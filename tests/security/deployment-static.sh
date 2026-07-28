@@ -50,6 +50,11 @@ grep -q 'HOME: /root' .github/workflows/security.yml || failed=1
 grep -q 'PLAYWRIGHT_BROWSERS_PATH: /ms-playwright' .github/workflows/security.yml || failed=1
 grep -q 'pipx install semgrep==1.124.0' .github/workflows/security.yml || failed=1
 grep -q 'pipx inject --force semgrep setuptools==80.9.0' .github/workflows/security.yml || failed=1
+grep -q '^  RIPGREP_VERSION: "14\.1\.1"$' .github/workflows/security.yml || failed=1
+grep -q '^  RIPGREP_AMD64_SHA256: "2f0c732ef166b4f7be7190d4012d60b3f8467bdd6f795c0598817bd2ac1706ae"$' \
+  .github/workflows/security.yml || failed=1
+[[ "$(grep -c 'name: Install pinned Ripgrep' .github/workflows/security.yml)" -eq 2 ]] || failed=1
+grep -q 'dpkg-deb --extract' .github/workflows/security.yml || failed=1
 grep -q "dex_oidc_subject='CiQyMzhiNmY3Yi0xN2JkLTRiMGQtYTE5NS0yNmU3MjViNzc2Y2ESBWxvY2Fs'" \
   tests/security/real-daemon-browser.sh || failed=1
 grep -q 'coverage + 0 >= 80' tests/security/backend-quality.sh || failed=1
@@ -83,6 +88,23 @@ grep -Eq 'image: ghcr\.io/dexidp/dex@sha256:[0-9a-f]{64} # v2\.45\.1-alpine$' de
 grep -Eq 'image: postgres@sha256:[0-9a-f]{64} # 18\.4-bookworm$' .github/workflows/security.yml || failed=1
 grep -q '^    network_mode: host$' deploy/compose/compose.yaml || failed=1
 grep -q 'AGENTROOM_OIDC_ISSUER: http://127\.0\.0\.1:' deploy/compose/compose.yaml || failed=1
+grep -q "^readonly POSTGRESQL_MAJOR=18$" deploy/install-host.sh || failed=1
+grep -q "^readonly POSTGRESQL_APT_KEY_FINGERPRINT='B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8'$" \
+  deploy/install-host.sh || failed=1
+grep -q "^readonly COSIGN_VERSION='3\\.0\\.6'$" deploy/install-host.sh || failed=1
+grep -q "^readonly COSIGN_AMD64_SHA256='e16e8eb815f8b1b3cee3e678874393c286f19dd59e9ac5da95e428f970ef00f3'$" \
+  deploy/install-host.sh || failed=1
+grep -q "dpkg --print-architecture.*amd64" deploy/install-host.sh || failed=1
+grep -q "shared_buffers = '256MB'" deploy/install-host.sh || failed=1
+grep -q '^max_connections = 50$' deploy/install-host.sh || failed=1
+grep -q 'sha256sum --check --strict' deploy/install-host.sh || failed=1
+
+install_help="$(deploy/install-host.sh --help 2>&1)" || failed=1
+grep -q 'install-host.sh --bootstrap --apply' <<<"${install_help}" || failed=1
+if deploy/install-host.sh --not-a-real-option >/dev/null 2>&1; then
+  printf 'install-host.sh accepted an unknown option\n' >&2
+  failed=1
+fi
 
 while IFS= read -r action_use; do
   if [[ ! "${action_use}" =~ uses:[[:space:]]+[^@[:space:]]+@[0-9a-f]{40}[[:space:]]+\#[[:space:]]+v[0-9] ]]; then

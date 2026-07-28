@@ -53,7 +53,22 @@ available for local packaging and is never accepted by production deployment.
 
 ## Prepare `host_agentroom`
 
-Install the host files after reviewing them:
+For a new Ubuntu/amd64 host, install verified production prerequisites and the
+host files in one operation:
+
+```sh
+sudo deploy/install-host.sh --bootstrap --apply
+```
+
+Bootstrap uses the official PostgreSQL APT repository for the host's Ubuntu
+codename, verifies the repository signing-key fingerprint, installs PostgreSQL
+18, pgBackRest, and the deployment-gate utilities, and installs a
+checksum-pinned Cosign package. It binds PostgreSQL to loopback and starts with
+a conservative 256 MiB shared-buffer budget and 50-connection limit. It does
+not create database, OIDC, or TLS credentials and does not start Agent Room.
+
+On a prepared host where prerequisites are already managed separately, install
+only the Agent Room host files:
 
 ```sh
 sudo deploy/install-host.sh --apply
