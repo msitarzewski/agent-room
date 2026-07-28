@@ -88,9 +88,14 @@ curl --fail --silent --show-error \
   http://127.0.0.1:5556/dex/.well-known/openid-configuration >/dev/null
 
 "${AGENTROOM_E2E_CTL_BIN}" migrate up
+# Dex connector-scopes the configured static user ID in the issued OIDC
+# subject. Bootstrap must use that provider-issued subject, not the underlying
+# staticPasswords.userID, or the callback correctly rejects the conflicting
+# identity.
+dex_oidc_subject='CiQyMzhiNmY3Yi0xN2JkLTRiMGQtYTE5NS0yNmU3MjViNzc2Y2ESBWxvY2Fs'
 "${AGENTROOM_E2E_CTL_BIN}" bootstrap \
   e2e-project 'Browser E2E' \
-  238b6f7b-17bd-4b0d-a195-26e725b776ca \
+  "${dex_oidc_subject}" \
   operator@agentroom.local
 
 "${AGENTROOM_E2E_DAEMON_BIN}" >"${AGENTROOM_E2E_DIAGNOSTICS}/agentroomd.log" 2>&1 &

@@ -1,18 +1,22 @@
 # Active Context
 
-**Last updated:** 2026-07-27
+**Last updated:** 2026-07-28
 
-**State:** DOCS
+**State:** APPLY
 
-**Substate:** IDLE
+**Substate:** RUNNING
 
-**Task status:** COMPLETE
+**Task status:** APPROVED — APPLYING
 
 ## Current Task
 
 The Apache-2.0 release is published to the public GitHub repository
-`msitarzewski/agent-room`. Canonical module, import, disclosure, service, test,
-and documentation references use `github.com/msitarzewski/agent-room`.
+`msitarzewski/agent-room`. The initial hosted workflow exposed three CI-only
+environment mismatches: Playwright container home ownership, a Dex raw-user-ID
+versus issued-subject fixture mismatch, and Semgrep's missing isolated
+`setuptools` dependency. The focused repair is implemented and has passed its
+targeted Linux container, real-daemon OIDC, local regression, security,
+license, completeness, and secret-scanning gates.
 
 ## Open-Source Release
 
@@ -30,6 +34,10 @@ and documentation references use `github.com/msitarzewski/agent-room`.
   completeness, and deployment gates pass
 - public Git history contains no gitleaks findings
 - public repository: `https://github.com/msitarzewski/agent-room`
+- CI repair: exact Playwright container 18/18 and fresh PostgreSQL 18 + pinned
+  Dex real-daemon OIDC 1/1 pass
+- repaired Semgrep 1.124.0 environment scanned 73 source targets with zero
+  findings
 
 See
 `memory-bank/tasks/2026-07/270726_open-source-publication-readiness.md`.

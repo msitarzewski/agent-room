@@ -187,7 +187,7 @@ Initialize one development project, then start the daemon:
 bin/agentroomctl migrate up
 bin/agentroomctl bootstrap \
   local-project 'Local Agent Room' \
-  238b6f7b-17bd-4b0d-a195-26e725b776ca \
+  CiQyMzhiNmY3Yi0xN2JkLTRiMGQtYTE5NS0yNmU3MjViNzc2Y2ESBWxvY2Fs \
   operator@agentroom.local
 bin/agentroomd
 ```
@@ -195,7 +195,9 @@ bin/agentroomd
 Open <http://127.0.0.1:58443>. The local Dex login is
 `operator@agentroom.local` with password `agentroom-local-only`. These are
 checked-in development fixtures, never production credentials. The bootstrap
-command is a one-time initialization for the chosen project ID.
+command is a one-time initialization for the chosen project ID. Its identity
+argument is the exact provider-issued OIDC `sub`, which Dex connector-scopes;
+it is deliberately not the raw `staticPasswords.userID` from the Dex config.
 
 When finished:
 

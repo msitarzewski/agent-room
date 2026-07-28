@@ -51,6 +51,9 @@ jobs:
         run: npm run build
       - name: Browser and accessibility tests
         working-directory: web
+        env:
+          HOME: /root
+          PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
         run: npm run test:e2e:all
       - name: Upload web distribution
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -303,6 +306,7 @@ jobs:
           go install github.com/google/go-licenses@v1.6.0
           echo "${GOBIN}" >> "${GITHUB_PATH}"
           pipx install semgrep==1.124.0
+          pipx inject --force semgrep setuptools==80.9.0
       - name: Install locked frontend dependencies
         working-directory: web
         run: npm ci --ignore-scripts

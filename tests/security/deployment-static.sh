@@ -46,6 +46,12 @@ grep -q 'THIRD_PARTY_NOTICES.md' deploy/package-release.sh || failed=1
 grep -q 'Release archive is missing third-party license texts' tests/security/reproducible-release.sh || failed=1
 grep -q 'tests/security/license-compliance.sh' .github/workflows/security.yml || failed=1
 grep -q 'github.com/google/go-licenses@v1.6.0' .github/workflows/security.yml || failed=1
+grep -q 'HOME: /root' .github/workflows/security.yml || failed=1
+grep -q 'PLAYWRIGHT_BROWSERS_PATH: /ms-playwright' .github/workflows/security.yml || failed=1
+grep -q 'pipx install semgrep==1.124.0' .github/workflows/security.yml || failed=1
+grep -q 'pipx inject --force semgrep setuptools==80.9.0' .github/workflows/security.yml || failed=1
+grep -q "dex_oidc_subject='CiQyMzhiNmY3Yi0xN2JkLTRiMGQtYTE5NS0yNmU3MjViNzc2Y2ESBWxvY2Fs'" \
+  tests/security/real-daemon-browser.sh || failed=1
 grep -q 'coverage + 0 >= 80' tests/security/backend-quality.sh || failed=1
 grep -q 'coverage + 0 >= 90' tests/security/backend-quality.sh || failed=1
 grep -q 'tests/security/backend-quality.sh' .github/workflows/security.yml || failed=1

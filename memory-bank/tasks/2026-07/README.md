@@ -1,5 +1,16 @@
 # July 2026 Tasks
 
+## In Progress
+
+### 2026-07-28: Initial Hosted CI Repair
+
+- [APPROVED/APPLYING] Repaired the initial public workflow's Playwright
+  container, Dex subject fixture, and Semgrep isolated environment.
+- Targeted Linux container, real-daemon OIDC, regression, security, license,
+  completeness, and secret-scanning gates pass.
+- Failed run:
+  `https://github.com/msitarzewski/agent-room/actions/runs/30319218764`
+
 ## Completed
 
 ### 2026-07-27: Initial Public GitHub Publication
