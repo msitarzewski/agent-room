@@ -15,6 +15,10 @@ concurrency:
   group: security-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  RIPGREP_VERSION: "14.1.1"
+  RIPGREP_AMD64_SHA256: "2f0c732ef166b4f7be7190d4012d60b3f8467bdd6f795c0598817bd2ac1706ae"
+
 jobs:
   frontend:
     name: Frontend type, lint, coverage, build, and browser
@@ -219,6 +223,19 @@ jobs:
         uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           syft-version: v1.44.0
+      - name: Install pinned Ripgrep
+        run: |
+          set -Eeuo pipefail
+          package="${RUNNER_TEMP}/ripgrep_${RIPGREP_VERSION}_amd64.deb"
+          install_dir="${RUNNER_TEMP}/ripgrep"
+          curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+            "https://github.com/BurntSushi/ripgrep/releases/download/${RIPGREP_VERSION}/ripgrep_${RIPGREP_VERSION}-1_amd64.deb" \
+            --output "${package}"
+          printf '%s  %s\n' "${RIPGREP_AMD64_SHA256}" "${package}" |
+            sha256sum --check --strict
+          dpkg-deb --extract "${package}" "${install_dir}"
+          "${install_dir}/usr/bin/rg" --version | grep -q "^ripgrep ${RIPGREP_VERSION}\\b"
+          echo "${install_dir}/usr/bin" >> "${GITHUB_PATH}"
       - name: Verify reproducible release archive
         run: |
           set -Eeuo pipefail
@@ -307,6 +324,19 @@ jobs:
           echo "${GOBIN}" >> "${GITHUB_PATH}"
           pipx install semgrep==1.124.0
           pipx inject --force semgrep setuptools==80.9.0
+      - name: Install pinned Ripgrep
+        run: |
+          set -Eeuo pipefail
+          package="${RUNNER_TEMP}/ripgrep_${RIPGREP_VERSION}_amd64.deb"
+          install_dir="${RUNNER_TEMP}/ripgrep"
+          curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+            "https://github.com/BurntSushi/ripgrep/releases/download/${RIPGREP_VERSION}/ripgrep_${RIPGREP_VERSION}-1_amd64.deb" \
+            --output "${package}"
+          printf '%s  %s\n' "${RIPGREP_AMD64_SHA256}" "${package}" |
+            sha256sum --check --strict
+          dpkg-deb --extract "${package}" "${install_dir}"
+          "${install_dir}/usr/bin/rg" --version | grep -q "^ripgrep ${RIPGREP_VERSION}\\b"
+          echo "${install_dir}/usr/bin" >> "${GITHUB_PATH}"
       - name: Install locked frontend dependencies
         working-directory: web
         run: npm ci --ignore-scripts

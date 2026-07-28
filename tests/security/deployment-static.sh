@@ -50,6 +50,11 @@ grep -q 'HOME: /root' .github/workflows/security.yml || failed=1
 grep -q 'PLAYWRIGHT_BROWSERS_PATH: /ms-playwright' .github/workflows/security.yml || failed=1
 grep -q 'pipx install semgrep==1.124.0' .github/workflows/security.yml || failed=1
 grep -q 'pipx inject --force semgrep setuptools==80.9.0' .github/workflows/security.yml || failed=1
+grep -q '^  RIPGREP_VERSION: "14\.1\.1"$' .github/workflows/security.yml || failed=1
+grep -q '^  RIPGREP_AMD64_SHA256: "2f0c732ef166b4f7be7190d4012d60b3f8467bdd6f795c0598817bd2ac1706ae"$' \
+  .github/workflows/security.yml || failed=1
+[[ "$(grep -c 'name: Install pinned Ripgrep' .github/workflows/security.yml)" -eq 2 ]] || failed=1
+grep -q 'dpkg-deb --extract' .github/workflows/security.yml || failed=1
 grep -q "dex_oidc_subject='CiQyMzhiNmY3Yi0xN2JkLTRiMGQtYTE5NS0yNmU3MjViNzc2Y2ESBWxvY2Fs'" \
   tests/security/real-daemon-browser.sh || failed=1
 grep -q 'coverage + 0 >= 80' tests/security/backend-quality.sh || failed=1
