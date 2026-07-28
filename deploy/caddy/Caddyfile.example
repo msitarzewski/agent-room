@@ -1,0 +1,82 @@
+{
+	servers {
+		strict_sni_host
+	}
+	admin 127.0.0.1:2019
+}
+
+agentroom.example.invalid {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		Content-Security-Policy "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self' wss://agentroom.example.invalid; script-src 'self'; style-src 'self'; upgrade-insecure-requests"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		-X-Powered-By
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/agentroom-access.json {
+			mode 0600
+			roll_size 25MiB
+			roll_keep 10
+			roll_keep_for 720h
+		}
+		format filter {
+			wrap json
+			fields {
+				request>headers>Authorization delete
+				request>headers>Cookie delete
+				request>headers>Set-Cookie delete
+				resp_headers>Set-Cookie delete
+				request>uri query {
+					replace REDACTED
+				}
+			}
+		}
+	}
+
+	@private_adapters {
+		path /api/v1/ingest /api/v1/mcp /api/v1/adapters/*
+	}
+	handle @private_adapters {
+		respond "Not Found" 404
+	}
+
+	@allowed {
+		path / /index.html /favicon.ico /assets/* /auth/* /api/* /ws /healthz
+	}
+	handle @allowed {
+		request_body {
+			max_size 256KB
+		}
+		reverse_proxy https://agentroom.internal.example.invalid:8443 {
+			health_uri /healthz
+			health_interval 15s
+			health_timeout 3s
+			health_fails 3
+			health_passes 2
+			fail_duration 30s
+			max_fails 3
+			lb_try_duration 2s
+			dial_timeout 3s
+			response_header_timeout 15s
+			stream_timeout 12h
+			stream_close_delay 5m
+
+			transport http {
+				tls
+				tls_server_name agentroom.internal.example.invalid
+				tls_trust_pool file /etc/caddy/agentroom/upstream-ca.pem
+				tls_client_auth /etc/caddy/agentroom/ingress-client.pem /etc/caddy/agentroom/ingress-client-key.pem
+			}
+		}
+	}
+
+	handle {
+		respond "Not Found" 404
+	}
+}

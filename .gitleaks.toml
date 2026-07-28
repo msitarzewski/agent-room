@@ -1,0 +1,24 @@
+title = "Agent Room secret scanning"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "agentroom-systemd-credential-plaintext"
+description = "Agent Room production credential assigned as plaintext"
+regex = '''(?i)(AGENTROOM_(DATABASE_URL|SESSION_SECRET|OIDC_CLIENT_SECRET|TLS_KEY))\s*=\s*[^$\s][^\s]+'''
+keywords = ["AGENTROOM_DATABASE_URL", "AGENTROOM_SESSION_SECRET", "AGENTROOM_OIDC_CLIENT_SECRET", "AGENTROOM_TLS_KEY"]
+
+[[rules]]
+id = "agentroom-private-key"
+description = "Private key material"
+regex = '''-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----'''
+keywords = ["PRIVATE KEY"]
+
+[allowlist]
+description = "Known non-secret protocol fixture and prose false positive"
+regexTarget = "match"
+regexes = [
+  '''Sec-WebSocket-Key:\s+dGhlIHNhbXBsZSBub25jZQ==''',
+  '''slow/truncated''',
+]

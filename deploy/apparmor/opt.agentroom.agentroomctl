@@ -1,0 +1,25 @@
+#include <tunables/global>
+
+profile agentroomctl /opt/agentroom/releases/*/bin/agentroomctl flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include <abstractions/openssl>
+
+  network inet stream,
+  network inet6 stream,
+  network unix stream,
+
+  /opt/agentroom/releases/*/bin/agentroomctl mr,
+  /etc/agentroom/agentroom.conf r,
+  /run/credentials/agentroom-migrate.service/* r,
+  /run/credentials/agentroom-migration-check-*/** r,
+  /var/lib/agentroom/** rwk,
+  /var/log/agentroom/** rw,
+  /etc/ssl/openssl.cnf r,
+  /etc/ssl/certs/** r,
+
+  deny /home/** rwklx,
+  deny /root/** rwklx,
+  deny /var/lib/hermes/** rwklx,
+  deny /home/*/.hermes/** rwklx,
+}

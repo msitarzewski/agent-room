@@ -1,0 +1,14 @@
+#!/usr/sbin/nft -f
+
+# Replace the documentation-only TEST-NET address before loading.
+define ingress_ipv4 = 192.0.2.10
+
+table inet agentroom {
+	chain agentroom-mtls-only {
+		type filter hook input priority -5; policy accept;
+
+		iifname "lo" tcp dport 8443 accept comment "agentroom-loopback"
+		ip saddr $ingress_ipv4 tcp dport 8443 accept comment "agentroom-ingress-mtls"
+		tcp dport 8443 drop comment "agentroom-mtls-only"
+	}
+}

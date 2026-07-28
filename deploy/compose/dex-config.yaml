@@ -1,0 +1,29 @@
+# Development and automated browser testing only. Never deploy this identity
+# provider or its static credentials in production.
+issuer: "{{ .Env.DEX_ISSUER }}"
+
+storage:
+  type: memory
+
+web:
+  http: 0.0.0.0:5556
+
+telemetry:
+  http: 0.0.0.0:5558
+
+enablePasswordDB: true
+
+staticClients:
+  - id: agentroom-local
+    name: Agent Room local development
+    secret: agentroom-dex-local-only
+    redirectURIs:
+      - http://127.0.0.1:58443/api/v1/auth/callback
+      - http://localhost:58443/api/v1/auth/callback
+
+staticPasswords:
+  - email: operator@agentroom.local
+    # bcrypt hash of the documented dev/test password: agentroom-local-only
+    hash: "$2y$10$NDV4toyonsWx6POvRVMjp.BceDkYXrv7Jmac8fCCzh6pzK4nfB0gK"
+    username: operator
+    userID: 238b6f7b-17bd-4b0d-a195-26e725b776ca

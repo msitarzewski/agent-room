@@ -1,0 +1,350 @@
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend type, lint, coverage, build, and browser
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: mcr.microsoft.com/playwright@sha256:baed2032d533817f3dbe6425de795788430ba345e819a1201337009ba17c9d07 # v1.62.0-noble
+      options: --ipc=host
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24.8.0"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install locked dependencies
+        working-directory: web
+        run: npm ci --ignore-scripts
+      - name: Typecheck and lint
+        working-directory: web
+        run: |
+          npm run typecheck
+          npm run lint
+          npm run api:lint -- --extends recommended-strict
+      - name: Unit tests and coverage thresholds
+        working-directory: web
+        run: npm test
+      - name: Production build
+        working-directory: web
+        run: npm run build
+      - name: Browser and accessibility tests
+        working-directory: web
+        run: npm run test:e2e:all
+      - name: Upload web distribution
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: web-dist
+          path: web/dist
+          if-no-files-found: error
+          retention-days: 3
+      - name: Upload browser diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-diagnostics
+          path: |
+            web/playwright-report
+            web/test-results
+          if-no-files-found: ignore
+          retention-days: 3
+
+  backend:
+    name: Backend race, coverage, integration, and Linux build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296 # 18.4-bookworm
+        env:
+          POSTGRES_DB: agentroom_test
+          POSTGRES_USER: agentroom
+          POSTGRES_PASSWORD: agentroom-integration-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agentroom -d agentroom_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Vet, race tests, and coverage threshold
+        env:
+          AGENTROOM_TEST_DATABASE_URL: postgres://agentroom:agentroom-integration-only@127.0.0.1:5432/agentroom_test?sslmode=disable
+        run: tests/security/backend-quality.sh
+      - name: Validate API contracts
+        run: |
+          set -Eeuo pipefail
+          jq -e '.["$schema"] and .type == "object"' api/arp/event-envelope.schema.json >/dev/null
+      - name: Cross-build Linux binaries
+        run: |
+          set -Eeuo pipefail
+          mkdir -p build/linux-amd64
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -trimpath -buildvcs=true -o build/linux-amd64/agentroomd ./cmd/agentroomd
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -trimpath -buildvcs=true -o build/linux-amd64/agentroomctl ./cmd/agentroomctl
+          file build/linux-amd64/agentroomd build/linux-amd64/agentroomctl |
+            grep -c 'ELF 64-bit.*x86-64' | grep -q '^2$'
+      - name: Upload Linux binaries
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-amd64-binaries
+          path: build/linux-amd64
+          if-no-files-found: error
+          retention-days: 3
+
+  real-daemon-browser:
+    name: Real daemon OIDC browser
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296 # 18.4-bookworm
+        env:
+          POSTGRES_DB: agentroom_e2e_test
+          POSTGRES_USER: agentroom
+          POSTGRES_PASSWORD: agentroom-e2e-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agentroom -d agentroom_e2e_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Install Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24.8.0"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install locked frontend and Chromium
+        working-directory: web
+        run: |
+          npm ci --ignore-scripts
+          npx playwright install --with-deps chromium
+      - name: Build production SPA and native daemon
+        run: |
+          set -Eeuo pipefail
+          npm --prefix web run build
+          mkdir -p build/e2e
+          go build -trimpath -buildvcs=true -o build/e2e/agentroomd ./cmd/agentroomd
+          go build -trimpath -buildvcs=true -o build/e2e/agentroomctl ./cmd/agentroomctl
+      - name: Run real daemon OIDC browser test
+        env:
+          AGENTROOM_TEST_DATABASE_URL: postgres://agentroom:agentroom-e2e-only@127.0.0.1:5432/agentroom_e2e_test?sslmode=disable
+        run: tests/security/real-daemon-browser.sh
+      - name: Upload real-daemon diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: real-daemon-browser-diagnostics
+          path: |
+            build/e2e-diagnostics
+            web/playwright-report
+            web/test-results
+          if-no-files-found: ignore
+          retention-days: 3
+
+  release-reproducibility:
+    name: Release package reproducibility and deployment config
+    needs: [frontend, backend, real-daemon-browser]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install Go for provenance verification
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Download web distribution
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: web-dist
+          path: build/web
+      - name: Download Linux binaries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: linux-amd64-binaries
+          path: build/linux-amd64
+      - name: Install pinned Syft
+        id: syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          syft-version: v1.44.0
+      - name: Verify reproducible release archive
+        run: |
+          set -Eeuo pipefail
+          chmod 0755 build/linux-amd64/agentroomd build/linux-amd64/agentroomctl
+          export PATH="$(dirname "${{ steps.syft.outputs.cmd }}"):${PATH}"
+          tests/security/reproducible-release.sh \
+            build/linux-amd64/agentroomd \
+            build/linux-amd64/agentroomctl \
+            build/web
+          tests/security/release-provenance-fail-closed.sh \
+            build/linux-amd64/agentroomd \
+            build/linux-amd64/agentroomctl \
+            build/web
+      - name: Validate deployment configuration
+        env:
+          AGENTROOM_IMAGE: agentroom:ci-config-only
+          AGENTROOM_DEV_SECRETS_DIR: /tmp/agentroom-ci-secrets-not-read
+        run: |
+          set -Eeuo pipefail
+          tests/security/deployment-static.sh
+          docker compose --file deploy/compose/compose.yaml --profile app config --quiet
+
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: go
+            build-mode: autobuild
+          - language: javascript-typescript
+            build-mode: none
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-extended
+      - name: Analyze
+        uses: github/codeql-action/analyze@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        with:
+          category: /language:${{ matrix.language }}
+
+  security-gates:
+    name: SAST, SCA, secrets, race, and completeness
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Install Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24.8.0"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install pinned security tools
+        env:
+          GOBIN: ${{ runner.temp }}/security-bin
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "${GOBIN}"
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.25.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+          go install github.com/zricethezav/gitleaks/v8@v8.24.2
+          go install github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.2.4
+          go install github.com/google/go-licenses@v1.6.0
+          echo "${GOBIN}" >> "${GITHUB_PATH}"
+          pipx install semgrep==1.124.0
+      - name: Install locked frontend dependencies
+        working-directory: web
+        run: npm ci --ignore-scripts
+      - name: Static and dependency security gates
+        env:
+          SEMGREP_SEND_METRICS: "off"
+        run: |
+          set -Eeuo pipefail
+          gitleaks git --redact --config .gitleaks.toml .
+          gitleaks dir --redact --config .gitleaks.toml .
+          semgrep scan --error --config .semgrep.yml .
+          # G124 is covered by TestCookieSecurityAttributes: production always
+          # sets Secure while loopback-only development deliberately does not.
+          # G204 is covered by the runtime boundary tests: executables are an
+          # absolute-path allowlist and production disables in-process runners.
+          gosec -severity medium -confidence medium \
+            -exclude=G124,G204 \
+            -exclude-dir=internal/postgres/sqlcgen \
+            -exclude-dir=web/node_modules ./...
+          staticcheck -tags=integration ./cmd/... ./internal/... ./tests/security ./tests/api
+          govulncheck ./...
+          go_dependencies="$(go list -deps ./...)"
+          if grep -q '^golang.org/x/crypto/openpgp' <<<"${go_dependencies}"; then
+            printf 'GO-2026-5932 exception is invalid: openpgp became reachable\n' >&2
+            exit 1
+          fi
+          osv_config="${RUNNER_TEMP}/osv-scanner.toml"
+          printf '%s\n' \
+            '[[IgnoredVulns]]' \
+            'id = "GO-2026-5932"' \
+            'ignoreUntil = 2026-10-27' \
+            'reason = "x/crypto/openpgp is unmaintained, but Agent Room imports argon2 only; govulncheck and the dependency guard prove openpgp is unreachable. Review by expiry."' \
+            >"${osv_config}"
+          osv-scanner scan source --recursive --config "${osv_config}" .
+          npm --prefix web audit --audit-level=high
+          tests/security/license-compliance.sh
+      - name: Deployment and completeness gates
+        run: |
+          set -Eeuo pipefail
+          tests/security/deployment-static.sh
+          tests/security/artifact-fail-closed.sh
+          tests/security/artifact-backup-restore.sh
+          tests/security/completeness-scan.sh
+          tests/security/source-authorization-contract.sh
+          tests/security/compose-postgres18.sh

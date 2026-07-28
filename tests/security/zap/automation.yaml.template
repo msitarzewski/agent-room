@@ -1,0 +1,52 @@
+env:
+  contexts:
+    - name: agentroom-staging
+      urls:
+        - "__TARGET_URL__"
+      includePaths:
+        - "__TARGET_URL__/.*"
+      excludePaths:
+        - "__TARGET_URL__/auth/logout"
+  parameters:
+    failOnError: true
+    failOnWarning: true
+    continueOnFailure: false
+    progressToStdout: true
+
+jobs:
+  - type: spider
+    parameters:
+      context: agentroom-staging
+      maxDuration: 5
+      maxDepth: 10
+      acceptCookies: true
+
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 5
+
+  - type: activeScan
+    parameters:
+      context: agentroom-staging
+      policy: Default Policy
+      maxRuleDurationInMins: 2
+      maxScanDurationInMins: 20
+
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 5
+
+  - type: report
+    parameters:
+      template: traditional-json-plus
+      reportDir: /zap/wrk/results
+      reportFile: zap-report.json
+      reportTitle: Agent Room staging DAST
+
+  - type: exitStatus
+    parameters:
+      errorLevel: High
+      warnLevel: Medium
+      okExitValue: 0
+      warnExitValue: 2
+      errorExitValue: 1

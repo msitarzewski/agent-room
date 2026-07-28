@@ -1,0 +1,126 @@
+name: agentroom-dev
+
+services:
+  postgres:
+    image: postgres@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296 # 18.4-bookworm
+    environment:
+      POSTGRES_DB: ${AGENTROOM_DEV_POSTGRES_DB:-agentroom}
+      POSTGRES_USER: agentroom
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
+    secrets:
+      - postgres-password
+    ports:
+      - "127.0.0.1:${AGENTROOM_DEV_POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - agentroom-postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentroom -d \"$$POSTGRES_DB\""]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+      - /run/postgresql:rw,nosuid,nodev,size=16m
+
+  dex:
+    image: ghcr.io/dexidp/dex@sha256:8499afd690c437f52301efd2b05b2455da5bd2dfc20332cd697dc9937f808462 # v2.45.1-alpine
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    environment:
+      DEX_ISSUER: http://127.0.0.1:${AGENTROOM_DEV_OIDC_PORT:-5556}/dex
+    ports:
+      - "127.0.0.1:${AGENTROOM_DEV_OIDC_PORT:-5556}:5556"
+    volumes:
+      - ./dex-config.yaml:/etc/dex/config.yaml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --spider http://127.0.0.1:5556/dex/.well-known/openid-configuration"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  agentroom:
+    profiles: ["app"]
+    image: ${AGENTROOM_IMAGE:?Set AGENTROOM_IMAGE to a verified development image}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dex:
+        condition: service_healthy
+    # Linux host networking gives the native host and this optional container
+    # one canonical loopback OIDC issuer. Every Agent Room listener remains
+    # loopback-only, so the profile does not expose control-plane ports to LAN.
+    network_mode: host
+    environment:
+      AGENTROOM_CONFIG_FILE: /etc/agentroom/agentroom.conf
+      AGENTROOM_DEV: "true"
+      AGENTROOM_HTTPS_ADDR: 127.0.0.1:${AGENTROOM_DEV_HTTPS_PORT:-58443}
+      AGENTROOM_ADMIN_ADDR: 127.0.0.1:${AGENTROOM_DEV_ADMIN_PORT:-59090}
+      AGENTROOM_ADAPTER_ADDR: 127.0.0.1:${AGENTROOM_DEV_ADAPTER_PORT:-59091}
+      AGENTROOM_PUBLIC_URL: http://127.0.0.1:${AGENTROOM_DEV_HTTPS_PORT:-58443}
+      AGENTROOM_ALLOWED_ORIGINS: http://127.0.0.1:${AGENTROOM_DEV_HTTPS_PORT:-58443}
+      AGENTROOM_OIDC_ISSUER: http://127.0.0.1:${AGENTROOM_DEV_OIDC_PORT:-5556}/dex
+      AGENTROOM_OIDC_CLIENT_ID: agentroom-local
+      AGENTROOM_OIDC_REDIRECT_URL: http://127.0.0.1:${AGENTROOM_DEV_HTTPS_PORT:-58443}/api/v1/auth/callback
+      AGENTROOM_ARTIFACT_DIR: /var/lib/agentroom/artifacts
+      AGENTROOM_DATABASE_URL_FILE: /run/secrets/database-url
+      AGENTROOM_SESSION_SECRET_FILE: /run/secrets/session-secret
+      AGENTROOM_OIDC_CLIENT_SECRET_FILE: /run/secrets/oidc-client-secret
+      AGENTROOM_TLS_CERT_FILE: /run/secrets/tls-cert
+      AGENTROOM_TLS_KEY_FILE: /run/secrets/tls-key
+      AGENTROOM_TLS_CLIENT_CA_FILE: /run/secrets/tls-client-ca
+    secrets:
+      - database-url
+      - session-secret
+      - oidc-client-secret
+      - tls-cert
+      - tls-key
+      - tls-client-ca
+    volumes:
+      - ../config/agentroom.conf.example:/etc/agentroom/agentroom.conf:ro
+      - agentroom-data:/var/lib/agentroom
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+      - /run:rw,nosuid,nodev,size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+secrets:
+  postgres-password:
+    file: ${AGENTROOM_DEV_SECRETS_DIR:-./secrets}/postgres-password
+  database-url:
+    file: ${AGENTROOM_DEV_SECRETS_DIR:-./secrets}/database-url
+  session-secret:
+    file: ${AGENTROOM_DEV_SECRETS_DIR:-./secrets}/session-secret
+  oidc-client-secret:
+    file: ${AGENTROOM_DEV_SECRETS_DIR:-./secrets}/oidc-client-secret
+  tls-cert:
+    file: ${AGENTROOM_DEV_SECRETS_DIR:-./secrets}/tls-cert.pem
+  tls-key:
+    file: ${AGENTROOM_DEV_SECRETS_DIR:-./secrets}/tls-key.pem
+  tls-client-ca:
+    file: ${AGENTROOM_DEV_SECRETS_DIR:-./secrets}/tls-client-ca.pem
+
+volumes:
+  agentroom-postgres:
+  agentroom-data:

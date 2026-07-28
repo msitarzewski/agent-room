@@ -1,0 +1,17 @@
+# Strict dotenv syntax. This file contains nonsecrets only.
+AGENTROOM_HTTPS_ADDR=:8443
+AGENTROOM_ADMIN_ADDR=127.0.0.1:9090
+AGENTROOM_ADAPTER_ADDR=127.0.0.1:9091
+AGENTROOM_PUBLIC_URL=https://agentroom.example.invalid
+AGENTROOM_ALLOWED_ORIGINS=https://agentroom.example.invalid
+# Replace this TEST-NET address with the exact ingress address that connects to the Agent Room host.
+AGENTROOM_TRUSTED_PROXY_CIDRS=192.0.2.1/32
+AGENTROOM_OIDC_ISSUER=https://identity.example.invalid
+AGENTROOM_OIDC_CLIENT_ID=agentroom
+AGENTROOM_OIDC_REDIRECT_URL=https://agentroom.example.invalid/api/v1/auth/callback
+AGENTROOM_ARTIFACT_DIR=/var/lib/agentroom/artifacts
+AGENTROOM_WEB_DIR=/opt/agentroom/current/web
+AGENTROOM_LOG_LEVEL=info
+AGENTROOM_OTEL_EXPORTER_OTLP_ENDPOINT=
+AGENTROOM_MAX_REQUEST_BYTES=262144
+AGENTROOM_SHUTDOWN_TIMEOUT=30s

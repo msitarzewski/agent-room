@@ -1,0 +1,5 @@
+archive_mode = on
+archive_command = 'pgbackrest --stanza=agentroom archive-push %p'
+restore_command = 'pgbackrest --stanza=agentroom archive-get %f "%p"'
+max_wal_senders = 3
+wal_level = replica

@@ -1,0 +1,37 @@
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets/
+
+# Go
+/bin/
+/build/
+/coverage/
+*.test
+*.prof
+
+# Web
+/web/node_modules/
+/web/dist/
+/web/coverage/
+/web/playwright-report/
+/web/test-results/
+/web/*.tsbuildinfo
+
+# Runtime data
+/data/
+/artifacts/
+/backups/
+*.log
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+
+# Local agent state
+/.agents/

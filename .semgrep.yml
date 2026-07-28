@@ -1,0 +1,103 @@
+rules:
+  - id: agentroom-go-insecure-tls
+    languages: [go]
+    severity: ERROR
+    message: TLS verification must never be disabled.
+    pattern: "tls.Config{..., InsecureSkipVerify: true, ...}"
+    metadata:
+      cwe: CWE-295
+
+  - id: agentroom-go-shell-command
+    languages: [go]
+    severity: ERROR
+    message: Do not pass constructed input through a shell.
+    patterns:
+      - pattern-either:
+          - pattern: exec.Command("sh", "-c", $CMD)
+          - pattern: exec.Command("bash", "-c", $CMD)
+          - pattern: exec.CommandContext($CTX, "sh", "-c", $CMD)
+          - pattern: exec.CommandContext($CTX, "bash", "-c", $CMD)
+    metadata:
+      cwe: CWE-78
+
+  - id: agentroom-go-bare-listen-and-serve
+    languages: [go]
+    severity: ERROR
+    message: Use an http.Server with explicit header/read/write/idle limits.
+    pattern-either:
+      - pattern: http.ListenAndServe(...)
+      - pattern: http.ListenAndServeTLS(...)
+    metadata:
+      cwe: CWE-400
+
+  - id: agentroom-go-unsafe-html
+    languages: [go]
+    severity: ERROR
+    message: Untrusted content must not be converted to trusted template HTML.
+    pattern-either:
+      - pattern: template.HTML($X)
+      - pattern: template.JS($X)
+      - pattern: template.URL($X)
+    metadata:
+      cwe: CWE-79
+
+  - id: agentroom-go-sql-formatting
+    languages: [go]
+    severity: ERROR
+    message: Build SQL with static statements and bound parameters, not formatting.
+    patterns:
+      - pattern-either:
+          - pattern: $DB.Exec(..., fmt.Sprintf($SQL, ...), ...)
+          - pattern: $DB.Query(..., fmt.Sprintf($SQL, ...), ...)
+          - pattern: $DB.QueryRow(..., fmt.Sprintf($SQL, ...), ...)
+    metadata:
+      cwe: CWE-89
+
+  - id: agentroom-ts-dangerously-set-inner-html
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Agent-derived content must not use dangerouslySetInnerHTML.
+    pattern: "<$X dangerouslySetInnerHTML={...} />"
+    metadata:
+      cwe: CWE-79
+
+  - id: agentroom-browser-token-storage
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Authentication tokens must remain in HttpOnly server-managed cookies.
+    patterns:
+      - pattern-either:
+          - pattern: localStorage.setItem($KEY, $VALUE)
+          - pattern: sessionStorage.setItem($KEY, $VALUE)
+      - metavariable-regex:
+          metavariable: $KEY
+          regex: "(?i).*(token|secret|authorization|credential|jwt).*"
+    paths:
+      include:
+        - /web/src/**
+    metadata:
+      cwe: CWE-922
+
+  - id: agentroom-websocket-query-token
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Never place credentials in a WebSocket URL query string.
+    patterns:
+      - pattern: $URL.searchParams.set($KEY, $VALUE)
+      - metavariable-regex:
+          metavariable: $KEY
+          regex: "(?i).*(token|key|secret|authorization).*"
+    metadata:
+      cwe: CWE-598
+
+  - id: agentroom-shell-curl-pipe
+    languages: [bash]
+    severity: ERROR
+    message: Downloaded content must be verified before execution.
+    pattern-either:
+      - pattern: curl ... | sh
+      - pattern: curl ... | bash
+      - pattern: wget ... | sh
+      - pattern: wget ... | bash
+    metadata:
+      cwe: CWE-494

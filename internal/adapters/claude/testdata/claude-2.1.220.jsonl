@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","session_id":"00000000-0000-4000-8000-000000000001","claude_code_version":"2.1.220","model":"claude-sonnet","tools":["Read","Edit"]}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resets_at":1785171600}}
+{"type":"assistant","session_id":"00000000-0000-4000-8000-000000000001","timestamp":"2026-07-27T12:00:00Z","message":{"role":"assistant","content":[{"type":"text","text":"sanitized"}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"sanitized","usage":{"input_tokens":10,"output_tokens":4},"total_cost_usd":0.01,"duration_ms":1200,"session_id":"00000000-0000-4000-8000-000000000001"}

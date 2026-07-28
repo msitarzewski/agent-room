@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+IFS=$'\n\t'
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+cd "${repo_root}"
+
+failed=0
+if rg -n 'tls_insecure_skip_verify|InsecureSkipVerify[[:space:]]*:[[:space:]]*true' \
+  deploy/caddy/Caddyfile.example deploy/systemd deploy/config deploy/compose; then
+  failed=1
+fi
+if rg -n 'Environment=.*(SECRET|PASSWORD|DATABASE_URL|TLS_KEY)=' deploy/systemd; then
+  failed=1
+fi
+for required in \
+  NoNewPrivileges=true \
+  ProtectSystem=strict \
+  ProtectHome=true \
+  PrivateTmp=true \
+  PrivateDevices=true \
+  RestrictSUIDSGID=true \
+  MemoryDenyWriteExecute=true; do
+  grep -q "^${required}$" deploy/systemd/agentroom.service || {
+    printf 'Missing systemd hardening: %s\n' "${required}" >&2
+    failed=1
+  }
+done
+grep -q '^CapabilityBoundingSet=$' deploy/systemd/agentroom.service || failed=1
+grep -q 'tls_client_auth' deploy/caddy/Caddyfile.example || failed=1
+grep -q 'handle @private_adapters' deploy/caddy/Caddyfile.example || failed=1
+grep -q '/api/v1/ingest /api/v1/mcp' deploy/caddy/Caddyfile.example || failed=1
+grep -q 'respond "Not Found" 404' deploy/caddy/Caddyfile.example || failed=1
+grep -q '^AGENTROOM_ADAPTER_ADDR=127\.0\.0\.1:9091$' deploy/config/agentroom.conf.example || failed=1
+grep -q '^AGENTROOM_WEB_DIR=/opt/agentroom/current/web$' deploy/config/agentroom.conf.example || failed=1
+grep -q '^ReadOnlyPaths=.* /opt/agentroom/current/web$' deploy/systemd/agentroom.service || failed=1
+grep -q '^AGENTROOM_OIDC_REDIRECT_URL=https://agentroom\.example\.invalid/api/v1/auth/callback$' deploy/config/agentroom.conf.example || failed=1
+grep -q 'AGENTROOM_OIDC_REDIRECT_URL: http://127\.0\.0\.1:.*\/api/v1/auth/callback' deploy/compose/compose.yaml || failed=1
+grep -q 'SOURCE_DATE_EPOCH is required for production release packaging' deploy/package-release.sh || failed=1
+grep -q 'SOURCE_REVISION must be the exact 40-character Git commit' deploy/package-release.sh || failed=1
+grep -q 'vcs.modified' deploy/package-release.sh || failed=1
+grep -q '.agentroom-build.json' deploy/package-release.sh || failed=1
+grep -q 'gzip -n' deploy/package-release.sh || failed=1
+grep -q 'Required license material is missing' deploy/package-release.sh || failed=1
+grep -q 'THIRD_PARTY_NOTICES.md' deploy/package-release.sh || failed=1
+grep -q 'Release archive is missing third-party license texts' tests/security/reproducible-release.sh || failed=1
+grep -q 'tests/security/license-compliance.sh' .github/workflows/security.yml || failed=1
+grep -q 'github.com/google/go-licenses@v1.6.0' .github/workflows/security.yml || failed=1
+grep -q 'coverage + 0 >= 80' tests/security/backend-quality.sh || failed=1
+grep -q 'coverage + 0 >= 90' tests/security/backend-quality.sh || failed=1
+grep -q 'tests/security/backend-quality.sh' .github/workflows/security.yml || failed=1
+grep -q 'tests/security/backend-quality.sh' deploy/build-release.sh || failed=1
+grep -q 'npm run api:lint -- --extends recommended-strict' .github/workflows/security.yml || failed=1
+grep -q -- '-exclude-dir=internal/postgres/sqlcgen' .github/workflows/security.yml || failed=1
+grep -q -- '-exclude=G124,G204' .github/workflows/security.yml || failed=1
+grep -q -- '-exclude=G124,G204' tests/security/static-security.sh || failed=1
+grep -q -- '-coverpkg=./internal/...' tests/security/backend-quality.sh || failed=1
+grep -q './internal/... ./tests/security' tests/security/backend-quality.sh || failed=1
+grep -q './internal/postgres' tests/security/backend-quality.sh || failed=1
+grep -q './tests/api' tests/security/backend-quality.sh || failed=1
+grep -q 'npm --prefix web run api:lint -- --extends recommended-strict' deploy/build-release.sh || failed=1
+[[ ! -e .redocly.lint-ignore.yaml && ! -e web/.redocly.lint-ignore.yaml ]] || failed=1
+grep -q 'confirm-quiesced AGENTROOM_STOPPED' deploy/deploy.sh || failed=1
+grep -q 'artifact-backup.sh' deploy/backup.sh || failed=1
+grep -q 'artifact-restore.sh' deploy/restore.sh || failed=1
+grep -q "id = \"GO-2026-5932\"" .github/workflows/security.yml || failed=1
+grep -q "ignoreUntil = 2026-10-27" .github/workflows/security.yml || failed=1
+grep -q 'go_dependencies="$(go list -deps ./...)"' .github/workflows/security.yml || failed=1
+grep -q "grep -q '\\^golang.org/x/crypto/openpgp'" .github/workflows/security.yml || failed=1
+grep -q "id = \"GO-2026-5932\"" tests/security/static-security.sh || failed=1
+grep -q 'honnef.co/go/tools/cmd/staticcheck@v0.7.0' .github/workflows/security.yml || failed=1
+grep -q 'staticcheck -tags=integration' .github/workflows/security.yml || failed=1
+grep -q 'staticcheck -tags=integration' tests/security/static-security.sh || failed=1
+grep -q 'deny /home/\* /\\.hermes' deploy/apparmor/opt.agentroom.agentroomd 2>/dev/null && failed=1
+grep -Eq 'image: postgres@sha256:[0-9a-f]{64} # 18\.4-bookworm$' deploy/compose/compose.yaml || failed=1
+grep -Eq 'image: ghcr\.io/dexidp/dex@sha256:[0-9a-f]{64} # v2\.45\.1-alpine$' deploy/compose/compose.yaml || failed=1
+grep -Eq 'image: postgres@sha256:[0-9a-f]{64} # 18\.4-bookworm$' .github/workflows/security.yml || failed=1
+grep -q '^    network_mode: host$' deploy/compose/compose.yaml || failed=1
+grep -q 'AGENTROOM_OIDC_ISSUER: http://127\.0\.0\.1:' deploy/compose/compose.yaml || failed=1
+
+while IFS= read -r action_use; do
+  if [[ ! "${action_use}" =~ uses:[[:space:]]+[^@[:space:]]+@[0-9a-f]{40}[[:space:]]+\#[[:space:]]+v[0-9] ]]; then
+    printf 'GitHub Action is not pinned to an immutable SHA with a version comment: %s\n' "${action_use}" >&2
+    failed=1
+  fi
+done < <(rg '^[[:space:]]*uses:' .github/workflows)
+
+for script in deploy/*.sh deploy/caddy/*.sh deploy/firewall/*.sh tests/security/*.sh; do
+  bash -n "${script}"
+done
+
+((failed == 0)) || { printf 'Deployment static checks failed\n' >&2; exit 1; }
+printf 'Deployment static checks passed\n'

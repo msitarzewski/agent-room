@@ -1,0 +1,47 @@
+[Unit]
+Description=Agent Room forward database migration
+After=postgresql.service
+Requires=postgresql.service
+ConditionPathIsExecutable=/opt/agentroom/current/bin/agentroomctl
+
+[Service]
+Type=oneshot
+User=agentroom
+Group=agentroom
+WorkingDirectory=/var/lib/agentroom
+ExecStart=/opt/agentroom/current/bin/agentroomctl --config /etc/agentroom/agentroom.conf migrate up
+LoadCredentialEncrypted=database-url:/etc/agentroom/credentials/database-url.cred
+Environment=AGENTROOM_DATABASE_URL_FILE=%d/database-url
+UMask=0077
+TimeoutStartSec=300s
+
+StateDirectory=agentroom
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/agentroom
+ReadOnlyPaths=/etc/agentroom/agentroom.conf
+
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@clock @cpu-emulation @debug @module @mount @obsolete @privileged @raw-io @reboot @swap
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

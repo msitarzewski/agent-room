@@ -1,0 +1,17 @@
+{
+  "object": "list",
+  "sessions": [
+    {
+      "id": "20260727_120000_a1b2c3d4",
+      "source": "api-server",
+      "title": "release coordination",
+      "model": "hermes-agent",
+      "started_at": "2026-07-27T12:00:00Z",
+      "ended_at": null,
+      "input_tokens": 120,
+      "output_tokens": 45
+    }
+  ],
+  "limit": 20,
+  "offset": 0
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentroom.dev/schemas/arp/event-envelope.v1.json",
+  "title": "Agent Room Event Envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "project_id", "type", "subject_type", "subject_id", "actor_id", "occurred_at", "schema_version", "payload"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "cursor": {"type": "integer", "minimum": 0},
+    "project_id": {"type": "string", "minLength": 1},
+    "type": {"type": "string", "minLength": 1},
+    "subject_type": {"type": "string", "enum": ["agent", "run", "session", "task", "attention", "evidence", "artifact", "approval", "intervention", "chat_message", "budget", "claim", "audit", "organization", "human", "project", "host", "agent_instance", "task_transition", "situation", "policy", "deployment"]},
+    "subject_id": {"type": "string", "minLength": 1},
+    "actor_id": {"type": "string", "minLength": 1},
+    "command_id": {"type": "string"},
+    "correlation_id": {"type": "string"},
+    "causation_id": {"type": "string"},
+    "source_system": {"type": "string"},
+    "source_event_id": {"type": "string"},
+    "source_sequence": {"type": "integer", "minimum": 0},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "schema_version": {"const": 1},
+    "payload": {}
+  }
+}

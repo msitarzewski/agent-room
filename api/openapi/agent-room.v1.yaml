@@ -1,0 +1,1315 @@
+openapi: 3.1.0
+info:
+  title: Agent Room API
+  version: 1.0.0
+  description: Canonical founding-release HTTP contract. Commands mutate state; events record accepted facts.
+  license:
+    name: Apache License 2.0
+    identifier: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+servers:
+  - url: /api/v1
+security:
+  - sessionCookie: []
+tags:
+  - {name: Authentication, description: Browser session lifecycle}
+  - {name: Coordination, description: Human and agent coordination state}
+  - {name: Resources, description: Project-scoped resource projections}
+  - {name: Control, description: Versioned and auditable commands}
+  - {name: Adapter, description: Service-token authenticated runtime ingestion}
+  - {name: Realtime, description: Cursor-based project activity}
+paths:
+  /auth/login:
+    get:
+      operationId: beginOIDCLogin
+      summary: Begin OIDC login
+      tags: [Authentication]
+      security: []
+      parameters:
+        - {name: return_to, in: query, description: Same-origin path to resume after authentication, schema: {type: string}}
+      responses:
+        "302": {description: Redirect to the configured OIDC provider}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        default: {$ref: "#/components/responses/UnexpectedResponse"}
+  /auth/callback:
+    get:
+      operationId: completeOIDCLogin
+      summary: Complete OIDC login
+      tags: [Authentication]
+      security: []
+      parameters:
+        - {name: state, in: query, required: true, description: Bound OIDC state, schema: {type: string, minLength: 1}}
+        - {name: code, in: query, required: true, description: OIDC authorization code, schema: {type: string, minLength: 1}}
+      responses:
+        "303": {description: Session created and browser redirected}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        default: {$ref: "#/components/responses/UnexpectedResponse"}
+  /auth/dev-login:
+    post:
+      operationId: createDevelopmentSession
+      summary: Create a development-only password session
+      description: Available only when the daemon is explicitly running in development mode.
+      tags: [Authentication]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: {type: string, minLength: 1}
+                password: {type: string, minLength: 1}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Development session created
+          content: {application/json: {schema: {$ref: "#/components/schemas/SessionEnvelope"}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /auth/session:
+    get:
+      operationId: getSession
+      summary: Get the current browser session
+      description: Returns the actor and the stable session-bound CSRF token.
+      tags: [Authentication]
+      responses:
+        "200":
+          description: Active session
+          content: {application/json: {schema: {$ref: "#/components/schemas/SessionEnvelope"}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /auth/logout:
+    post:
+      operationId: revokeSession
+      summary: Revoke the current browser session
+      tags: [Authentication]
+      parameters:
+        - {$ref: "#/components/parameters/CSRF"}
+      responses:
+        "204": {description: Session revoked}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /projects:
+    get:
+      operationId: listProjects
+      summary: List projects available to the current actor
+      tags: [Coordination]
+      responses:
+        "200":
+          description: Available projects and project-scoped capabilities
+          content: {application/json: {schema: {$ref: "#/components/schemas/ProjectSummaryPage"}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /overview:
+    get:
+      operationId: getProjectOverview
+      summary: Get project resource counts and latest cursor
+      tags: [Coordination]
+      parameters:
+        - {$ref: "#/components/parameters/Project"}
+      responses:
+        "200":
+          description: Project overview
+          content: {application/json: {schema: {$ref: "#/components/schemas/ProjectOverview"}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /brief:
+    get:
+      operationId: getReturnBrief
+      summary: Get deterministic changes since the actor reviewed this project
+      tags: [Coordination]
+      parameters:
+        - {$ref: "#/components/parameters/Project"}
+        - {name: after, in: query, description: Optional bounded replay override, schema: {type: integer, format: int64, minimum: 0}}
+      responses:
+        "200":
+          description: Actor- and project-scoped return brief
+          content: {application/json: {schema: {$ref: "#/components/schemas/ProjectBrief"}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /brief/acknowledge:
+    post:
+      operationId: acknowledgeReturnBrief
+      summary: Advance the actor's reviewed project cursor
+      tags: [Coordination]
+      parameters:
+        - {$ref: "#/components/parameters/Project"}
+        - {$ref: "#/components/parameters/CSRF"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_cursor, through_cursor]
+              properties:
+                expected_cursor: {type: integer, format: int64, minimum: 0}
+                through_cursor: {type: integer, format: int64, minimum: 0}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Reviewed cursor advanced or idempotently replayed
+          content: {application/json: {schema: {$ref: "#/components/schemas/BriefAcknowledgement"}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /health/components:
+    get:
+      operationId: getComponentHealth
+      summary: Get role-safe component health
+      tags: [Coordination]
+      parameters:
+        - {$ref: "#/components/parameters/Project"}
+      responses:
+        "200":
+          description: Component health snapshot
+          content: {application/json: {schema: {$ref: "#/components/schemas/HealthSnapshot"}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "503": {$ref: "#/components/responses/ServiceUnavailable"}
+  /agents:
+    get:
+      operationId: listAgents
+      summary: List project agents
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses: {"200": {$ref: "#/components/responses/AgentList"}, "400": {$ref: "#/components/responses/BadRequest"}, "403": {$ref: "#/components/responses/Forbidden"}}
+  /agents/{id}:
+    get:
+      operationId: getAgent
+      summary: Get a project agent
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses: {"200": {$ref: "#/components/responses/AgentItem"}, "400": {$ref: "#/components/responses/BadRequest"}, "404": {$ref: "#/components/responses/NotFound"}}
+  /runs:
+    get:
+      operationId: listRuns
+      summary: List project runs
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses: {"200": {$ref: "#/components/responses/RunList"}, "400": {$ref: "#/components/responses/BadRequest"}, "403": {$ref: "#/components/responses/Forbidden"}}
+  /runs/{id}:
+    get:
+      operationId: getRun
+      summary: Get a project run
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses: {"200": {$ref: "#/components/responses/RunItem"}, "400": {$ref: "#/components/responses/BadRequest"}, "404": {$ref: "#/components/responses/NotFound"}}
+  /sessions:
+    get:
+      operationId: listWorkSessions
+      summary: List project work sessions
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses: {"200": {$ref: "#/components/responses/WorkSessionList"}, "400": {$ref: "#/components/responses/BadRequest"}, "403": {$ref: "#/components/responses/Forbidden"}}
+  /sessions/{id}:
+    get:
+      operationId: getWorkSession
+      summary: Get a project work session
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses: {"200": {$ref: "#/components/responses/WorkSessionItem"}, "400": {$ref: "#/components/responses/BadRequest"}, "404": {$ref: "#/components/responses/NotFound"}}
+  /tasks:
+    get:
+      operationId: listTasks
+      summary: List project tasks
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses: {"200": {$ref: "#/components/responses/TaskList"}, "400": {$ref: "#/components/responses/BadRequest"}, "403": {$ref: "#/components/responses/Forbidden"}}
+  /tasks/{id}:
+    get:
+      operationId: getTask
+      summary: Get a project task
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses: {"200": {$ref: "#/components/responses/TaskItem"}, "400": {$ref: "#/components/responses/BadRequest"}, "404": {$ref: "#/components/responses/NotFound"}}
+  /attention:
+    get:
+      operationId: listAttention
+      summary: List project attention items
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses: {"200": {$ref: "#/components/responses/AttentionList"}, "400": {$ref: "#/components/responses/BadRequest"}, "403": {$ref: "#/components/responses/Forbidden"}}
+  /attention/{id}:
+    get:
+      operationId: getAttention
+      summary: Get a project attention item
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses: {"200": {$ref: "#/components/responses/AttentionItem"}, "400": {$ref: "#/components/responses/BadRequest"}, "404": {$ref: "#/components/responses/NotFound"}}
+  /evidence:
+    get:
+      operationId: listEvidence
+      summary: List project evidence
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses: {"200": {$ref: "#/components/responses/EvidenceList"}, "400": {$ref: "#/components/responses/BadRequest"}, "403": {$ref: "#/components/responses/Forbidden"}}
+  /evidence/{id}:
+    get:
+      operationId: getEvidence
+      summary: Get project evidence
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses: {"200": {$ref: "#/components/responses/EvidenceItem"}, "400": {$ref: "#/components/responses/BadRequest"}, "404": {$ref: "#/components/responses/NotFound"}}
+  /artifacts:
+    get:
+      operationId: listArtifacts
+      summary: List project artifact metadata
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses: {"200": {$ref: "#/components/responses/ArtifactList"}, "400": {$ref: "#/components/responses/BadRequest"}, "403": {$ref: "#/components/responses/Forbidden"}}
+    post:
+      operationId: uploadArtifact
+      summary: Upload an immutable content-addressed artifact
+      tags: [Control]
+      parameters:
+        - {$ref: "#/components/parameters/Project"}
+        - {$ref: "#/components/parameters/CSRF"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+        - {name: task_id, in: query, description: Associated task identifier, schema: {type: string}}
+        - {name: run_id, in: query, description: Associated run identifier, schema: {type: string}}
+        - {name: X-Artifact-Name, in: header, required: true, description: Safe download filename, schema: {type: string, minLength: 1, maxLength: 255}}
+      requestBody:
+        required: true
+        content:
+          application/octet-stream: {schema: {type: string, format: binary}}
+          text/plain: {schema: {type: string}}
+          application/json: {schema: {}}
+      responses:
+        "201": {$ref: "#/components/responses/ArtifactItem"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "503": {$ref: "#/components/responses/ServiceUnavailable"}
+  /artifacts/{id}:
+    get:
+      operationId: getArtifact
+      summary: Get project artifact metadata
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses: {"200": {$ref: "#/components/responses/ArtifactItem"}, "400": {$ref: "#/components/responses/BadRequest"}, "404": {$ref: "#/components/responses/NotFound"}}
+  /artifacts/{id}/content:
+    get:
+      operationId: downloadArtifact
+      summary: Download integrity-checked artifact content
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses:
+        "200":
+          description: Verified artifact bytes with digest ETag
+          headers:
+            ETag: {description: Content digest, schema: {type: string}}
+            Content-Disposition: {description: Attachment filename, schema: {type: string}}
+          content: {application/octet-stream: {schema: {type: string, format: binary}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /approvals:
+    get:
+      operationId: listApprovals
+      summary: List project approvals
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses: {"200": {$ref: "#/components/responses/ApprovalList"}, "400": {$ref: "#/components/responses/BadRequest"}, "403": {$ref: "#/components/responses/Forbidden"}}
+    post:
+      operationId: requestRunApproval
+      summary: Request approval for a destructive run action
+      tags: [Control]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/CSRF"}, {$ref: "#/components/parameters/IdempotencyKey"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [run_id, action, expected_target_version, expires_in_seconds]
+              properties:
+                run_id: {type: string, minLength: 1}
+                action: {type: string, enum: [cancel]}
+                message: {type: string}
+                expected_target_version: {type: integer, format: int64, minimum: 1}
+                expires_in_seconds: {type: integer, format: int64, minimum: 1, maximum: 86400}
+              additionalProperties: false
+      responses:
+        "201": {$ref: "#/components/responses/ApprovalItem"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /approvals/{id}:
+    get:
+      operationId: getApproval
+      summary: Get a project approval
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses: {"200": {$ref: "#/components/responses/ApprovalItem"}, "400": {$ref: "#/components/responses/BadRequest"}, "404": {$ref: "#/components/responses/NotFound"}}
+  /interventions:
+    get:
+      operationId: listInterventions
+      summary: List project interventions
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses: {"200": {$ref: "#/components/responses/InterventionList"}, "400": {$ref: "#/components/responses/BadRequest"}, "403": {$ref: "#/components/responses/Forbidden"}}
+  /interventions/{id}:
+    get:
+      operationId: getIntervention
+      summary: Get a project intervention
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses: {"200": {$ref: "#/components/responses/InterventionItem"}, "400": {$ref: "#/components/responses/BadRequest"}, "404": {$ref: "#/components/responses/NotFound"}}
+  /budgets:
+    get:
+      operationId: listBudgets
+      summary: List project budgets
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses: {"200": {$ref: "#/components/responses/BudgetList"}, "400": {$ref: "#/components/responses/BadRequest"}, "403": {$ref: "#/components/responses/Forbidden"}}
+  /budgets/{id}:
+    get:
+      operationId: getBudget
+      summary: Get a project budget
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses: {"200": {$ref: "#/components/responses/BudgetItem"}, "400": {$ref: "#/components/responses/BadRequest"}, "404": {$ref: "#/components/responses/NotFound"}}
+  /claims:
+    get:
+      operationId: listClaims
+      summary: List project claims
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses: {"200": {$ref: "#/components/responses/ClaimList"}, "400": {$ref: "#/components/responses/BadRequest"}, "403": {$ref: "#/components/responses/Forbidden"}}
+  /claims/{id}:
+    get:
+      operationId: getClaim
+      summary: Get a project claim
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses: {"200": {$ref: "#/components/responses/ClaimItem"}, "400": {$ref: "#/components/responses/BadRequest"}, "404": {$ref: "#/components/responses/NotFound"}}
+  /audit:
+    get:
+      operationId: listAuditRecords
+      summary: List project audit records
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses: {"200": {$ref: "#/components/responses/AuditRecordList"}, "400": {$ref: "#/components/responses/BadRequest"}, "403": {$ref: "#/components/responses/Forbidden"}}
+  /audit/{id}:
+    get:
+      operationId: getAuditRecord
+      summary: Get a project audit record
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses: {"200": {$ref: "#/components/responses/AuditRecordItem"}, "400": {$ref: "#/components/responses/BadRequest"}, "404": {$ref: "#/components/responses/NotFound"}}
+  /chat/messages:
+    get:
+      operationId: listChatMessages
+      summary: List project chat messages
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses: {"200": {$ref: "#/components/responses/ChatMessageList"}, "400": {$ref: "#/components/responses/BadRequest"}, "403": {$ref: "#/components/responses/Forbidden"}}
+    post:
+      operationId: createChatMessage
+      summary: Send a project chat message
+      tags: [Control]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/CSRF"}, {$ref: "#/components/parameters/IdempotencyKey"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                session_id: {type: string}
+                run_id: {type: string}
+                body: {type: string, minLength: 1}
+                metadata: {}
+              additionalProperties: false
+      responses:
+        "201": {$ref: "#/components/responses/ChatMessageItem"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /chat/messages/{id}:
+    get:
+      operationId: getChatMessage
+      summary: Get a project chat message
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses: {"200": {$ref: "#/components/responses/ChatMessageItem"}, "400": {$ref: "#/components/responses/BadRequest"}, "404": {$ref: "#/components/responses/NotFound"}}
+  /events:
+    get:
+      operationId: listEvents
+      summary: List cursor-ordered project events
+      tags: [Realtime]
+      parameters:
+        - {$ref: "#/components/parameters/Project"}
+        - {name: cursor, in: query, description: Return events strictly after this cursor, schema: {type: integer, format: int64, minimum: 0}}
+        - {$ref: "#/components/parameters/EventLimit"}
+      responses:
+        "200":
+          description: Cursor-ordered event page
+          content: {application/json: {schema: {$ref: "#/components/schemas/EventPage"}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /tasks/{id}/transition:
+    post:
+      operationId: transitionTask
+      summary: Transition a task with optimistic concurrency
+      tags: [Control]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/CSRF"}, {$ref: "#/components/parameters/IdempotencyKey"}, {$ref: "#/components/parameters/IfMatch"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: {$ref: "#/components/schemas/TaskStatus"}
+                reason: {type: string}
+              additionalProperties: false
+      responses:
+        "200": {$ref: "#/components/responses/TaskItem"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "428": {$ref: "#/components/responses/PreconditionRequired"}
+  /attention/{id}/acknowledge:
+    post:
+      operationId: acknowledgeAttention
+      summary: Acknowledge an attention item
+      tags: [Control]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/CSRF"}, {$ref: "#/components/parameters/IdempotencyKey"}, {$ref: "#/components/parameters/IfMatch"}]
+      responses:
+        "200": {$ref: "#/components/responses/AttentionItem"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "428": {$ref: "#/components/responses/PreconditionRequired"}
+  /attention/{id}/resolve:
+    post:
+      operationId: resolveAttention
+      summary: Resolve an attention item
+      tags: [Control]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/CSRF"}, {$ref: "#/components/parameters/IdempotencyKey"}, {$ref: "#/components/parameters/IfMatch"}]
+      responses:
+        "200": {$ref: "#/components/responses/AttentionItem"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "428": {$ref: "#/components/responses/PreconditionRequired"}
+  /runs/{id}/actions:
+    post:
+      operationId: controlRun
+      summary: Queue control for a live managed run
+      tags: [Control]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/CSRF"}, {$ref: "#/components/parameters/IdempotencyKey"}, {$ref: "#/components/parameters/IfMatch"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: {type: string, enum: [pause, resume, cancel, message, redirect]}
+                message: {type: string}
+                approval_id: {type: string}
+              additionalProperties: false
+      responses:
+        "200": {$ref: "#/components/responses/RunItem"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "428": {$ref: "#/components/responses/PreconditionRequired"}
+  /claims/{id}/review:
+    post:
+      operationId: reviewClaim
+      summary: Review an agent claim
+      tags: [Control]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/CSRF"}, {$ref: "#/components/parameters/IdempotencyKey"}, {$ref: "#/components/parameters/IfMatch"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: {type: string, enum: [accepted, rejected]}
+                note: {type: string}
+              additionalProperties: false
+      responses:
+        "200": {$ref: "#/components/responses/ClaimItem"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "428": {$ref: "#/components/responses/PreconditionRequired"}
+  /approvals/{id}/decision:
+    post:
+      operationId: decideApproval
+      summary: Decide an approval request
+      tags: [Control]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/CSRF"}, {$ref: "#/components/parameters/IdempotencyKey"}, {$ref: "#/components/parameters/IfMatch"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: {type: string, enum: [approved, rejected]}
+                note: {type: string}
+              additionalProperties: false
+      responses:
+        "200": {$ref: "#/components/responses/ApprovalItem"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "428": {$ref: "#/components/responses/PreconditionRequired"}
+  /stream:
+    get:
+      operationId: streamProjectEvents
+      summary: Open the project event WebSocket
+      description: Upgrades to a server-push WebSocket carrying cursor-bearing event, heartbeat, and resync frames.
+      tags: [Realtime]
+      parameters:
+        - {$ref: "#/components/parameters/Project"}
+        - {name: after, in: query, description: Replay events strictly after this cursor, schema: {type: integer, format: int64, minimum: 0}}
+      x-websocket-message:
+        type: object
+        required: [cursor, type, occurred_at]
+        properties:
+          cursor: {type: integer, format: int64, minimum: 0}
+          type: {type: string, description: "Event type, heartbeat, or resync_required"}
+          occurred_at: {type: string, format: date-time}
+          data: {}
+      responses:
+        "101": {description: WebSocket protocol switched}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        default: {$ref: "#/components/responses/UnexpectedResponse"}
+  /ingest:
+    post:
+      operationId: ingestAdapterEvents
+      summary: Ingest authenticated runtime events
+      description: Adapter-only endpoint served by the private listener. Event identifiers and actor attribution are replaced by canonical server values.
+      tags: [Adapter]
+      security:
+        - serviceToken: []
+      parameters:
+        - {$ref: "#/components/parameters/Project"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [events]
+              properties:
+                events:
+                  type: array
+                  minItems: 1
+                  items: {$ref: "#/components/schemas/IngestEvent"}
+              additionalProperties: false
+      responses:
+        "202": {description: Events accepted}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /organizations:
+    get:
+      operationId: listOrganizations
+      summary: List organizations
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses: {"200": {$ref: "#/components/responses/OrganizationList"}, "400": {$ref: "#/components/responses/BadRequest"}, "403": {$ref: "#/components/responses/Forbidden"}}
+  /organizations/{id}:
+    get:
+      operationId: getOrganization
+      summary: Get an organization
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses: {"200": {$ref: "#/components/responses/OrganizationItem"}, "400": {$ref: "#/components/responses/BadRequest"}, "404": {$ref: "#/components/responses/NotFound"}}
+  /humans:
+    get:
+      operationId: listHumans
+      summary: List humans
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses: {"200": {$ref: "#/components/responses/HumanList"}, "400": {$ref: "#/components/responses/BadRequest"}, "403": {$ref: "#/components/responses/Forbidden"}}
+  /humans/{id}:
+    get:
+      operationId: getHuman
+      summary: Get a human
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses: {"200": {$ref: "#/components/responses/HumanItem"}, "400": {$ref: "#/components/responses/BadRequest"}, "404": {$ref: "#/components/responses/NotFound"}}
+  /projects-state:
+    get:
+      operationId: listProjectResources
+      summary: List project resource projections
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses: {"200": {$ref: "#/components/responses/ProjectResourceList"}, "400": {$ref: "#/components/responses/BadRequest"}, "403": {$ref: "#/components/responses/Forbidden"}}
+  /projects-state/{id}:
+    get:
+      operationId: getProjectResource
+      summary: Get a project resource projection
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses: {"200": {$ref: "#/components/responses/ProjectResourceItem"}, "400": {$ref: "#/components/responses/BadRequest"}, "404": {$ref: "#/components/responses/NotFound"}}
+  /hosts:
+    get:
+      operationId: listHosts
+      summary: List runtime hosts
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses: {"200": {$ref: "#/components/responses/HostList"}, "400": {$ref: "#/components/responses/BadRequest"}, "403": {$ref: "#/components/responses/Forbidden"}}
+  /hosts/{id}:
+    get:
+      operationId: getHost
+      summary: Get a runtime host
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses: {"200": {$ref: "#/components/responses/HostItem"}, "400": {$ref: "#/components/responses/BadRequest"}, "404": {$ref: "#/components/responses/NotFound"}}
+  /agent-instances:
+    get:
+      operationId: listAgentInstances
+      summary: List agent process instances
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses: {"200": {$ref: "#/components/responses/AgentInstanceList"}, "400": {$ref: "#/components/responses/BadRequest"}, "403": {$ref: "#/components/responses/Forbidden"}}
+  /agent-instances/{id}:
+    get:
+      operationId: getAgentInstance
+      summary: Get an agent process instance
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses: {"200": {$ref: "#/components/responses/AgentInstanceItem"}, "400": {$ref: "#/components/responses/BadRequest"}, "404": {$ref: "#/components/responses/NotFound"}}
+  /task-transitions:
+    get:
+      operationId: listTaskTransitions
+      summary: List durable task transitions
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses: {"200": {$ref: "#/components/responses/TaskTransitionList"}, "400": {$ref: "#/components/responses/BadRequest"}, "403": {$ref: "#/components/responses/Forbidden"}}
+  /task-transitions/{id}:
+    get:
+      operationId: getTaskTransition
+      summary: Get a durable task transition
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses: {"200": {$ref: "#/components/responses/TaskTransitionItem"}, "400": {$ref: "#/components/responses/BadRequest"}, "404": {$ref: "#/components/responses/NotFound"}}
+  /situations:
+    get:
+      operationId: listSituations
+      summary: List deduplicated situations
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses: {"200": {$ref: "#/components/responses/SituationList"}, "400": {$ref: "#/components/responses/BadRequest"}, "403": {$ref: "#/components/responses/Forbidden"}}
+  /situations/{id}:
+    get:
+      operationId: getSituation
+      summary: Get a deduplicated situation
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses: {"200": {$ref: "#/components/responses/SituationItem"}, "400": {$ref: "#/components/responses/BadRequest"}, "404": {$ref: "#/components/responses/NotFound"}}
+  /policies:
+    get:
+      operationId: listPolicies
+      summary: List coordination policies
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses: {"200": {$ref: "#/components/responses/PolicyList"}, "400": {$ref: "#/components/responses/BadRequest"}, "403": {$ref: "#/components/responses/Forbidden"}}
+  /policies/{id}:
+    get:
+      operationId: getPolicy
+      summary: Get a coordination policy
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses: {"200": {$ref: "#/components/responses/PolicyItem"}, "400": {$ref: "#/components/responses/BadRequest"}, "404": {$ref: "#/components/responses/NotFound"}}
+  /deployments:
+    get:
+      operationId: listDeployments
+      summary: List deployments
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses: {"200": {$ref: "#/components/responses/DeploymentList"}, "400": {$ref: "#/components/responses/BadRequest"}, "403": {$ref: "#/components/responses/Forbidden"}}
+  /deployments/{id}:
+    get:
+      operationId: getDeployment
+      summary: Get a deployment
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses: {"200": {$ref: "#/components/responses/DeploymentItem"}, "400": {$ref: "#/components/responses/BadRequest"}, "404": {$ref: "#/components/responses/NotFound"}}
+components:
+  securitySchemes:
+    sessionCookie: {type: apiKey, in: cookie, name: __Host-agentroom}
+    serviceToken: {type: http, scheme: bearer, bearerFormat: opaque}
+  parameters:
+    ID: {name: id, in: path, required: true, description: Resource identifier, schema: {type: string, minLength: 1}}
+    Project: {name: project_id, in: query, required: true, description: Authorized project identifier, schema: {type: string, minLength: 1}}
+    Cursor: {name: cursor, in: query, description: Opaque resource page cursor, schema: {type: string}}
+    Limit: {name: limit, in: query, description: Maximum resources to return, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+    EventLimit: {name: limit, in: query, description: Maximum events to return, schema: {type: integer, minimum: 1, maximum: 1000, default: 100}}
+    CSRF: {name: X-CSRF-Token, in: header, required: true, description: Stable token bound to the active browser session, schema: {type: string, minLength: 32}}
+    IdempotencyKey: {name: Idempotency-Key, in: header, required: true, description: Unique command replay key, schema: {type: string, minLength: 1, maxLength: 200}}
+    IfMatch: {name: If-Match, in: header, required: true, description: Expected positive resource version, schema: {type: integer, format: int64, minimum: 1}}
+  responses:
+    BadRequest: {$ref: "#/components/responses/ProblemBadRequest"}
+    ProblemBadRequest:
+      description: Request validation failed
+      content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}
+    Unauthorized:
+      description: Authentication required
+      content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}
+    Forbidden:
+      description: Project capability, origin, or CSRF check failed
+      content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}
+    NotFound:
+      description: Resource or route not found
+      content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}
+    Conflict:
+      description: Version, idempotency, approval, integrity, or runtime conflict
+      content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}
+    PreconditionRequired:
+      description: A valid If-Match resource version is required
+      content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}
+    TooManyRequests:
+      description: Request rate limit exceeded
+      content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}
+    ServiceUnavailable:
+      description: Required storage or service component is degraded
+      content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}
+    UnexpectedResponse:
+      description: An unexpected protocol or server response
+      content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}
+    AgentList: {description: Agent page, content: {application/json: {schema: {$ref: "#/components/schemas/AgentPage"}}}}
+    AgentItem: {description: Agent resource, content: {application/json: {schema: {$ref: "#/components/schemas/Agent"}}}}
+    RunList: {description: Run page, content: {application/json: {schema: {$ref: "#/components/schemas/RunPage"}}}}
+    RunItem: {description: Run resource, content: {application/json: {schema: {$ref: "#/components/schemas/Run"}}}}
+    WorkSessionList: {description: Work session page, content: {application/json: {schema: {$ref: "#/components/schemas/WorkSessionPage"}}}}
+    WorkSessionItem: {description: Work session resource, content: {application/json: {schema: {$ref: "#/components/schemas/WorkSession"}}}}
+    TaskList: {description: Task page, content: {application/json: {schema: {$ref: "#/components/schemas/TaskPage"}}}}
+    TaskItem: {description: Task resource, content: {application/json: {schema: {$ref: "#/components/schemas/Task"}}}}
+    AttentionList: {description: Attention page, content: {application/json: {schema: {$ref: "#/components/schemas/AttentionPage"}}}}
+    AttentionItem: {description: Attention resource, content: {application/json: {schema: {$ref: "#/components/schemas/Attention"}}}}
+    EvidenceList: {description: Evidence page, content: {application/json: {schema: {$ref: "#/components/schemas/EvidencePage"}}}}
+    EvidenceItem: {description: Evidence resource, content: {application/json: {schema: {$ref: "#/components/schemas/Evidence"}}}}
+    ArtifactList: {description: Artifact page, content: {application/json: {schema: {$ref: "#/components/schemas/ArtifactPage"}}}}
+    ArtifactItem: {description: Artifact resource, content: {application/json: {schema: {$ref: "#/components/schemas/Artifact"}}}}
+    ApprovalList: {description: Approval page, content: {application/json: {schema: {$ref: "#/components/schemas/ApprovalPage"}}}}
+    ApprovalItem: {description: Approval resource, content: {application/json: {schema: {$ref: "#/components/schemas/Approval"}}}}
+    InterventionList: {description: Intervention page, content: {application/json: {schema: {$ref: "#/components/schemas/InterventionPage"}}}}
+    InterventionItem: {description: Intervention resource, content: {application/json: {schema: {$ref: "#/components/schemas/Intervention"}}}}
+    BudgetList: {description: Budget page, content: {application/json: {schema: {$ref: "#/components/schemas/BudgetPage"}}}}
+    BudgetItem: {description: Budget resource, content: {application/json: {schema: {$ref: "#/components/schemas/Budget"}}}}
+    ClaimList: {description: Claim page, content: {application/json: {schema: {$ref: "#/components/schemas/ClaimPage"}}}}
+    ClaimItem: {description: Claim resource, content: {application/json: {schema: {$ref: "#/components/schemas/Claim"}}}}
+    AuditRecordList: {description: Audit record page, content: {application/json: {schema: {$ref: "#/components/schemas/AuditRecordPage"}}}}
+    AuditRecordItem: {description: Audit record, content: {application/json: {schema: {$ref: "#/components/schemas/AuditRecord"}}}}
+    ChatMessageList: {description: Chat message page, content: {application/json: {schema: {$ref: "#/components/schemas/ChatMessagePage"}}}}
+    ChatMessageItem: {description: Chat message, content: {application/json: {schema: {$ref: "#/components/schemas/ChatMessage"}}}}
+    OrganizationList: {description: Organization page, content: {application/json: {schema: {$ref: "#/components/schemas/OrganizationPage"}}}}
+    OrganizationItem: {description: Organization, content: {application/json: {schema: {$ref: "#/components/schemas/Organization"}}}}
+    HumanList: {description: Human page, content: {application/json: {schema: {$ref: "#/components/schemas/HumanPage"}}}}
+    HumanItem: {description: Human, content: {application/json: {schema: {$ref: "#/components/schemas/Human"}}}}
+    ProjectResourceList: {description: Project resource page, content: {application/json: {schema: {$ref: "#/components/schemas/ProjectResourcePage"}}}}
+    ProjectResourceItem: {description: Project resource, content: {application/json: {schema: {$ref: "#/components/schemas/ProjectResource"}}}}
+    HostList: {description: Host page, content: {application/json: {schema: {$ref: "#/components/schemas/HostPage"}}}}
+    HostItem: {description: Host, content: {application/json: {schema: {$ref: "#/components/schemas/Host"}}}}
+    AgentInstanceList: {description: Agent instance page, content: {application/json: {schema: {$ref: "#/components/schemas/AgentInstancePage"}}}}
+    AgentInstanceItem: {description: Agent instance, content: {application/json: {schema: {$ref: "#/components/schemas/AgentInstance"}}}}
+    TaskTransitionList: {description: Task transition page, content: {application/json: {schema: {$ref: "#/components/schemas/TaskTransitionPage"}}}}
+    TaskTransitionItem: {description: Task transition, content: {application/json: {schema: {$ref: "#/components/schemas/TaskTransition"}}}}
+    SituationList: {description: Situation page, content: {application/json: {schema: {$ref: "#/components/schemas/SituationPage"}}}}
+    SituationItem: {description: Situation, content: {application/json: {schema: {$ref: "#/components/schemas/Situation"}}}}
+    PolicyList: {description: Policy page, content: {application/json: {schema: {$ref: "#/components/schemas/PolicyPage"}}}}
+    PolicyItem: {description: Policy, content: {application/json: {schema: {$ref: "#/components/schemas/Policy"}}}}
+    DeploymentList: {description: Deployment page, content: {application/json: {schema: {$ref: "#/components/schemas/DeploymentPage"}}}}
+    DeploymentItem: {description: Deployment, content: {application/json: {schema: {$ref: "#/components/schemas/Deployment"}}}}
+  schemas:
+    ResourceBase:
+      type: object
+      required: [id, project_id, version, created_at, updated_at]
+      properties:
+        id: {type: string}
+        project_id: {type: string}
+        version: {type: integer, format: int64, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    Source:
+      type: object
+      required: [system]
+      properties:
+        system: {type: string}
+        external_id: {type: string}
+        external_url: {type: string, format: uri}
+    SessionEnvelope:
+      type: object
+      required: [user, csrf_token, expires_at]
+      properties:
+        user:
+          type: object
+          required: [id, username, display_name, capabilities]
+          properties:
+            id: {type: string}
+            username: {type: string}
+            display_name: {type: string}
+            capabilities: {type: array, items: {type: string}}
+        csrf_token: {type: string}
+        expires_at: {type: string, format: date-time}
+    ProjectSummary:
+      type: object
+      required: [id, name, version, updated_at, capabilities]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        version: {type: integer, format: int64, minimum: 1}
+        updated_at: {type: string, format: date-time}
+        capabilities: {type: array, items: {type: string}}
+    ProjectSummaryPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/ProjectSummary"}}
+    ProjectOverview:
+      type: object
+      required: [project_id, counts, event_cursor, generated_at]
+      properties:
+        project_id: {type: string}
+        counts: {type: object, additionalProperties: {type: integer, format: int64, minimum: 0}}
+        event_cursor: {type: integer, format: int64, minimum: 0}
+        generated_at: {type: string, format: date-time}
+    BriefAcknowledgement:
+      type: object
+      required: [reviewed_cursor, replayed]
+      properties:
+        reviewed_cursor: {type: integer, format: int64, minimum: 0}
+        replayed: {type: boolean}
+    ProjectBrief:
+      type: object
+      required: [project_id, from_cursor, through_cursor, reviewed_cursor, event_counts, events, open_attention, pending_approvals, recommended_actions, generated_at]
+      properties:
+        project_id: {type: string}
+        from_cursor: {type: integer, format: int64, minimum: 0}
+        through_cursor: {type: integer, format: int64, minimum: 0}
+        reviewed_cursor: {type: integer, format: int64, minimum: 0}
+        event_counts: {type: object, additionalProperties: {type: integer, minimum: 0}}
+        events: {type: array, items: {$ref: "#/components/schemas/Event"}}
+        open_attention: {type: array, items: {$ref: "#/components/schemas/Attention"}}
+        pending_approvals: {type: array, items: {$ref: "#/components/schemas/Approval"}}
+        recommended_actions: {type: array, items: {type: string}}
+        generated_at: {type: string, format: date-time}
+    ComponentStatus:
+      type: string
+      enum: [ok, degraded]
+    HealthSnapshot:
+      type: object
+      required: [schema, event_outbox, control_outbox, adapters, artifacts, oidc, realtime, checked_at]
+      properties:
+        schema:
+          type: object
+          required: [status, migrations]
+          properties:
+            status: {$ref: "#/components/schemas/ComponentStatus"}
+            migrations: {type: integer, minimum: 0}
+        event_outbox:
+          type: object
+          required: [status, pending, oldest_seconds]
+          properties:
+            status: {$ref: "#/components/schemas/ComponentStatus"}
+            pending: {type: integer, format: int64, minimum: 0}
+            oldest_seconds: {type: number, minimum: 0}
+        control_outbox:
+          type: object
+          required: [status, pending]
+          properties:
+            status: {$ref: "#/components/schemas/ComponentStatus"}
+            pending: {type: integer, format: int64, minimum: 0}
+        adapters:
+          type: object
+          required: [status, last_seen]
+          properties:
+            status: {$ref: "#/components/schemas/ComponentStatus"}
+            last_seen: {type: object, additionalProperties: {type: string, format: date-time}}
+        artifacts:
+          type: object
+          required: [status]
+          properties: {status: {$ref: "#/components/schemas/ComponentStatus"}}
+        oidc:
+          type: object
+          required: [status, configured]
+          properties:
+            status: {$ref: "#/components/schemas/ComponentStatus"}
+            configured: {type: boolean}
+        realtime:
+          type: object
+          required: [status]
+          properties: {status: {$ref: "#/components/schemas/ComponentStatus"}}
+        checked_at: {type: string, format: date-time}
+    TaskStatus:
+      type: string
+      enum: [inbox, ready, working, review, completed, archived, blocked, cancelled, reopened, failed]
+    Agent:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [display_name, kind, status, capabilities, source]
+          properties:
+            display_name: {type: string}
+            kind: {type: string}
+            status: {type: string}
+            capabilities: {type: array, items: {type: string}}
+            source: {$ref: "#/components/schemas/Source"}
+    Run:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [agent_id, status, capabilities, source]
+          properties:
+            agent_id: {type: string}
+            session_id: {type: string}
+            task_id: {type: string}
+            status: {type: string}
+            summary: {type: string}
+            control_status: {type: string, enum: [pending, executing, executed, failed]}
+            control_action: {type: string, enum: [pause, resume, cancel, message, redirect]}
+            control_error: {type: string}
+            capabilities: {type: array, items: {type: string}}
+            source: {$ref: "#/components/schemas/Source"}
+    WorkSession:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [agent_id, status, source]
+          properties:
+            agent_id: {type: string}
+            status: {type: string}
+            external_ref: {type: string}
+            conversation_ref: {type: string}
+            source: {$ref: "#/components/schemas/Source"}
+            last_reconciled_at: {type: string, format: date-time}
+    Task:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [title, status, priority, dependencies, source]
+          properties:
+            title: {type: string}
+            description: {type: string}
+            owner_id: {type: string}
+            status: {$ref: "#/components/schemas/TaskStatus"}
+            priority: {type: string, enum: [low, normal, high, critical]}
+            dependencies: {type: array, items: {type: string}}
+            budget_id: {type: string}
+            review_state: {type: string}
+            approval_state: {type: string}
+            blocked_reason: {type: string}
+            source: {$ref: "#/components/schemas/Source"}
+    TaskTransition:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [task_id, from, to, actor_id, command_id]
+          properties:
+            task_id: {type: string}
+            from: {$ref: "#/components/schemas/TaskStatus"}
+            to: {$ref: "#/components/schemas/TaskStatus"}
+            actor_id: {type: string}
+            reason: {type: string}
+            command_id: {type: string}
+    Attention:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [kind, severity, title, status]
+          properties:
+            kind: {type: string}
+            severity: {type: string, enum: [low, normal, high, critical]}
+            title: {type: string}
+            detail: {type: string}
+            resource_type: {type: string}
+            resource_id: {type: string}
+            status: {type: string, enum: [open, acknowledged, resolved]}
+            owner_id: {type: string}
+            acknowledged_at: {type: string, format: date-time}
+            resolved_at: {type: string, format: date-time}
+    Evidence:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [scope_type, kind, summary, source]
+          properties:
+            scope_type: {type: string, enum: [project, task, run]}
+            task_id: {type: string}
+            run_id: {type: string}
+            kind: {type: string}
+            summary: {type: string}
+            source: {$ref: "#/components/schemas/Source"}
+            digest: {type: string}
+            data: {}
+    Artifact:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [scope_type, name, media_type, uri, source]
+          properties:
+            scope_type: {type: string, enum: [project, task, run]}
+            task_id: {type: string}
+            run_id: {type: string}
+            name: {type: string}
+            media_type: {type: string}
+            uri: {type: string}
+            digest: {type: string}
+            source: {$ref: "#/components/schemas/Source"}
+    Approval:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [kind, status, resource_type, resource_id, requested_by, reason, command_digest, command_version, expected_target_version, expires_at]
+          properties:
+            kind: {type: string}
+            status: {type: string, enum: [pending, approved, rejected]}
+            resource_type: {type: string}
+            resource_id: {type: string}
+            requested_by: {type: string}
+            decided_by: {type: string}
+            reason: {type: string}
+            decision_note: {type: string}
+            decision_at: {type: string, format: date-time}
+            command_digest: {type: string}
+            command_version: {type: integer, minimum: 1}
+            expected_target_version: {type: integer, format: int64, minimum: 1}
+            expires_at: {type: string, format: date-time}
+            consumed_at: {type: string, format: date-time}
+            consumed_by: {type: string}
+            context: {type: object, additionalProperties: true}
+    Intervention:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [run_id, action, status, actor_id]
+          properties:
+            run_id: {type: string}
+            action: {type: string}
+            status: {type: string}
+            message: {type: string}
+            actor_id: {type: string}
+            approval_id: {type: string}
+            executed_at: {type: string, format: date-time}
+    ChatMessage:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [author_id, role, body]
+          properties:
+            session_id: {type: string}
+            run_id: {type: string}
+            author_id: {type: string}
+            role: {type: string}
+            body: {type: string}
+            metadata: {}
+    Budget:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [name, scope_type, scope_id, enforcement_mode, status]
+          properties:
+            name: {type: string}
+            scope_type: {type: string}
+            scope_id: {type: string}
+            enforcement_mode: {type: string}
+            status: {type: string}
+            token_limit: {type: integer, format: int64}
+            token_used: {type: integer, format: int64}
+            cost_limit_cents: {type: integer, format: int64}
+            cost_used_cents: {type: integer, format: int64}
+            time_limit_seconds: {type: integer, format: int64}
+            time_used_seconds: {type: integer, format: int64}
+            concurrent_limit: {type: integer, format: int64}
+            concurrent_used: {type: integer, format: int64}
+    Claim:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [task_id, agent_id, status]
+          properties:
+            task_id: {type: string}
+            agent_id: {type: string}
+            status: {type: string}
+            review_note: {type: string}
+            reviewer_id: {type: string}
+    AuditRecord:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [actor_id, action, resource_type, resource_id, outcome]
+          properties:
+            actor_id: {type: string}
+            action: {type: string}
+            resource_type: {type: string}
+            resource_id: {type: string}
+            command_id: {type: string}
+            outcome: {type: string}
+            remote_addr: {type: string}
+            details: {}
+    Organization:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [name, status]
+          properties: {name: {type: string}, status: {type: string}}
+    Human:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [email, display_name, status]
+          properties: {email: {type: string, format: email}, display_name: {type: string}, status: {type: string}}
+    ProjectResource:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [organization_id, name, slug, status]
+          properties: {organization_id: {type: string}, name: {type: string}, slug: {type: string}, status: {type: string}}
+    Host:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [hostname, os, arch, status]
+          properties:
+            hostname: {type: string}
+            os: {type: string}
+            arch: {type: string}
+            status: {type: string}
+            labels: {type: object, additionalProperties: {type: string}}
+    AgentInstance:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [agent_id, host_id, runtime, status, started_at]
+          properties:
+            agent_id: {type: string}
+            host_id: {type: string}
+            runtime: {type: string}
+            process_id: {type: integer}
+            status: {type: string}
+            started_at: {type: string, format: date-time}
+            stopped_at: {type: string, format: date-time}
+    Situation:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [kind, fingerprint, status, severity, summary, material_hash, occurrences, first_observed_at, last_observed_at]
+          properties:
+            kind: {type: string}
+            fingerprint: {type: string}
+            status: {type: string}
+            severity: {type: string}
+            summary: {type: string}
+            detail: {type: string}
+            material_hash: {type: string}
+            occurrences: {type: integer, format: int64, minimum: 1}
+            first_observed_at: {type: string, format: date-time}
+            last_observed_at: {type: string, format: date-time}
+            resolved_at: {type: string, format: date-time}
+    Policy:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [name, kind, status, priority, rule]
+          properties:
+            name: {type: string}
+            kind: {type: string}
+            status: {type: string}
+            priority: {type: integer}
+            rule: {}
+    Deployment:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [environment, host_id, release, commit, status]
+          properties:
+            environment: {type: string}
+            host_id: {type: string}
+            release: {type: string}
+            commit: {type: string}
+            status: {type: string}
+            rollback_of: {type: string}
+            deployed_at: {type: string, format: date-time}
+    Event:
+      type: object
+      required: [id, cursor, project_id, type, subject_type, subject_id, actor_id, occurred_at, schema_version, payload]
+      properties:
+        id: {type: string}
+        cursor: {type: integer, format: int64, minimum: 1}
+        project_id: {type: string}
+        type: {type: string}
+        subject_type: {type: string}
+        subject_id: {type: string}
+        actor_id: {type: string}
+        command_id: {type: string}
+        correlation_id: {type: string}
+        causation_id: {type: string}
+        occurred_at: {type: string, format: date-time}
+        schema_version: {type: integer, minimum: 1}
+        source_system: {type: string}
+        source_event_id: {type: string}
+        source_sequence: {type: integer, format: int64}
+        payload: {}
+    IngestEvent:
+      type: object
+      required: [project_id, type, subject_type, subject_id, source_system, payload]
+      properties:
+        project_id: {type: string}
+        type: {type: string, pattern: "^[a-z][a-z0-9_.-]{0,127}$"}
+        subject_type: {type: string}
+        subject_id: {type: string, minLength: 1}
+        correlation_id: {type: string}
+        causation_id: {type: string}
+        occurred_at: {type: string, format: date-time}
+        schema_version: {type: integer, enum: [0, 1]}
+        source_system: {type: string, pattern: "^[a-z][a-z0-9_.-]{0,63}$"}
+        source_event_id: {type: string}
+        source_sequence: {type: integer, format: int64}
+        payload: {}
+    Problem:
+      type: object
+      required: [type, title, status, detail, code]
+      properties:
+        type: {type: string, format: uri}
+        title: {type: string}
+        status: {type: integer, minimum: 400, maximum: 599}
+        detail: {type: string}
+        code: {type: string}
+        field_errors: {type: object, additionalProperties: {type: string}}
+    EventPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/Event"}}
+        next_cursor: {type: integer, format: int64, minimum: 1}
+    AgentPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Agent"}}, next_cursor: {type: string}}}
+    RunPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Run"}}, next_cursor: {type: string}}}
+    WorkSessionPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/WorkSession"}}, next_cursor: {type: string}}}
+    TaskPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Task"}}, next_cursor: {type: string}}}
+    AttentionPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Attention"}}, next_cursor: {type: string}}}
+    EvidencePage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Evidence"}}, next_cursor: {type: string}}}
+    ArtifactPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Artifact"}}, next_cursor: {type: string}}}
+    ApprovalPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Approval"}}, next_cursor: {type: string}}}
+    InterventionPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Intervention"}}, next_cursor: {type: string}}}
+    BudgetPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Budget"}}, next_cursor: {type: string}}}
+    ClaimPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Claim"}}, next_cursor: {type: string}}}
+    AuditRecordPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/AuditRecord"}}, next_cursor: {type: string}}}
+    ChatMessagePage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/ChatMessage"}}, next_cursor: {type: string}}}
+    OrganizationPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Organization"}}, next_cursor: {type: string}}}
+    HumanPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Human"}}, next_cursor: {type: string}}}
+    ProjectResourcePage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/ProjectResource"}}, next_cursor: {type: string}}}
+    HostPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Host"}}, next_cursor: {type: string}}}
+    AgentInstancePage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/AgentInstance"}}, next_cursor: {type: string}}}
+    TaskTransitionPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/TaskTransition"}}, next_cursor: {type: string}}}
+    SituationPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Situation"}}, next_cursor: {type: string}}}
+    PolicyPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Policy"}}, next_cursor: {type: string}}}
+    DeploymentPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Deployment"}}, next_cursor: {type: string}}}
