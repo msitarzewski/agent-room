@@ -123,7 +123,7 @@ func remoteIP(request *http.Request, trusted []*net.IPNet) string {
 	host, _, err := net.SplitHostPort(request.RemoteAddr)
 	if err == nil {
 		peer := net.ParseIP(host)
-		if request.TLS != nil && len(request.TLS.VerifiedChains) > 0 && trustedIP(peer, trusted) {
+		if trustedIP(peer, trusted) {
 			if forwarded := firstForwardedIP(request.Header.Get("X-Forwarded-For")); forwarded != "" {
 				return forwarded
 			}

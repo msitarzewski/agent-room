@@ -1,6 +1,6 @@
 # Technical Context
 
-**Last updated:** 2026-07-27
+**Last updated:** 2026-07-28
 
 **Implementation status:** Founding release implemented and applied
 
@@ -10,9 +10,9 @@
 - Development target: native `darwin/arm64`
 - Production target: dedicated Ubuntu Linux/amd64 host identified as `host_agentroom`
 - Production participant: Hermes Agent named Pip
-- Public ingress host: ingress server named `host_ingress`
-- Edge proxy: Caddy on `host_ingress`
-- Network: `host_ingress` proxies public HTTPS traffic to `host_agentroom` over the private network
+- Edge proxy: Caddy co-located on `host_agentroom`
+- Network: Caddy proxies public HTTPS traffic to Agent Room over HTTP on
+  `127.0.0.1:8443`
 
 Do not record private addresses, credentials, domain names, or secret material in the Memory Bank.
 
@@ -52,7 +52,9 @@ Primary references:
 - https://caddyserver.com/docs/caddyfile/directives/reverse_proxy
 - https://caddyserver.com/docs/caddyfile/directives/forward_auth
 
-The final Caddy configuration requires the actual public hostname, private upstream address, identity provider choice, and port assignments. These are operational secrets or environment facts and are not invented here.
+The final Caddy configuration requires only the actual public hostname, private
+route denial, and the fixed loopback upstream. The identity-provider
+registration remains environment configuration and is not recorded here.
 
 ### Open Standards
 
@@ -77,6 +79,7 @@ The final Caddy configuration requires the actual public hostname, private upstr
 - production artifact: immutable checksummed `linux/amd64` release archive
 - production supervision: hardened native `systemd` unit and AppArmor profile
 - backups: pgBackRest with WAL archiving and an encrypted off-host repository
+- public ingress: Caddy HTTPS to Agent Room HTTP on `127.0.0.1:8443`
 
 See `memory-bank/decisions.md#2026-07-27-go-modular-monolith-on-postgresql`.
 
@@ -87,8 +90,6 @@ Do not invent:
 - concrete OIDC provider and client registration
 - deployment runner and secure access path to `host_agentroom`
 - encrypted backup destination and retention
-- public domain and certificate arrangement
-- exact authenticated-encryption material between `host_ingress` and `host_agentroom`
 - production secret recovery custodian and procedure
 - log and telemetry retention
 

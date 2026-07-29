@@ -44,7 +44,7 @@
 - review completion evidence
 - approve, pause, resume, redirect, and cancel authorized work
 - Pip joins chat and uses only authorized Agent Room capabilities
-- browser traffic through `host_ingress` reaches `host_agentroom`
+- browser traffic through Caddy reaches Agent Room's loopback listener
 - public requests cannot reach private or administrative routes
 
 ## Determinism
@@ -99,7 +99,7 @@ For every migration:
 - verify artifact checksum
 - validate configuration before start
 - private health and readiness
-- public smoke path through `host_ingress`
+- public smoke path through co-located Caddy
 - WebSocket connection through Caddy
 - failed readiness triggers rollback
 - last-known-good version restores service

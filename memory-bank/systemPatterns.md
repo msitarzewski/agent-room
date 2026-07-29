@@ -133,13 +133,14 @@ Pip's chat permissions are separate from Pip's control permissions.
 Production topology:
 
 ```
-Internet → host_ingress/Caddy → private network → host_agentroom/Agent Room
-                                      └→ host_agentroom/Hermes
+Internet → host_agentroom/Caddy → HTTP 127.0.0.1:8443 → Agent Room
 ```
 
-Only `host_ingress` accepts public traffic.
+Only Caddy accepts public traffic.
 
-`host_agentroom` accepts Agent Room traffic from the trusted private network and the known ingress path. Administrative and debug surfaces remain private.
+Agent Room's application, administration, and adapter listeners bind to
+loopback. Caddy denies private adapter and MCP routes before proxying remaining
+requests. Administrative and debug surfaces remain private.
 
 The same immutable artifact is promoted from development to production with environment-specific configuration injected at runtime.
 

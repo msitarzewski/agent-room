@@ -23,11 +23,6 @@ for secret in database-url session-secret oidc-client-secret; do
   install -m 0600 /dev/null "${temporary}/${secret}"
   printf 'compose-regression-only\n' >"${temporary}/${secret}"
 done
-for certificate in tls-cert.pem tls-key.pem tls-client-ca.pem; do
-  install -m 0600 /dev/null "${temporary}/${certificate}"
-  printf 'compose-regression-placeholder\n' >"${temporary}/${certificate}"
-done
-
 export AGENTROOM_DEV_SECRETS_DIR="${temporary}"
 export AGENTROOM_IMAGE="agentroom:compose-regression-not-started"
 export AGENTROOM_DEV_POSTGRES_DB="agentroom_test"

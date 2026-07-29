@@ -30,8 +30,8 @@ test.describe("real daemon", () => {
     const unauthorized = await page.request.get("/api/v1/tasks?project_id=unauthorized");
     expect(unauthorized.status()).toBe(401);
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
-    await page.getByRole("button", { name: "Continue securely" }).click();
+    await expect(page.getByRole("heading", { name: "The work continues. The room remembers." })).toBeVisible();
+    await page.getByRole("button", { name: "Enter quietly" }).click();
     await expect(page).not.toHaveURL(/\/login$/);
     await page.locator('input[name="login"], input[name="username"], input[type="email"]').first().fill(username);
     await page.locator('input[name="password"], input[type="password"]').first().fill(password);

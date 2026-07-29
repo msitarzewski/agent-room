@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -109,16 +107,9 @@ func run() error {
 	go runArtifactGC(ctx, artifactStore, repo)
 	api := httpapi.New(service, authManager, hub, spa, artifactStore, cfg.MaxRequestBytes, cfg.MaxArtifactBytes, cfg.PublicURL, cfg.AllowedOrigins, cfg.TrustedProxyCIDRs, cfg.Dev)
 
-	publicListener, err := net.Listen("tcp", cfg.HTTPSAddr)
+	publicListener, err := net.Listen("tcp", cfg.HTTPAddr)
 	if err != nil {
 		return fmt.Errorf("listen public: %w", err)
-	}
-	if !cfg.Dev {
-		publicListener, err = tlsListener(publicListener, cfg)
-		if err != nil {
-			closeListener(publicListener)
-			return err
-		}
 	}
 	adminListener, err := net.Listen("tcp", cfg.AdminAddr)
 	if err != nil {
@@ -166,7 +157,7 @@ func run() error {
 	}
 	watchdogStop := make(chan struct{})
 	go notify.Watchdog(watchdogStop, func(err error) { slog.Warn("systemd watchdog notification failed", "error", err) })
-	slog.Info("agentroomd ready", "public_addr", cfg.HTTPSAddr, "admin_addr", cfg.AdminAddr, "adapter_addr", cfg.AdapterAddr, "dev", cfg.Dev)
+	slog.Info("agentroomd ready", "public_addr", cfg.HTTPAddr, "admin_addr", cfg.AdminAddr, "adapter_addr", cfg.AdapterAddr, "dev", cfg.Dev)
 
 	select {
 	case <-ctx.Done():
@@ -207,23 +198,6 @@ func closeListener(listener net.Listener) {
 	if err := listener.Close(); err != nil {
 		slog.Warn("listener close failed", "error", err)
 	}
-}
-
-func tlsListener(listener net.Listener, cfg config.Config) (net.Listener, error) {
-	certificate, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
-	if err != nil {
-		return nil, fmt.Errorf("load TLS certificate: %w", err)
-	}
-	caPEM, err := config.ReadRegularFile(cfg.TLSClientCAFile)
-	if err != nil {
-		return nil, fmt.Errorf("read client CA: %w", err)
-	}
-	clientCAs := x509.NewCertPool()
-	if !clientCAs.AppendCertsFromPEM(caPEM) {
-		return nil, errors.New("client CA file contains no valid certificates")
-	}
-	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{certificate}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: clientCAs, NextProtos: []string{"h2", "http/1.1"}}
-	return tls.NewListener(listener, tlsConfig), nil
 }
 
 func requireCurrentSchema(ctx context.Context, repo *postgres.Repository) error {

@@ -77,3 +77,22 @@ write_json_atomically() {
   chmod 0600 "${temporary}"
   mv -f "${temporary}" "${destination}"
 }
+
+run_agentroomctl_transient() {
+  local unit_name="$1"
+  shift
+  [[ "${unit_name}" =~ ^[A-Za-z0-9_.@-]+$ ]] ||
+    die "invalid transient unit name: ${unit_name}"
+  require_command systemd-run
+  systemd-run --quiet --wait --pipe --collect \
+    --unit="${unit_name}" \
+    --uid="${AGENTROOM_USER}" --gid="${AGENTROOM_GROUP}" \
+    --property="LoadCredentialEncrypted=database-url:${AGENTROOM_CONFIG_DIR}/credentials/database-url.cred" \
+    --property="LoadCredentialEncrypted=session-secret:${AGENTROOM_CONFIG_DIR}/credentials/session-secret.cred" \
+    --property="LoadCredentialEncrypted=oidc-client-secret:${AGENTROOM_CONFIG_DIR}/credentials/oidc-client-secret.cred" \
+    --property="Environment=AGENTROOM_DATABASE_URL_FILE=%d/database-url" \
+    --property="Environment=AGENTROOM_SESSION_SECRET_FILE=%d/session-secret" \
+    --property="Environment=AGENTROOM_OIDC_CLIENT_SECRET_FILE=%d/oidc-client-secret" \
+    "${AGENTROOM_CURRENT_LINK}/bin/agentroomctl" \
+    --config "${AGENTROOM_CONFIG_FILE}" "$@"
+}

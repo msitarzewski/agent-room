@@ -54,7 +54,7 @@ func TestCredentialDirectoryExpansion(t *testing.T) {
 	cfg, err := fromValues(map[string]string{
 		"AGENTROOM_MAX_REQUEST_BYTES": "1048576", "AGENTROOM_SHUTDOWN_TIMEOUT": "20s",
 		"AGENTROOM_DATABASE_URL_FILE": "%d/db", "AGENTROOM_SESSION_SECRET_FILE": "%d/session",
-		"AGENTROOM_HTTPS_ADDR": "127.0.0.1:8443", "AGENTROOM_ADMIN_ADDR": "127.0.0.1:9090",
+		"AGENTROOM_HTTP_ADDR": "127.0.0.1:8443", "AGENTROOM_ADMIN_ADDR": "127.0.0.1:9090",
 		"AGENTROOM_DEV": "true",
 	})
 	if err != nil {
@@ -67,7 +67,7 @@ func TestCredentialDirectoryExpansion(t *testing.T) {
 
 func validDevelopmentConfig() Config {
 	return Config{
-		HTTPSAddr: "127.0.0.1:8080", AdminAddr: "127.0.0.1:9090", AdapterAddr: "localhost:9091",
+		HTTPAddr: "127.0.0.1:8080", AdminAddr: "127.0.0.1:9090", AdapterAddr: "localhost:9091",
 		PublicURL: "http://127.0.0.1:8080", AllowedOrigins: []string{"http://127.0.0.1:8080"},
 		DatabaseURL: "postgres://test", SessionSecret: []byte(strings.Repeat("s", 32)),
 		MaxRequestBytes: 1 << 20, MaxArtifactBytes: 64 << 20, MaxConcurrentRuns: 4,
@@ -96,7 +96,7 @@ func TestConfigValidationRejectsUnsafeBoundaries(t *testing.T) {
 		"public-path":        func(c *Config) { c.PublicURL = "http://localhost:8080/path" },
 		"proxy-cidr":         func(c *Config) { c.TrustedProxyCIDRs = []string{"not-a-cidr"} },
 		"origin":             func(c *Config) { c.AllowedOrigins = []string{"http://localhost:8080/path"} },
-		"dev-public-bind":    func(c *Config) { c.HTTPSAddr = "0.0.0.0:8080" },
+		"http-public-bind":   func(c *Config) { c.HTTPAddr = "0.0.0.0:8080" },
 		"admin-public-bind":  func(c *Config) { c.AdminAddr = "0.0.0.0:9090" },
 		"adapter-public":     func(c *Config) { c.AdapterAddr = "0.0.0.0:9091" },
 	}
@@ -117,7 +117,7 @@ func TestProductionValidationRequiresExternalSecurityBoundaries(t *testing.T) {
 	valid.Dev = false
 	valid.PublicURL = "https://agentroom.test"
 	valid.AllowedOrigins = []string{"https://agentroom.test"}
-	valid.TLSCertFile, valid.TLSKeyFile, valid.TLSClientCAFile = "cert", "key", "ca"
+	valid.TrustedProxyCIDRs = []string{"127.0.0.1/32"}
 	valid.OIDCIssuer, valid.OIDCClientID, valid.OIDCClientSecret = "https://id.test", "client", "secret"
 	valid.OIDCRedirectURL = "https://agentroom.test/api/v1/auth/callback"
 	if err := valid.Validate(); err != nil {
@@ -127,9 +127,11 @@ func TestProductionValidationRequiresExternalSecurityBoundaries(t *testing.T) {
 		"public-url":      func(c *Config) { c.PublicURL = "" },
 		"plaintext-url":   func(c *Config) { c.PublicURL = "http://agentroom.test" },
 		"managed-runtime": func(c *Config) { c.CodexBin = "/usr/bin/codex" },
-		"tls":             func(c *Config) { c.TLSCertFile = "" },
+		"http-bind":       func(c *Config) { c.HTTPAddr = "0.0.0.0:8080" },
 		"oidc":            func(c *Config) { c.OIDCIssuer = "" },
 		"origins":         func(c *Config) { c.AllowedOrigins = nil },
+		"trusted-proxy":   func(c *Config) { c.TrustedProxyCIDRs = nil },
+		"remote-proxy":    func(c *Config) { c.TrustedProxyCIDRs = []string{"192.0.2.1/32"} },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -144,14 +146,14 @@ func TestProductionValidationRequiresExternalSecurityBoundaries(t *testing.T) {
 
 func TestParsingAndSecretFailures(t *testing.T) {
 	for _, args := range [][]string{
-		{"--unknown=x"}, {"--dev=true"}, {"--config"}, {"--https-addr"},
+		{"--unknown=x"}, {"--dev=true"}, {"--config"}, {"--http-addr"},
 	} {
 		if _, _, _, err := parseCLI(args); err == nil {
 			t.Fatalf("invalid CLI accepted: %v", args)
 		}
 	}
 	path, values, rest, err := parseCLI([]string{
-		"serve", "--config=agentroom.conf", "--dev", "--https-addr", "localhost:8080",
+		"serve", "--config=agentroom.conf", "--dev", "--http-addr", "localhost:8080",
 		"--admin-addr=localhost:9090", "--adapter-addr", "localhost:9091",
 		"--public-url=http://localhost:8080",
 	})
@@ -261,14 +263,14 @@ func TestLoadAppliesFileAndCLIPrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg, rest, err := Load([]string{
-		"serve", "--config", configPath, "--https-addr=localhost:8080",
+		"serve", "--config", configPath, "--http-addr=localhost:8080",
 		"--public-url", "http://localhost:8080",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.ConfigPath != configPath || cfg.PublicURL != "http://localhost:8080" ||
-		cfg.HTTPSAddr != "localhost:8080" || cfg.DatabaseURL != "postgres://agentroom-test" ||
+		cfg.HTTPAddr != "localhost:8080" || cfg.DatabaseURL != "postgres://agentroom-test" ||
 		len(cfg.SessionSecret) != 32 || len(rest) != 1 || rest[0] != "serve" {
 		t.Fatalf("cfg=%+v rest=%v", cfg, rest)
 	}

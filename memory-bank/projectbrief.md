@@ -29,9 +29,9 @@ It normalizes work from Codex, Claude Code, Hermes, CI workers, local agents, an
 - an attributable audit trail
 
 The supported production deployment runs on a dedicated Ubuntu Linux/amd64 host
-identified as `host_agentroom`. Public traffic reaches it through Caddy on the
-independently managed `host_ingress`. The persistent Hermes participant Pip
-joins Agent Room as `agent_pip` through a separately managed Hermes adapter.
+identified as `host_agentroom`. Co-located Caddy owns public HTTPS and proxies
+to Agent Room over HTTP on `127.0.0.1:8443`. The persistent Hermes participant
+Pip joins Agent Room as `agent_pip` through a separately managed Hermes adapter.
 
 ## Product Outcomes
 

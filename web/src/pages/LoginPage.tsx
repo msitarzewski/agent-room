@@ -11,29 +11,51 @@ export function LoginPage({ navigate }: { navigate: (to: string, replace?: boole
   if (session) return null;
 
   return (
-    <main className="login-layout">
-      <section className="login-story" aria-labelledby="login-story-title">
-        <div className="brand brand--large">
-          <span className="brand-mark" aria-hidden="true">AR</span>
-          <div><strong>Agent Room</strong><span>Human control plane</span></div>
+    <main className="threshold">
+      <div className="threshold-atmosphere" aria-hidden="true">
+        <span className="threshold-orbit threshold-orbit--outer" />
+        <span className="threshold-orbit threshold-orbit--middle" />
+        <span className="threshold-orbit threshold-orbit--inner" />
+        <span className="threshold-core" />
+        <span className="threshold-star threshold-star--one" />
+        <span className="threshold-star threshold-star--two" />
+        <span className="threshold-star threshold-star--three" />
+      </div>
+
+      <header className="threshold-header">
+        <div className="threshold-brand" aria-label="Agent Room">
+          <span className="threshold-sigil" aria-hidden="true">AR</span>
+          <span>Agent Room</span>
         </div>
-        <div>
-          <p className="eyebrow">One place to supervise every AI worker</p>
-          <h1 id="login-story-title">Know what matters. Inspect the evidence. Act safely.</h1>
-          <p>Agent Room turns real worker activity into a trustworthy view of work, attention, and control.</p>
-        </div>
-      </section>
-      <section className="login-panel" aria-labelledby="sign-in-title">
-        <div className="login-card">
-          <p className="eyebrow">Protected control plane</p>
-          <h2 id="sign-in-title">Sign in</h2>
-          <p>Continue through the configured identity provider. Agent Room never receives your provider password.</p>
-          <button className="button button--primary button--wide" type="button" onClick={login}>
-            Continue securely
+        <p>Room&nbsp;01&nbsp;&nbsp;/&nbsp;&nbsp;Signal quiet</p>
+      </header>
+
+      <section className="threshold-copy" aria-labelledby="threshold-title">
+        <p className="threshold-kicker">The human remains in the loop</p>
+        <h1 id="threshold-title" aria-label="The work continues. The room remembers.">
+          The work continues.
+          <span>The room remembers.</span>
+        </h1>
+        <p className="threshold-intro">
+          Signals gather here. Evidence stays attached. The right interruption
+          waits for the right human.
+        </p>
+        <div className="threshold-entry">
+          <button className="threshold-button" type="button" onClick={login}>
+            <span>Enter quietly</span>
+            <span aria-hidden="true">↗</span>
           </button>
-          <small>Authorization code flow with PKCE · session protected by secure cookies</small>
+          <small>If you are expected, the door already knows.</small>
         </div>
       </section>
+
+      <footer className="threshold-footer">
+        <span>Attention, not noise</span>
+        <span aria-hidden="true">·</span>
+        <span>Evidence, not claims</span>
+        <span aria-hidden="true">·</span>
+        <span>Control, with consequence</span>
+      </footer>
     </main>
   );
 }

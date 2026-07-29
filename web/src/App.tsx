@@ -85,7 +85,10 @@ function ProtectedRoutes({ pathname, navigate }: {
   if (error) {
     return <main className="bootstrap-state" role="alert"><span className="state-icon" aria-hidden="true">!</span><h1>Agent Room is unreachable</h1><p>{error}</p><button className="button button--primary" type="button" onClick={() => void refresh()}>Try again</button></main>;
   }
-  if (!session) return <Redirect to="/login" navigate={navigate} />;
+  if (!session) {
+    if (pathname !== "/") return <Redirect to="/" navigate={navigate} />;
+    return <LoginPage navigate={navigate} />;
+  }
   return (
     <StreamProvider>
       <AppShell pathname={pathname} navigate={navigate}>

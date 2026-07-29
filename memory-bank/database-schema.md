@@ -2,9 +2,10 @@
 
 **Status:** Domain model, not a database migration
 
-**Last updated:** 2026-07-27
+**Last updated:** 2026-07-28
 
-The storage engine is undecided. These entities and invariants should survive that decision.
+PostgreSQL 18 is the selected storage engine. These entities and invariants
+remain independent of physical schema details.
 
 ## Identity
 
@@ -26,7 +27,9 @@ Concrete installation or process for an agent. Records host, runtime, version, p
 
 ### Host
 
-Infrastructure identity distinct from participants. Initial hosts include `host_agentroom` and `host_ingress`.
+Infrastructure identity distinct from participants. The initial production
+host is `host_agentroom`; Caddy and Agent Room are separate processes on that
+host.
 
 ### Session
 
@@ -120,7 +123,6 @@ Artifact version, checksum, environment, migration set, actor, timestamps, healt
 ## Initial Identifier Examples
 
 - `host_agentroom` — dedicated Agent Room production host
-- `host_ingress` — public ingress server
 - `agent_pip` — persistent Hermes participant
 
 These examples reserve semantic clarity, not a final ID serialization format.

@@ -2,8 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"net"
@@ -96,31 +94,31 @@ func TestLimiterRejectsDisabledCapacityAndBoundsSockets(t *testing.T) {
 	}
 }
 
-func TestRemoteIPOnlyTrustsForwardingOverVerifiedMTLS(t *testing.T) {
+func TestRemoteIPOnlyTrustsForwardingFromConfiguredProxy(t *testing.T) {
 	t.Parallel()
-	_, trusted, err := net.ParseCIDR("192.0.2.0/24")
+	_, trusted, err := net.ParseCIDR("127.0.0.1/32")
 	if err != nil {
 		t.Fatal(err)
 	}
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
-	request.RemoteAddr = "192.0.2.10:443"
+	request.RemoteAddr = "198.51.100.10:443"
 	request.Header.Set("X-Forwarded-For", "203.0.113.9, 198.51.100.2")
-	if got := remoteIP(request, []*net.IPNet{trusted}); got != "192.0.2.10" {
-		t.Fatalf("unverified forwarding trusted: %q", got)
+	if got := remoteIP(request, []*net.IPNet{trusted}); got != "198.51.100.10" {
+		t.Fatalf("untrusted forwarding peer changed: %q", got)
 	}
-	request.TLS = &tls.ConnectionState{VerifiedChains: [][]*x509.Certificate{{{}}}}
+	request.RemoteAddr = "127.0.0.1:443"
 	if got := remoteIP(request, []*net.IPNet{trusted}); got != "203.0.113.9" {
-		t.Fatalf("verified forwarding ignored: %q", got)
+		t.Fatalf("trusted proxy forwarding ignored: %q", got)
 	}
 	request.Header.Set("X-Forwarded-For", "not-an-ip")
-	if got := remoteIP(request, []*net.IPNet{trusted}); got != "192.0.2.10" {
+	if got := remoteIP(request, []*net.IPNet{trusted}); got != "127.0.0.1" {
 		t.Fatalf("invalid forwarding trusted: %q", got)
 	}
 	request.RemoteAddr = "not-a-host-port"
 	if got := remoteIP(request, []*net.IPNet{trusted}); got != "not-a-host-port" {
 		t.Fatalf("unparseable peer changed: %q", got)
 	}
-	if !trustedIP(net.ParseIP("192.0.2.42"), []*net.IPNet{trusted}) ||
+	if !trustedIP(net.ParseIP("127.0.0.1"), []*net.IPNet{trusted}) ||
 		trustedIP(net.ParseIP("198.51.100.42"), []*net.IPNet{trusted}) {
 		t.Fatal("trusted-network matching is incorrect")
 	}

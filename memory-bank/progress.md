@@ -1,10 +1,11 @@
 # Progress
 
-**Last updated:** 2026-07-27
+**Last updated:** 2026-07-28
 
 ## Current Phase
 
-Founding release implemented and applied. Production onboarding is next.
+Founding release implemented. Simplified production activation is approved and
+being applied.
 
 ## Completed Foundations
 
@@ -14,7 +15,7 @@ Founding release implemented and applied. Production onboarding is next.
 - [x] Clarified command, event, projection, and telemetry boundaries
 - [x] Separated agent, instance, run, session, and host identity
 - [x] Defined Pip as a persistent Hermes participant
-- [x] Defined `host_agentroom` and `host_ingress` production topology
+- [x] Defined co-located Caddy and loopback Agent Room production topology
 - [x] Defined build-once development-to-production contract
 - [x] Reordered roadmap around validated supervisory outcomes
 
@@ -68,7 +69,7 @@ Founding release implemented and applied. Production onboarding is next.
 
 ### Milestone 7: Production on host_agentroom
 
-**Status:** Promotion mechanism verified; live deployment pending
+**Status:** Simplified promotion mechanism verified; live deployment applying
 
 ### Milestone 8: First Orchestrator
 
@@ -84,19 +85,15 @@ Founding release implemented and applied. Production onboarding is next.
 
 ## Immediate Next Work
 
-1. Configure repository protections and private vulnerability reporting.
-2. Select the real public hostname and OIDC provider/client registration.
-3. Establish secure deployment access and authenticated upstream trust between
-   `host_ingress` and the Ubuntu Intel production host.
-4. Configure Pip's least-privilege Hermes hooks, Agent Room service token, and
+1. Publish and merge the approved ingress simplification.
+2. Complete the OIDC provider/client registration and production activation.
+3. Configure Pip's least-privilege Hermes hooks, Agent Room service token, and
    MCP tools.
-5. Provision and test the encrypted off-host backup destination.
+4. Provision and test the encrypted off-host backup destination.
 
 ## Current Blockers
 
 - repository protection and private vulnerability-reporting configuration
-- public hostname and authentication provider
-- production access and secret-management path
-- authenticated `host_ingress` to production-host trust material
+- OIDC client registration and secret
 - encrypted backup destination and retention
 - Hermes production credential and live hook/MCP configuration

@@ -1,6 +1,6 @@
 # Decisions
 
-**Last updated:** 2026-07-27
+**Last updated:** 2026-07-28
 
 Only accepted decisions belong here. Open technical choices remain in `techContext.md` and `build-deployment.md`.
 
@@ -103,7 +103,7 @@ separate identities even when they are colocated.
 
 ## 2026-07-27: Production Runs on host_agentroom Behind Caddy on host_ingress
 
-**Status:** Accepted
+**Status:** Superseded on 2026-07-28
 
 **Context:** Agent Room needs a production topology with a single intentional
 public ingress and a private application host.
@@ -120,6 +120,39 @@ Caddy on the independently managed `host_ingress`.
 - private-upstream availability and edge security are early operational requirements
 
 **Reference:** `memory-bank/build-deployment.md#Topology`
+
+## 2026-07-28: Co-locate Caddy and Agent Room with a Loopback Upstream
+
+**Status:** Accepted
+
+**Context:** The production Caddy instance and Agent Room service run on the
+same Ubuntu host. A second TLS boundary, private CA, client certificates, and
+firewall policy between two processes on that host added failure modes without
+adding a meaningful network trust boundary.
+
+**Decision:** Terminate public HTTPS in Caddy and proxy to Agent Room over HTTP
+on `127.0.0.1:8443`. Require Agent Room's application, administration, and
+adapter listeners to bind to loopback. Deny private adapter and MCP routes at
+Caddy, and trust forwarded client information only from an explicitly
+configured loopback proxy.
+
+**Alternatives:**
+
+- Loopback mTLS was rejected because it duplicated Caddy's public TLS work and
+  required unnecessary certificate lifecycle management.
+- A second ingress host was rejected because the deployed topology is
+  co-located and does not need a cross-host upstream.
+
+**Consequences:**
+
+- the Caddy site block is intentionally small
+- no application TLS keys, private CA, client certificate, or host firewall
+  rule is required for port 8443
+- the service fails configuration validation if a listener or trusted proxy is
+  not loopback
+- deployment automation never edits the independently managed Caddyfile
+
+**Reference:** `memory-bank/tasks/2026-07/280726_production-ingress-simplification.md`
 
 ## 2026-07-27: Build Once and Promote
 
@@ -197,7 +230,7 @@ managed services. Keep Hermes under its own Unix identity and lifecycle.
 - releases switch through an atomic current-version pointer
 - rollback restores the previous verified Agent Room artifact without touching
   Hermes
-- Caddy reaches only the authenticated encrypted upstream
+- Caddy reaches Agent Room only through its loopback HTTP listener
 - development may use containers without making them the production runtime
 
 **Reference:** `memory-bank/build-deployment.md#Runtime-Isolation`

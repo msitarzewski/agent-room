@@ -53,7 +53,7 @@ printf '%s\n' 'agentroom-dex-local-only' >"${temporary}/oidc-client-secret"
 mkdir -p "${temporary}/artifacts" "${temporary}/workspaces"
 
 export AGENTROOM_DEV=true
-export AGENTROOM_HTTPS_ADDR=127.0.0.1:58443
+export AGENTROOM_HTTP_ADDR=127.0.0.1:58443
 export AGENTROOM_ADMIN_ADDR=127.0.0.1:59090
 export AGENTROOM_ADAPTER_ADDR=127.0.0.1:59091
 export AGENTROOM_PUBLIC_URL=http://127.0.0.1:58443

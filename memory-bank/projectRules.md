@@ -1,6 +1,6 @@
 # Project Rules
 
-**Last updated:** 2026-07-27
+**Last updated:** 2026-07-28
 
 These rules supplement `AGENTS.md` with Agent Room-specific product and architecture constraints.
 
@@ -38,7 +38,7 @@ These rules supplement `AGENTS.md` with Agent Room-specific product and architec
 
 1. Build once and promote the verified artifact.
 2. Keep development and production state isolated.
-3. Only `host_ingress` accepts public traffic.
+3. Only Caddy accepts public traffic; Agent Room listeners bind to loopback.
 4. Keep administrative and debug surfaces private.
 5. Back up before irreversible migration.
 6. Retain and test a last-known-good rollback path.

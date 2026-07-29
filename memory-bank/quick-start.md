@@ -1,6 +1,6 @@
 # Quick Start
 
-**Last updated:** 2026-07-27
+**Last updated:** 2026-07-28
 
 ## Project in One Paragraph
 
@@ -19,7 +19,7 @@ Agent Room is the human control plane for AI workers. It begins as a local-first
 
 - `host_agentroom`: dedicated Ubuntu Linux/amd64 Agent Room host
 - Pip / `agent_pip`: persistent Hermes participant connected through the Hermes adapter
-- `host_ingress`: independently managed Caddy public ingress
+- Caddy: co-located public HTTPS ingress proxying to Agent Room on loopback
 
 Do not confuse `host_agentroom` with `agent_pip`.
 
@@ -30,7 +30,8 @@ Do not confuse `host_agentroom` with `agent_pip`.
 - Hermes retains Pip's native memory, skills, conversations, and sessions.
 - Chat messages do not directly mutate state.
 - Destructive actions require human approval.
-- Only `host_ingress` is intentionally exposed to the public internet.
+- Only Caddy is intentionally exposed to the public internet.
+- Agent Room listens on HTTP `127.0.0.1:8443`; Caddy owns public TLS.
 - Development and production use separate data and credentials.
 - One verified artifact is promoted to `host_agentroom`.
 
@@ -41,6 +42,6 @@ Production onboarding and the live Hermes/Pip connector remain pending.
 
 ## Next Decision
 
-Select the concrete production hostname, OIDC provider, secure deployment
-transport, backup destination, and live Hermes/Pip credentials without placing
-environment secrets in source.
+Complete the OIDC client registration, deploy the approved release, configure
+the backup destination, and provision live Hermes/Pip credentials without
+placing environment secrets in source.

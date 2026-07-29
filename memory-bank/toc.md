@@ -1,6 +1,6 @@
 # Agent Room Memory Bank
 
-**Last updated:** 2026-07-27
+**Last updated:** 2026-07-28
 
 This index routes future sessions to the smallest useful context set. `boot.md` remains the founding product specification; the Memory Bank records working context, accepted decisions, implementation patterns, and operational procedures derived from it.
 
@@ -32,7 +32,7 @@ This index routes future sessions to the smallest useful context set. `boot.md` 
 
 ## Operations
 
-- [build-deployment.md](./build-deployment.md) — development-to-production contract for `host_agentroom` through `host_ingress`
+- [build-deployment.md](./build-deployment.md) — development-to-production contract for co-located Caddy and Agent Room
 - [decisions.md](./decisions.md) — accepted architectural and product decisions
 
 ## Update Policy
