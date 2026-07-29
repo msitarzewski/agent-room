@@ -160,7 +160,7 @@ while IFS= read -r -d '' file_path; do
     exit 1
   }
   digest="$(sha256sum "${file_path}" | awk '{print $1}')"
-  size="$(stat -c '%s' "${file_path}")"
+  size="$(wc -c <"${file_path}" | tr -d ' ')"
   jq -cn --arg path "${relative}" --arg sha256 "${digest}" --argjson size "${size}" \
     '{path:$path,sha256:$sha256,size:$size}' >>"${files_json}"
 done < <(find "${stage}" -type f ! -name manifest.json ! -name .files.jsonl -print0 | sort -z)
