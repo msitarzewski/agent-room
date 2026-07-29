@@ -191,7 +191,8 @@ tar --sort=name --mtime="@${epoch}" --owner=0 --group=0 --numeric-owner \
 )
 
 if ((development_unsigned == 0)); then
-  cosign sign-blob --yes --key "${cosign_key}" \
+  cosign sign-blob --new-bundle-format=false --use-signing-config=false \
+    --yes --key "${cosign_key}" \
     --output-signature "${artifact}.sig" "${artifact}"
   [[ -s "${artifact}.sig" ]] || { printf 'cosign did not create a signature\n' >&2; exit 1; }
 else

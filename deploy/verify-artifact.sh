@@ -48,7 +48,8 @@ artifact_base="$(basename "${artifact}")"
   }
   sha256sum --check --strict "${artifact_base}.sha256"
 )
-cosign verify-blob --key "${public_key}" --signature "${artifact}.sig" "${artifact}" >/dev/null
+cosign verify-blob --new-bundle-format=false --key "${public_key}" \
+  --signature "${artifact}.sig" "${artifact}" >/dev/null
 
 listing="$(mktemp)"
 verbose_listing="$(mktemp)"

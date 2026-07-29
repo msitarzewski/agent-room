@@ -52,8 +52,11 @@ grep -q 'SOURCE_REVISION must be the exact 40-character Git commit' deploy/packa
 grep -q 'vcs.modified' deploy/package-release.sh || failed=1
 grep -q '.agentroom-build.json' deploy/package-release.sh || failed=1
 grep -q 'gzip -n' deploy/package-release.sh || failed=1
-grep -q 'wc -c <"${file_path}"' deploy/package-release.sh || failed=1
+grep -q "wc -c <\"\${file_path}\"" deploy/package-release.sh || failed=1
 ! grep -q "stat -c '%s'" deploy/package-release.sh || failed=1
+grep -q 'cosign sign-blob --new-bundle-format=false' deploy/package-release.sh || failed=1
+grep -q -- '--use-signing-config=false' deploy/package-release.sh || failed=1
+grep -q 'cosign verify-blob --new-bundle-format=false' deploy/verify-artifact.sh || failed=1
 grep -q 'Required license material is missing' deploy/package-release.sh || failed=1
 grep -q 'THIRD_PARTY_NOTICES.md' deploy/package-release.sh || failed=1
 grep -q 'Release archive is missing third-party license texts' tests/security/reproducible-release.sh || failed=1
