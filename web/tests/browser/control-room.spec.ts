@@ -108,6 +108,62 @@ async function boot(page: Page, empty = false) {
   await expect(page.getByRole("heading", { name: "What needs you now" })).toBeVisible();
 }
 
+async function bootThreshold(page: Page) {
+  await page.route("**/api/v1/auth/session", (route) =>
+    route.fulfill({ status: 401, json: { error: "authentication required" } }));
+  await page.goto("/");
+  await expect(page.getByRole("heading", {
+    name: "The work continues. The room remembers.",
+  })).toBeVisible();
+}
+
+for (const viewport of [
+  { width: 1440, height: 900, label: "threshold desktop" },
+  { width: 768, height: 1024, label: "threshold tablet" },
+  { width: 390, height: 844, label: "threshold mobile" },
+]) {
+  test(`presents an accessible, private ${viewport.label}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await bootThreshold(page);
+    await expect(page.getByRole("button", { name: "Enter quietly" })).toBeVisible();
+    await expect(page.getByText("If you are expected, the door already knows.")).toBeVisible();
+    await expect(page.locator("body")).not.toContainText(
+      /identity provider|network membership|authorization code/i,
+    );
+    const dimensions = await page.evaluate(() => ({
+      viewport: document.documentElement.clientWidth,
+      document: document.documentElement.scrollWidth,
+    }));
+    expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport);
+    const results = await new AxeBuilder({ page })
+      .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+      .analyze();
+    expect(results.violations).toEqual([]);
+    await page.screenshot({
+      path: testInfo.outputPath(`${viewport.width}x${viewport.height}.png`),
+      fullPage: true,
+    });
+  });
+}
+
+test("threshold respects reduced motion and begins the OIDC handoff", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await bootThreshold(page);
+  const motion = await page.locator(".threshold-orbit").first().evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      durationSeconds: Number.parseFloat(style.animationDuration),
+      iterations: style.animationIterationCount,
+    };
+  });
+  expect(motion.durationSeconds).toBeLessThanOrEqual(0.00001);
+  expect(motion.iterations).toBe("1");
+  const login = page.waitForRequest((request) =>
+    new URL(request.url()).pathname === "/api/v1/auth/login");
+  await page.getByRole("button", { name: "Enter quietly" }).click();
+  expect(new URL((await login).url()).searchParams.get("return_to")).toBe("/");
+});
+
 test("supervises work across every primary view", async ({ page }) => {
   await boot(page);
   await expect(page.getByText("Review authentication evidence")).toBeVisible();

@@ -1,11 +1,11 @@
 # Agent Room deployment
 
-Agent Room is deployed independently from Hermes. The supported production
-target is a dedicated Ubuntu Linux/amd64 host, PostgreSQL stores durable state,
-and Caddy on `host_ingress` is the only public ingress. Caddy authenticates to
-Agent Room with mTLS; the application firewall also restricts port 8443 to
-`host_ingress`. These installation scripts target Ubuntu Linux/amd64 and must
-not be run on a Darwin development workstation.
+Agent Room is deployed independently from agent runtimes. The supported
+production target is an Ubuntu Linux/amd64 host, PostgreSQL stores durable
+state, and Caddy is the only public ingress. The default topology co-locates
+Caddy and Agent Room: Caddy terminates public TLS and proxies HTTP to the
+loopback-only application listener. These installation scripts must not be run
+on a Darwin development workstation.
 
 ## Supported production shape
 
@@ -14,7 +14,7 @@ not be run on a Darwin development workstation.
 - atomic `/opt/agentroom/current` symlink
 - systemd units with encrypted credentials and AppArmor confinement
 - PostgreSQL 18 with pgBackRest backups
-- Caddy TLS termination on `host_ingress`, mTLS to `host_agentroom:8443`
+- Caddy TLS termination and HTTP proxying to `127.0.0.1:8443`
 - adapter APIs on `127.0.0.1:9091`, reachable only through an approved
   private encrypted tunnel
 
@@ -65,81 +65,63 @@ codename, verifies the repository signing-key fingerprint, installs PostgreSQL
 18, pgBackRest, and the deployment-gate utilities, and installs a
 checksum-pinned Cosign package. It binds PostgreSQL to loopback and starts with
 a conservative 256 MiB shared-buffer budget and 50-connection limit. It does
-not create database, OIDC, or TLS credentials and does not start Agent Room.
+not create database or OIDC credentials and does not start Agent Room.
 
 On a prepared host where prerequisites are already managed separately, install
 only the Agent Room host files:
 
 ```sh
 sudo deploy/install-host.sh --apply
-sudoedit /etc/agentroom/agentroom.conf
 ```
 
-Replace every `.invalid` value in the example configuration. The parser accepts
-only documented `AGENTROOM_KEY=value` entries and treats unknown or duplicate
-keys as fatal. Also replace the TEST-NET value in
-`AGENTROOM_TRUSTED_PROXY_CIDRS` with the exact address or narrow CIDR used by
-`host_ingress` when it connects to `host_agentroom`. Forwarded client addresses are honored only
-when both that network check and the mTLS client-certificate check succeed.
-
-Provision systemd credentials without placing secrets in the environment or
-configuration:
+Create an OIDC client in the chosen provider with the redirect URI
+`https://<public-host>/api/v1/auth/callback`. Then configure the instance:
 
 ```sh
-sudo install -d -m 0700 /etc/agentroom/credentials
-sudo systemd-creds encrypt - /etc/agentroom/credentials/database-url.cred
-sudo systemd-creds encrypt - /etc/agentroom/credentials/session-secret.cred
-sudo systemd-creds encrypt - /etc/agentroom/credentials/oidc-client-secret.cred
-sudo systemd-creds encrypt <host_agentroom-server-key.pem> /etc/agentroom/credentials/tls-key.cred
-sudo install -m 0644 <host_agentroom-server-cert.pem> /etc/agentroom/credentials/tls-cert.pem
-sudo install -m 0644 <upstream-client-ca.pem> /etc/agentroom/credentials/tls-client-ca.pem
+sudo deploy/configure-instance.sh \
+  --public-url https://<public-host> \
+  --oidc-issuer https://<private-oidc-issuer> \
+  --oidc-client-id <client-id> \
+  --apply
 ```
 
-Each `systemd-creds encrypt - ...` command reads its secret from standard input;
-do not put secret values in shell history. The server certificate must cover
-the exact upstream DNS name configured by Caddy. The client CA should issue
-only ingress identities authorized to reach Agent Room.
+The configurator reads the OIDC client secret without echo, creates the local
+database and random database/session credentials, encrypts all application
+secrets with `systemd-creds`, writes strict nonsecret application config, and
+initializes pgBackRest. Existing encrypted credentials are preserved. For
+unattended provisioning, pass a root-only regular file with
+`--oidc-client-secret-file` and remove it after the command succeeds.
 
-Configure pgBackRest using `deploy/pgbackrest/pgbackrest.conf.example` and the
-PostgreSQL archive settings in `deploy/pgbackrest/postgresql.conf.snippet`.
-Initialize and validate the stanza before first deployment:
+The parser accepts only documented `AGENTROOM_KEY=value` entries and treats
+unknown or duplicate keys as fatal. Forwarded client addresses are honored
+only when the immediate peer matches the configured loopback proxy network.
 
-```sh
-sudo -u postgres pgbackrest --stanza=agentroom stanza-create
-sudo -u postgres pgbackrest --stanza=agentroom check
+## Configure Caddy
+
+The configurator deliberately does not edit a shared Caddyfile. Add a site
+block equivalent to the generic example, replacing only the hostname:
+
+```caddyfile
+agentroom.example.invalid {
+	@private path /api/v1/ingest /api/v1/ingest/* /api/v1/mcp /api/v1/mcp/* /api/v1/adapters /api/v1/adapters/*
+	respond @private "Not Found" 404
+
+	reverse_proxy 127.0.0.1:8443
+}
 ```
 
-## Configure `host_ingress`
-
-Copy `deploy/caddy/Caddyfile.example` into the existing Caddy configuration and
-replace the public host, upstream DNS name, CA, client certificate, and key.
-Never use `tls_insecure_skip_verify`. Validate before reload:
+The private adapter paths are denied at public ingress; approved adapters use
+the separate loopback-only port 9091 through an operator-managed encrypted
+tunnel. Validate before reload:
 
 ```sh
 sudo deploy/caddy/verify-caddy.sh /etc/caddy/Caddyfile
 sudo systemctl reload caddy
 ```
 
-Apply the nftables example only after replacing the TEST-NET address with the
-literal address of `host_ingress`. Preserve the host's existing policy and include the
-Agent Room chain from the owning ruleset. Validate from `host_agentroom`:
-
-```sh
-sudo deploy/firewall/verify-firewall.sh --ingress-ip <ingress-ip>
-```
-
-Verify both positive and negative mTLS paths from `host_ingress`:
-
-```sh
-deploy/caddy/verify-upstream-mtls.sh \
-  --url https://<host_agentroom-upstream-name>:8443/healthz \
-  --ca <upstream-ca.pem> \
-  --client-cert <host_ingress-client.pem> \
-  --client-key <host_ingress-client-key.pem>
-```
-
-Providing an independently issued certificate through `--untrusted-cert` and
-`--untrusted-key` also verifies rejection of the wrong client identity.
+No Agent Room firewall rule or upstream certificate is needed. The kernel
+cannot route a loopback listener from another machine, and `doctor.sh` verifies
+the actual listener address.
 
 ## Deploy and roll back
 
@@ -169,8 +151,7 @@ sudo deploy/rollback.sh --public-url https://<public-host>
 sudo deploy/rollback.sh --version <installed-version> --public-url https://<public-host>
 ```
 
-Run `sudo deploy/doctor.sh --public-url https://<public-host>` after host or
-certificate changes.
+Run `sudo deploy/doctor.sh` after host or application changes.
 
 ## Restore drills
 

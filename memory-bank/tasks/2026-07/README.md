@@ -2,6 +2,16 @@
 
 ## In Progress
 
+### 2026-07-28: Production Ingress Simplification
+
+- [APPROVED/APPLYING] Simplified production ingress to Caddy public HTTPS
+  proxying to Agent Room over HTTP on `127.0.0.1:8443`.
+- Removed redundant loopback mTLS, certificate lifecycle, and firewall
+  artifacts while preserving loopback enforcement, private-route denial,
+  encrypted credentials, OIDC, systemd hardening, and PostgreSQL 18.
+- Full backend, frontend, browser, OIDC, security, deployment, Caddy, and
+  Linux/amd64 gates pass.
+
 ### 2026-07-28: Initial Hosted CI Repair
 
 - [APPROVED/APPLYING] Repaired the initial public workflow's Playwright

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
 import { vi } from "vitest";
@@ -89,11 +89,29 @@ async function renderPath(path: string, options: FetchOptions = {}) {
 
 describe("Agent Room application", () => {
   it("offers only the production OIDC sign-in flow and is accessible", async () => {
-    const { container } = await renderPath("/login", { authenticated: false });
-    expect(screen.getByRole("heading", { name: "Sign in" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Continue securely" })).toBeInTheDocument();
+    const { container } = await renderPath("/", { authenticated: false });
+    expect(screen.getByRole("heading", { name: "The work continues. The room remembers." })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Enter quietly" })).toBeInTheDocument();
+    expect(screen.getByText("If you are expected, the door already knows.")).toBeInTheDocument();
     expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument();
     expect((await axe(container)).violations).toEqual([]);
+  });
+
+  it("preserves the legacy login route without disclosing the identity provider", async () => {
+    await renderPath("/login", { authenticated: false });
+    expect(screen.getByRole("heading", {
+      name: "The work continues. The room remembers.",
+    })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/login");
+    expect(document.body).not.toHaveTextContent(/identity provider|network membership|authorization code/i);
+  });
+
+  it("returns unauthenticated protected routes to the public threshold", async () => {
+    await renderPath("/tasks", { authenticated: false });
+    expect(await screen.findByRole("heading", {
+      name: "The work continues. The room remembers.",
+    })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/");
   });
 
   it("keeps a first login without project membership usable", async () => {
@@ -283,13 +301,26 @@ describe("Agent Room application", () => {
     await screen.findByRole("heading", { name: "What needs you now" });
     const socket = sockets().at(-1);
     expect(socket).toBeDefined();
-    socket?.emitOpen();
+    act(() => socket?.emitOpen());
     await screen.findByText("connected");
-    socket?.emitMessage({ cursor: 42, type: "task.updated", occurred_at: "2026-07-27T12:01:00Z", data: {} });
+    act(() => socket?.emitMessage({
+      cursor: 42,
+      type: "task.updated",
+      occurred_at: "2026-07-27T12:01:00Z",
+      data: {},
+    }));
     await screen.findByText(/updated/);
-    socket?.emitMessage({ cursor: 43, type: "heartbeat", occurred_at: "2026-07-27T12:01:01Z" });
-    socket?.emitMessage({ cursor: 44, type: "resync_required", occurred_at: "2026-07-27T12:01:02Z" });
-    socket?.emitClose();
+    act(() => socket?.emitMessage({
+      cursor: 43,
+      type: "heartbeat",
+      occurred_at: "2026-07-27T12:01:01Z",
+    }));
+    act(() => socket?.emitMessage({
+      cursor: 44,
+      type: "resync_required",
+      occurred_at: "2026-07-27T12:01:02Z",
+    }));
+    act(() => socket?.emitClose());
     await screen.findByText("reconnecting");
   });
 
@@ -299,7 +330,7 @@ describe("Agent Room application", () => {
     await screen.findByRole("heading", { name: "What needs you now" });
     const socket = sockets().at(-1);
     await user.click(screen.getByRole("button", { name: "Sign out" }));
-    await screen.findByRole("heading", { name: "Sign in" });
+    await screen.findByRole("heading", { name: "The work continues. The room remembers." });
     expect(socket?.readyState).toBe(WebSocket.CLOSED);
   });
 

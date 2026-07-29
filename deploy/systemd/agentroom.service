@@ -4,7 +4,7 @@ Documentation=https://github.com/msitarzewski/agent-room
 After=network-online.target postgresql.service
 Wants=network-online.target
 Requires=postgresql.service
-ConditionPathIsExecutable=/opt/agentroom/current/bin/agentroomd
+ConditionFileIsExecutable=/opt/agentroom/current/bin/agentroomd
 ConditionPathIsReadWrite=/var/lib/agentroom
 
 [Service]
@@ -25,15 +25,9 @@ UMask=0077
 LoadCredentialEncrypted=database-url:/etc/agentroom/credentials/database-url.cred
 LoadCredentialEncrypted=session-secret:/etc/agentroom/credentials/session-secret.cred
 LoadCredentialEncrypted=oidc-client-secret:/etc/agentroom/credentials/oidc-client-secret.cred
-LoadCredential=tls-cert:/etc/agentroom/credentials/tls-cert.pem
-LoadCredentialEncrypted=tls-key:/etc/agentroom/credentials/tls-key.cred
-LoadCredential=tls-client-ca:/etc/agentroom/credentials/tls-client-ca.pem
 Environment=AGENTROOM_DATABASE_URL_FILE=%d/database-url
 Environment=AGENTROOM_SESSION_SECRET_FILE=%d/session-secret
 Environment=AGENTROOM_OIDC_CLIENT_SECRET_FILE=%d/oidc-client-secret
-Environment=AGENTROOM_TLS_CERT_FILE=%d/tls-cert
-Environment=AGENTROOM_TLS_KEY_FILE=%d/tls-key
-Environment=AGENTROOM_TLS_CLIENT_CA_FILE=%d/tls-client-ca
 
 StateDirectory=agentroom
 StateDirectoryMode=0700

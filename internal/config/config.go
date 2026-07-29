@@ -17,7 +17,7 @@ import (
 )
 
 type Config struct {
-	HTTPSAddr         string
+	HTTPAddr          string
 	AdminAddr         string
 	AdapterAddr       string
 	PublicURL         string
@@ -40,15 +40,12 @@ type Config struct {
 	DatabaseURL       string
 	SessionSecret     []byte
 	OIDCClientSecret  string
-	TLSCertFile       string
-	TLSKeyFile        string
-	TLSClientCAFile   string
 	Dev               bool
 	ConfigPath        string
 }
 
 var known = map[string]struct{}{
-	"AGENTROOM_HTTPS_ADDR": {}, "AGENTROOM_ADMIN_ADDR": {}, "AGENTROOM_PUBLIC_URL": {},
+	"AGENTROOM_HTTP_ADDR": {}, "AGENTROOM_ADMIN_ADDR": {}, "AGENTROOM_PUBLIC_URL": {},
 	"AGENTROOM_ADAPTER_ADDR":        {},
 	"AGENTROOM_TRUSTED_PROXY_CIDRS": {},
 	"AGENTROOM_ALLOWED_ORIGINS":     {}, "AGENTROOM_OIDC_ISSUER": {}, "AGENTROOM_OIDC_CLIENT_ID": {},
@@ -60,13 +57,12 @@ var known = map[string]struct{}{
 	"AGENTROOM_MAX_ARTIFACT_BYTES": {},
 	"AGENTROOM_SHUTDOWN_TIMEOUT":   {}, "AGENTROOM_DATABASE_URL_FILE": {},
 	"AGENTROOM_SESSION_SECRET_FILE": {}, "AGENTROOM_OIDC_CLIENT_SECRET_FILE": {},
-	"AGENTROOM_TLS_CERT_FILE": {}, "AGENTROOM_TLS_KEY_FILE": {}, "AGENTROOM_TLS_CLIENT_CA_FILE": {},
 	"AGENTROOM_DEV": {},
 }
 
 func Load(args []string) (Config, []string, error) {
 	values := map[string]string{
-		"AGENTROOM_HTTPS_ADDR": ":8443", "AGENTROOM_ADMIN_ADDR": "127.0.0.1:9090",
+		"AGENTROOM_HTTP_ADDR": "127.0.0.1:8443", "AGENTROOM_ADMIN_ADDR": "127.0.0.1:9090",
 		"AGENTROOM_ADAPTER_ADDR": "127.0.0.1:9091",
 		"AGENTROOM_ARTIFACT_DIR": "/var/lib/agentroom/artifacts", "AGENTROOM_LOG_LEVEL": "info",
 		"AGENTROOM_WEB_DIR":             "/opt/agentroom/current/web",
@@ -128,8 +124,8 @@ func parseCLI(args []string) (string, map[string]string, []string, error) {
 		switch name {
 		case "config":
 			configPath = value
-		case "https-addr":
-			values["AGENTROOM_HTTPS_ADDR"] = value
+		case "http-addr":
+			values["AGENTROOM_HTTP_ADDR"] = value
 		case "admin-addr":
 			values["AGENTROOM_ADMIN_ADDR"] = value
 		case "adapter-addr":
@@ -253,15 +249,14 @@ func fromValues(v map[string]string) (Config, error) {
 		return Config{}, err
 	}
 	return Config{
-		HTTPSAddr: v["AGENTROOM_HTTPS_ADDR"], AdminAddr: v["AGENTROOM_ADMIN_ADDR"], AdapterAddr: v["AGENTROOM_ADAPTER_ADDR"], PublicURL: v["AGENTROOM_PUBLIC_URL"],
+		HTTPAddr: v["AGENTROOM_HTTP_ADDR"], AdminAddr: v["AGENTROOM_ADMIN_ADDR"], AdapterAddr: v["AGENTROOM_ADAPTER_ADDR"], PublicURL: v["AGENTROOM_PUBLIC_URL"],
 		AllowedOrigins: splitCSV(v["AGENTROOM_ALLOWED_ORIGINS"]), TrustedProxyCIDRs: splitCSV(v["AGENTROOM_TRUSTED_PROXY_CIDRS"]), OIDCIssuer: v["AGENTROOM_OIDC_ISSUER"],
 		OIDCClientID: v["AGENTROOM_OIDC_CLIENT_ID"], OIDCRedirectURL: v["AGENTROOM_OIDC_REDIRECT_URL"],
 		ArtifactDir: v["AGENTROOM_ARTIFACT_DIR"], WebDir: v["AGENTROOM_WEB_DIR"], WorkspaceRoot: v["AGENTROOM_WORKSPACE_ROOT"],
 		CodexBin: v["AGENTROOM_CODEX_BIN"], ClaudeBin: v["AGENTROOM_CLAUDE_BIN"], MaxConcurrentRuns: maxConcurrentRuns,
 		LogLevel: v["AGENTROOM_LOG_LEVEL"], OTLPEndpoint: v["AGENTROOM_OTEL_EXPORTER_OTLP_ENDPOINT"],
 		MaxRequestBytes: maxBytes, MaxArtifactBytes: maxArtifactBytes, ShutdownTimeout: shutdown, DatabaseURL: string(databaseURL), SessionSecret: sessionSecret,
-		OIDCClientSecret: string(oidcSecret), TLSCertFile: v["AGENTROOM_TLS_CERT_FILE"], TLSKeyFile: v["AGENTROOM_TLS_KEY_FILE"],
-		TLSClientCAFile: v["AGENTROOM_TLS_CLIENT_CA_FILE"], Dev: dev,
+		OIDCClientSecret: string(oidcSecret), Dev: dev,
 	}, nil
 }
 
@@ -323,8 +318,12 @@ func (c Config) Validate() error {
 		return errors.New("production requires a public URL")
 	}
 	for _, cidr := range c.TrustedProxyCIDRs {
-		if _, _, err := net.ParseCIDR(cidr); err != nil {
+		ip, _, err := net.ParseCIDR(cidr)
+		if err != nil {
 			return fmt.Errorf("invalid trusted proxy CIDR %q", cidr)
+		}
+		if !ip.IsLoopback() {
+			return fmt.Errorf("trusted proxy CIDR %q is not loopback", cidr)
 		}
 	}
 	for _, origin := range c.AllowedOrigins {
@@ -334,23 +333,22 @@ func (c Config) Validate() error {
 			return fmt.Errorf("invalid allowed origin %q", origin)
 		}
 	}
-	if c.Dev {
-		host, _, err := net.SplitHostPort(c.HTTPSAddr)
-		if err != nil || (host != "127.0.0.1" && host != "localhost" && host != "[::1]" && host != "::1") {
-			return errors.New("dev plaintext listener must bind to loopback")
-		}
-	} else {
+	httpHost, _, err := net.SplitHostPort(c.HTTPAddr)
+	if err != nil || (httpHost != "127.0.0.1" && httpHost != "localhost" && httpHost != "[::1]" && httpHost != "::1") {
+		return errors.New("HTTP listener must bind to loopback")
+	}
+	if !c.Dev {
 		if c.CodexBin != "" || c.ClaudeBin != "" {
 			return errors.New("production refuses in-process managed runtimes; use an isolated worker service")
-		}
-		if c.TLSCertFile == "" || c.TLSKeyFile == "" || c.TLSClientCAFile == "" {
-			return errors.New("production requires TLS certificate, key, and client CA files")
 		}
 		if c.OIDCIssuer == "" || c.OIDCClientID == "" || c.OIDCClientSecret == "" || c.OIDCRedirectURL == "" {
 			return errors.New("production requires complete OIDC configuration")
 		}
 		if len(c.AllowedOrigins) == 0 {
 			return errors.New("production requires an explicit allowed origin list")
+		}
+		if len(c.TrustedProxyCIDRs) == 0 {
+			return errors.New("production requires an explicit loopback trusted proxy")
 		}
 	}
 	adminHost, _, err := net.SplitHostPort(c.AdminAddr)

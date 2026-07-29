@@ -10,13 +10,11 @@
 
 ## Current Task
 
-The Apache-2.0 release is published to the public GitHub repository
-`msitarzewski/agent-room`. The initial hosted workflow exposed three CI-only
-environment mismatches: Playwright container home ownership, a Dex raw-user-ID
-versus issued-subject fixture mismatch, and Semgrep's missing isolated
-`setuptools` dependency. The focused repair is implemented and has passed its
-targeted Linux container, real-daemon OIDC, local regression, security,
-license, completeness, and secret-scanning gates.
+The approved production-ingress simplification is being published and deployed.
+Caddy owns public HTTPS and proxies to Agent Room over HTTP on
+`127.0.0.1:8443`. Application, administration, and adapter listeners are
+loopback-only. The application no longer manages an upstream private CA, TLS
+certificates, client certificates, or a firewall rule for port 8443.
 
 ## Open-Source Release
 
@@ -28,7 +26,7 @@ license, completeness, and secret-scanning gates.
 - OpenAPI license metadata changed from proprietary to Apache-2.0
 - private workstation paths, personal infrastructure names, and personal test
   fixtures removed
-- public deployment examples use `host_agentroom` and `host_ingress`; the
+- public deployment examples use generic hostnames and loopback addresses; the
   Hermes participant remains Pip / `agent_pip`
 - source secret, static analysis, unit, browser, release reproducibility,
   completeness, and deployment gates pass
@@ -48,7 +46,7 @@ See
 - create the Memory Bank from that specification
 - plan for a development-to-production mechanism
 - target a dedicated Ubuntu Linux/amd64 `host_agentroom` for production
-- treat `host_ingress` as the Caddy public ingress host
+- use co-located Caddy as the only public listener
 - represent the Hermes agent Pip as a participant in Agent Room chat
 - develop and debug natively on `darwin/arm64`
 - deploy the exact promoted artifact to Ubuntu Linux on dedicated Intel hardware
@@ -66,10 +64,13 @@ See
 - Development and debugging target native Apple Silicon; the promoted
   production artifact targets Ubuntu Linux `amd64`.
 - Production uses a hardened native `systemd` service, PostgreSQL/pgBackRest,
-  and the existing Caddy edge on `host_ingress`.
+  and co-located Caddy proxying to loopback HTTP.
 - Backend, frontend, and security/deployment work are assigned to separate
   agents with non-overlapping ownership.
 - The complete candidate now exists in the isolated sandbox.
+- The simplified ingress candidate was explicitly approved on 2026-07-28.
+- Caddy 2.11.4 validates the generic six-line configuration and the live
+  independently managed site block.
 - Native Apple Silicon, PostgreSQL 18 integration, real OIDC browser,
   Linux/amd64 emulation, three-engine browser, security scanner, HTTPS
   boundary, active ZAP, adapter turn, deployment, backup/restore, and
@@ -111,10 +112,7 @@ See
 
 ## Pending Decisions
 
-- authentication provider
-- public hostname and private upstream details
-- deployment runner, secure transport, and secret store
-- production access to `host_agentroom` and `host_ingress`
+- OIDC client registration and secret
 - encrypted off-host backup destination and retention
 - Hermes API credential for live acceptance
 

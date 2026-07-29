@@ -18,13 +18,6 @@ case "${action}" in
       die "migration unit failed"
     ;;
   status|verify)
-    systemd-run --quiet --wait --pipe --collect \
-      --unit="agentroom-migration-check-$$" \
-      --uid="${AGENTROOM_USER}" --gid="${AGENTROOM_GROUP}" \
-      --property="Environment=AGENTROOM_CONFIG_FILE=${AGENTROOM_CONFIG_FILE}" \
-      --property="LoadCredentialEncrypted=database-url:${AGENTROOM_CONFIG_DIR}/credentials/database-url.cred" \
-      --property="Environment=AGENTROOM_DATABASE_URL_FILE=%d/database-url" \
-      "${AGENTROOM_CURRENT_LINK}/bin/agentroomctl" \
-      --config "${AGENTROOM_CONFIG_FILE}" migrate "${action}"
+    run_agentroomctl_transient "agentroom-migration-check-$$" migrate "${action}"
     ;;
 esac

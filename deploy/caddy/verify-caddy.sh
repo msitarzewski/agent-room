@@ -6,18 +6,24 @@ IFS=$'\n\t'
 config="${1:-/etc/caddy/Caddyfile}"
 command -v caddy >/dev/null 2>&1 || { printf 'caddy is required\n' >&2; exit 1; }
 [[ -f "${config}" ]] || { printf 'Caddy config not found: %s\n' "${config}" >&2; exit 1; }
-grep -q 'tls_client_auth' "${config}" || { printf 'mTLS client authentication is absent\n' >&2; exit 1; }
-grep -q 'tls_trust_pool' "${config}" || { printf 'private upstream trust pool is absent\n' >&2; exit 1; }
-! grep -q 'tls_insecure_skip_verify' "${config}" || {
-  printf 'tls_insecure_skip_verify is forbidden\n' >&2
+grep -Eq 'reverse_proxy[[:space:]]+(http://)?127\.0\.0\.1:8443([[:space:]]|$)' "${config}" || {
+  printf 'loopback HTTP upstream is absent\n' >&2
   exit 1
 }
-grep -q 'handle @allowed' "${config}" || { printf 'public route allowlist is absent\n' >&2; exit 1; }
-grep -q 'handle @private_adapters' "${config}" || { printf 'private adapter denial is absent\n' >&2; exit 1; }
-grep -q '/api/v1/ingest /api/v1/mcp' "${config}" || {
-  printf 'ingest and MCP are not explicitly denied at public ingress\n' >&2
+if grep -Eq 'reverse_proxy[[:space:]]+https://127\.0\.0\.1:8443' "${config}"; then
+  printf 'obsolete upstream TLS configuration is present\n' >&2
   exit 1
-}
-grep -q 'respond "Not Found" 404' "${config}" || { printf 'default-deny route is absent\n' >&2; exit 1; }
-caddy fmt --diff "${config}"
+fi
+grep -Eq '@private.*path|@private[[:space:]]+path' "${config}" ||
+  { printf 'private route matcher is absent\n' >&2; exit 1; }
+for private_path in /api/v1/ingest /api/v1/mcp /api/v1/adapters; do
+  grep -q "${private_path}" "${config}" ||
+    { printf 'private route denial is missing %s\n' "${private_path}" >&2; exit 1; }
+done
+grep -Eq 'respond[[:space:]]+@private([[:space:]]+"Not Found")?[[:space:]]+404|handle[[:space:]]+@private' "${config}" ||
+  { printf 'private route denial is absent\n' >&2; exit 1; }
+if ! caddy fmt --diff "${config}" >/dev/null; then
+  printf 'Caddyfile is not formatted; run: caddy fmt --overwrite %s\n' "${config}" >&2
+  exit 1
+fi
 caddy validate --config "${config}" --adapter caddyfile

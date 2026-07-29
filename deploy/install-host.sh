@@ -29,8 +29,8 @@ and AppArmor profiles.
 
 --bootstrap additionally installs verified Ubuntu/amd64 production
 prerequisites, PostgreSQL 18, pgBackRest, and Cosign before preparing the host.
-It does not create application database credentials, OIDC credentials, TLS
-credentials, or start Agent Room.
+It does not create application database credentials, OIDC credentials, or
+start Agent Room.
 EOF
 }
 

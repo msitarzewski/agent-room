@@ -34,8 +34,10 @@ require_source_pattern "MCP requests rebind authorization without stateful privi
   'StreamableHTTPOptions\{Stateless: true' internal/httpapi/mcp.go
 require_source_pattern "approval consumption shares the destructive action transaction" \
   'consumeApprovalTx\(ctx, tx, cmd\)' internal/postgres/repository.go
-require_source_pattern "forwarded addresses require a verified mTLS peer" \
-  'request\.TLS != nil.*VerifiedChains' internal/httpapi/ratelimit.go
+require_source_pattern "forwarded addresses require a configured proxy peer" \
+  'trustedIP\(peer, trusted\)' internal/httpapi/ratelimit.go
+require_source_pattern "public HTTP is restricted to loopback" \
+  'HTTP listener must bind to loopback' internal/config/config.go
 require_source_pattern "rate-limit buckets are bounded and expire" \
   'len\(l\.buckets\) >= l\.maxKeys' internal/httpapi/ratelimit.go
 require_source_pattern "rate-limit LRU eviction removes stored keys" \
@@ -45,7 +47,7 @@ require_source_pattern "managed child runtimes require explicit development mode
 require_source_pattern "production refuses configured in-process managed runtimes" \
   'managed runtimes are disabled outside development mode' cmd/agentroomd/main.go
 require_source_pattern "public ingress explicitly denies adapter paths" \
-  'handle @private_adapters' deploy/caddy/Caddyfile.example
+  'respond @private "Not Found" 404' deploy/caddy/Caddyfile.example
 
 ((failed == 0)) || exit 1
 printf 'Source authorization boundary contract passed\n'

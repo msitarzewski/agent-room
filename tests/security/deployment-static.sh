@@ -27,13 +27,24 @@ for required in \
   }
 done
 grep -q '^CapabilityBoundingSet=$' deploy/systemd/agentroom.service || failed=1
-grep -q 'tls_client_auth' deploy/caddy/Caddyfile.example || failed=1
-grep -q 'handle @private_adapters' deploy/caddy/Caddyfile.example || failed=1
-grep -q '/api/v1/ingest /api/v1/mcp' deploy/caddy/Caddyfile.example || failed=1
-grep -q 'respond "Not Found" 404' deploy/caddy/Caddyfile.example || failed=1
+grep -q '^ConditionFileIsExecutable=' deploy/systemd/agentroom.service || failed=1
+! grep -q '^ConditionPathIsExecutable=' deploy/systemd/agentroom.service || failed=1
+grep -q '@private path' deploy/caddy/Caddyfile.example || failed=1
+grep -q '/api/v1/ingest.* /api/v1/mcp.* /api/v1/adapters' deploy/caddy/Caddyfile.example || failed=1
+grep -q 'respond @private "Not Found" 404' deploy/caddy/Caddyfile.example || failed=1
+grep -q 'reverse_proxy 127\.0\.0\.1:8443' deploy/caddy/Caddyfile.example || failed=1
+if rg -n 'tls_client_auth|tls_trust_pool|AGENTROOM_TLS_|reverse_proxy https://127\.0\.0\.1:8443' \
+  deploy/caddy/Caddyfile.example deploy/config deploy/systemd deploy/compose deploy/configure-instance.sh; then
+  failed=1
+fi
+grep -q '^AGENTROOM_HTTP_ADDR=127\.0\.0\.1:8443$' deploy/config/agentroom.conf.example || failed=1
 grep -q '^AGENTROOM_ADAPTER_ADDR=127\.0\.0\.1:9091$' deploy/config/agentroom.conf.example || failed=1
+grep -q '^AGENTROOM_TRUSTED_PROXY_CIDRS=127\.0\.0\.1/32$' deploy/config/agentroom.conf.example || failed=1
 grep -q '^AGENTROOM_WEB_DIR=/opt/agentroom/current/web$' deploy/config/agentroom.conf.example || failed=1
 grep -q '^ReadOnlyPaths=.* /opt/agentroom/current/web$' deploy/systemd/agentroom.service || failed=1
+grep -q '^LoadCredentialEncrypted=oidc-client-secret:' deploy/systemd/agentroom-migrate.service || failed=1
+grep -q 'run_agentroomctl_transient "agentroom-migration-check-\$\$"' deploy/migrate.sh || failed=1
+grep -q 'run_agentroomctl_transient "agentroom-doctor-\$\$"' deploy/doctor.sh || failed=1
 grep -q '^AGENTROOM_OIDC_REDIRECT_URL=https://agentroom\.example\.invalid/api/v1/auth/callback$' deploy/config/agentroom.conf.example || failed=1
 grep -q 'AGENTROOM_OIDC_REDIRECT_URL: http://127\.0\.0\.1:.*\/api/v1/auth/callback' deploy/compose/compose.yaml || failed=1
 grep -q 'SOURCE_DATE_EPOCH is required for production release packaging' deploy/package-release.sh || failed=1
@@ -98,11 +109,24 @@ grep -q "dpkg --print-architecture.*amd64" deploy/install-host.sh || failed=1
 grep -q "shared_buffers = '256MB'" deploy/install-host.sh || failed=1
 grep -q '^max_connections = 50$' deploy/install-host.sh || failed=1
 grep -q 'sha256sum --check --strict' deploy/install-host.sh || failed=1
+grep -q 'HTTP listener is loopback-only' deploy/doctor.sh || failed=1
+! grep -q 'require_command nft' deploy/doctor.sh || failed=1
+grep -q 'AGENTROOM_HTTP_ADDR=127.0.0.1:8443' deploy/configure-instance.sh || failed=1
+grep -q 'systemd-creds encrypt --name=' deploy/configure-instance.sh || failed=1
+! grep -q 'PKI\\|tls-key\\|Caddyfile.site' deploy/configure-instance.sh || failed=1
+grep -q 'pgbackrest --stanza=agentroom check' deploy/configure-instance.sh || failed=1
 
 install_help="$(deploy/install-host.sh --help 2>&1)" || failed=1
 grep -q 'install-host.sh --bootstrap --apply' <<<"${install_help}" || failed=1
 if deploy/install-host.sh --not-a-real-option >/dev/null 2>&1; then
   printf 'install-host.sh accepted an unknown option\n' >&2
+  failed=1
+fi
+
+configure_help="$(deploy/configure-instance.sh --help 2>&1)" || failed=1
+grep -q 'configure-instance.sh' <<<"${configure_help}" || failed=1
+if deploy/configure-instance.sh --not-a-real-option >/dev/null 2>&1; then
+  printf 'configure-instance.sh accepted an unknown option\n' >&2
   failed=1
 fi
 
@@ -113,7 +137,7 @@ while IFS= read -r action_use; do
   fi
 done < <(rg '^[[:space:]]*uses:' .github/workflows)
 
-for script in deploy/*.sh deploy/caddy/*.sh deploy/firewall/*.sh tests/security/*.sh; do
+for script in deploy/*.sh deploy/caddy/*.sh tests/security/*.sh; do
   bash -n "${script}"
 done
 

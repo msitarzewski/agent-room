@@ -165,7 +165,7 @@ Export the native development configuration:
 
 ```sh
 export AGENTROOM_DEV=true
-export AGENTROOM_HTTPS_ADDR=127.0.0.1:58443
+export AGENTROOM_HTTP_ADDR=127.0.0.1:58443
 export AGENTROOM_ADMIN_ADDR=127.0.0.1:59090
 export AGENTROOM_ADAPTER_ADDR=127.0.0.1:59091
 export AGENTROOM_PUBLIC_URL=http://127.0.0.1:58443
@@ -228,9 +228,10 @@ The builder reruns the locked frontend and backend gates, cross-builds
 `agentroomd` and `agentroomctl` for Linux/amd64, embeds Git provenance, creates
 an SPDX SBOM and exact file manifest, and emits a signed archive plus checksum.
 
-Host preparation, Caddy mTLS, PostgreSQL/pgBackRest, firewall verification,
-promotion, smoke testing, backup records, and isolated restore drills are
-defined in [deploy/README.md](deploy/README.md). The production transition is:
+Host preparation, co-located Caddy TLS termination, loopback HTTP proxying,
+PostgreSQL/pgBackRest, promotion, smoke testing, backup records, and isolated
+restore drills are defined in
+[deploy/README.md](deploy/README.md). The production transition is:
 
 ```sh
 sudo deploy/deploy.sh \

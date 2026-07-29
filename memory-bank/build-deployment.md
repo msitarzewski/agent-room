@@ -1,8 +1,8 @@
 # Build and Deployment
 
-**Status:** Approved deployment architecture; implementation in progress
+**Status:** Approved deployment architecture; production activation in progress
 
-**Last updated:** 2026-07-27
+**Last updated:** 2026-07-28
 
 ## Topology
 
@@ -10,17 +10,17 @@
 Public Internet
       │
       ▼
-host_ingress
-Caddy: TLS termination, edge authentication/policy, route allowlist
-      │
-      ▼ authenticated private network
 host_agentroom
+Caddy: public TLS termination and private-route denial
+      │
+      ▼ HTTP on 127.0.0.1:8443
 Agent Room service + persistent Agent Room data
-Hermes service + independent Hermes data
-agent_pip participates through the Hermes adapter
 ```
 
-Only `host_ingress` is a public ingress host. `host_agentroom` is not intentionally exposed directly to the internet.
+Caddy is the only intentional public listener. Agent Room binds its public
+application listener to loopback and is not directly reachable from another
+host. Pip remains an independently managed Hermes participant connected
+through the Hermes adapter.
 
 ## Environment Model
 
@@ -41,8 +41,8 @@ Only `host_ingress` is a public ingress host. `host_agentroom` is not intentiona
 - production-only configuration and secrets
 - dedicated persistent data and backup path
 - hardened native `systemd` lifecycle and enforced AppArmor policy
-- traffic accepted only through intended private interfaces
-- public requests enter through Caddy on `host_ingress`
+- application HTTP accepted only on `127.0.0.1:8443`
+- public requests enter through co-located Caddy
 
 Development and production must never share a writable database.
 
@@ -78,7 +78,7 @@ Do not build a different artifact on `host_agentroom`.
 9. Apply forward-compatible migrations.
 10. Start the new version.
 11. Pass private readiness and health checks.
-12. Pass smoke checks through Caddy on `host_ingress`.
+12. Pass smoke checks through co-located Caddy.
 13. Mark the deployment successful.
 14. Retain the last-known-good artifact and rollback metadata.
 
@@ -106,20 +106,19 @@ Rollback:
 
 Rollback must not roll back, recreate, or overwrite Hermes data.
 
-## Caddy Boundary on `host_ingress`
+## Caddy Boundary
 
-The eventual Caddy configuration should:
+The production Caddy configuration:
 
 - terminate public HTTPS
-- proxy only allowlisted Agent Room routes
+- deny private adapter and MCP routes
+- proxy remaining requests to `127.0.0.1:8443` over HTTP
 - support WebSocket upgrades
-- enforce authentication before protected routes if auth is delegated to the edge
-- set request-body and header limits
-- set appropriate dial, response-header, idle, and write timeouts
-- use active health checks against a minimal readiness path
-- emit structured access logs with sensitive values redacted
-- trust forwarded identity or client information only from configured trusted proxies
-- avoid `tls_insecure_skip_verify`
+- leave application authentication to Agent Room's OIDC relying party
+- rely on Caddy's automatic certificate management and proxy headers
+
+The application accepts forwarded client information only when the immediate
+peer matches the explicit loopback trusted-proxy CIDR.
 
 Keep private:
 
@@ -130,7 +129,9 @@ Keep private:
 - detailed health diagnostics
 - internal adapter callbacks unless explicitly authenticated
 
-The public hostname, internal address, ports, and identity-provider details remain environment configuration.
+The public hostname and identity-provider details remain environment
+configuration. The repository contains only a generic six-line Caddy example;
+deployment automation never edits the host's Caddyfile.
 
 ## Authentication and Authorization
 
@@ -185,7 +186,7 @@ Restore is not considered implemented until tested on isolated data.
 - backup mechanism: pgBackRest with WAL archiving and verified isolated restore
 - nonsecret configuration: `/etc/agentroom/agentroom.conf`
 - secrets: systemd credential files referenced through `AGENTROOM_*_FILE`
-- public upstream: mTLS-capable HTTPS listener on `:8443`
+- public upstream: loopback HTTP listener on `127.0.0.1:8443`
 - private administration: loopback listener on `127.0.0.1:9090`
 - health: minimal public `/healthz`; private `/livez` and `/readyz`
 - migrations: embedded and invoked with `agentroomctl migrate`
@@ -194,8 +195,6 @@ Restore is not considered implemented until tested on isolated data.
 
 - deployment runner and secure access path to `host_agentroom`
 - concrete OIDC provider and client registration
-- private-network authenticated-encryption material between `host_ingress` and `host_agentroom`
-- DNS and public hostname
 - encrypted off-host backup repository and retention
 - secret recovery procedure
 - log and telemetry retention
