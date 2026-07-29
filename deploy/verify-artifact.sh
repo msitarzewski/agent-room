@@ -46,7 +46,7 @@ artifact_base="$(basename "${artifact}")"
     printf 'Checksum file has an unexpected or unsafe format\n' >&2
     exit 1
   }
-  sha256sum --check --strict "${artifact_base}.sha256"
+  sha256sum --check --strict "${artifact_base}.sha256" >/dev/null
 )
 cosign verify-blob --new-bundle-format=false --key "${public_key}" \
   --signature "${artifact}.sig" "${artifact}" >/dev/null
