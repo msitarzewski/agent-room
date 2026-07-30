@@ -42,6 +42,8 @@ grep -q '^AGENTROOM_ADAPTER_ADDR=127\.0\.0\.1:9091$' deploy/config/agentroom.con
 grep -q '^AGENTROOM_TRUSTED_PROXY_CIDRS=127\.0\.0\.1/32$' deploy/config/agentroom.conf.example || failed=1
 grep -q '^AGENTROOM_WEB_DIR=/opt/agentroom/current/web$' deploy/config/agentroom.conf.example || failed=1
 grep -q '^ReadOnlyPaths=.* /opt/agentroom/current/web$' deploy/systemd/agentroom.service || failed=1
+grep -q '^  /etc/agentroom/ r,$' deploy/apparmor/opt.agentroom.agentroomctl || failed=1
+grep -q '^  /etc/agentroom/ r,$' deploy/apparmor/opt.agentroom.agentroomd || failed=1
 grep -q '^LoadCredentialEncrypted=oidc-client-secret:' deploy/systemd/agentroom-migrate.service || failed=1
 grep -q 'run_agentroomctl_transient "agentroom-migration-check-\$\$"' deploy/migrate.sh || failed=1
 grep -q 'run_agentroomctl_transient "agentroom-doctor-\$\$"' deploy/doctor.sh || failed=1
@@ -88,6 +90,9 @@ grep -q './tests/api' tests/security/backend-quality.sh || failed=1
 grep -q 'npm --prefix web run api:lint -- --extends recommended-strict' deploy/build-release.sh || failed=1
 [[ ! -e .redocly.lint-ignore.yaml && ! -e web/.redocly.lint-ignore.yaml ]] || failed=1
 grep -q 'confirm-quiesced AGENTROOM_STOPPED' deploy/deploy.sh || failed=1
+grep -q '^release_installed=0$' deploy/deploy.sh || failed=1
+grep -q '^release_installed=1$' deploy/deploy.sh || failed=1
+grep -q 'rm -rf -- "${release_dir}"' deploy/deploy.sh || failed=1
 grep -q 'artifact-backup.sh' deploy/backup.sh || failed=1
 grep -q 'artifact-restore.sh' deploy/restore.sh || failed=1
 grep -q "id = \"GO-2026-5932\"" .github/workflows/security.yml || failed=1

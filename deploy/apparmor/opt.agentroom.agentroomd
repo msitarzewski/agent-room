@@ -11,6 +11,7 @@ profile agentroomd /opt/agentroom/releases/*/bin/agentroomd flags=(attach_discon
 
   /opt/agentroom/releases/*/bin/agentroomd mr,
   /opt/agentroom/releases/*/web/** r,
+  /etc/agentroom/ r,
   /etc/agentroom/agentroom.conf r,
   /run/credentials/agentroom.service/* r,
   /run/agentroom/** rw,
