@@ -10,6 +10,7 @@ profile agentroomctl /opt/agentroom/releases/*/bin/agentroomctl flags=(attach_di
   network unix stream,
 
   /opt/agentroom/releases/*/bin/agentroomctl mr,
+  /etc/agentroom/ r,
   /etc/agentroom/agentroom.conf r,
   /run/credentials/agentroom-migrate.service/* r,
   /run/credentials/agentroom-migration-check-*/** r,

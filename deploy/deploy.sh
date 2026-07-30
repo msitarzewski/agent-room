@@ -56,6 +56,7 @@ fi
 
 switched=0
 service_stopped=0
+release_installed=0
 rollback_on_error() {
   local status=$?
   trap - ERR
@@ -72,6 +73,10 @@ rollback_on_error() {
     if [[ -L "${AGENTROOM_CURRENT_LINK}" ]]; then
       systemctl start "${AGENTROOM_UNIT}" || true
     fi
+  fi
+  if ((release_installed == 1)); then
+    log "removing incomplete release ${version}"
+    rm -rf -- "${release_dir}"
   fi
   exit "${status}"
 }
@@ -90,6 +95,7 @@ find "${verify_extract}/web" -type f -exec chmod 0644 {} +
 chmod 0644 "${verify_extract}/manifest.json" "${verify_extract}/sbom.spdx.json"
 mv "${verify_extract}" "${release_dir}"
 verify_extract=""
+release_installed=1
 
 atomic_current_link "${version}"
 switched=1
@@ -121,4 +127,5 @@ fi
 trap - ERR
 service_stopped=0
 switched=0
+release_installed=0
 log "deployment ${version} succeeded"
