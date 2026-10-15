@@ -260,10 +260,15 @@ func (r *Repository) List(ctx context.Context, projectID string, kind domain.Res
 	var lastID string
 	for rows.Next() {
 		var raw []byte
-		if err := rows.Scan(&raw, &lastTime, &lastID); err != nil {
+		var updatedAt time.Time
+		var id string
+		if err := rows.Scan(&raw, &updatedAt, &id); err != nil {
 			return app.Page{}, err
 		}
 		page.Items = append(page.Items, raw)
+		if len(page.Items) <= limit {
+			lastTime, lastID = updatedAt, id
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return app.Page{}, err
@@ -363,7 +368,7 @@ func (r *Repository) Execute(ctx context.Context, cmd domain.Command, build func
 		return app.CommandResult{}, err
 	}
 	err = tx.QueryRow(ctx, `INSERT INTO events(id,project_id,event_type,subject_type,subject_id,actor_id,command_id,correlation_id,causation_id,occurred_at,schema_version,source_system,source_event_id,source_sequence,payload)
-		VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),NULLIF($9,''),$10,$11,NULLIF($12,''),NULLIF($13,''),NULLIF($14,0),$15) RETURNING cursor`,
+		VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),NULLIF($9,''),$10,$11,NULLIF($12,''),NULLIF($13,''),NULLIF($14::bigint,0),$15) RETURNING cursor`,
 		mutation.Event.ID, mutation.Event.ProjectID, mutation.Event.Type, mutation.Event.SubjectType, mutation.Event.SubjectID,
 		mutation.Event.ActorID, mutation.Event.CommandID, mutation.Event.CorrelationID, mutation.Event.CausationID,
 		mutation.Event.OccurredAt, mutation.Event.SchemaVersion, mutation.Event.SourceSystem, mutation.Event.SourceEventID, mutation.Event.SourceSequence, mutation.Event.Payload).Scan(&mutation.Event.Cursor)
@@ -510,7 +515,7 @@ func (r *Repository) Ingest(ctx context.Context, events []domain.Event) error {
 		}
 		var cursor int64
 		err = tx.QueryRow(ctx, `INSERT INTO events(id,project_id,event_type,subject_type,subject_id,actor_id,command_id,correlation_id,causation_id,occurred_at,schema_version,source_system,source_event_id,source_sequence,payload)
-			VALUES($1,$2,$3,$4,$5,$6,NULLIF($7,''),NULLIF($8,''),NULLIF($9,''),$10,$11,$12,$13,NULLIF($14,0),$15)
+			VALUES($1,$2,$3,$4,$5,$6,NULLIF($7,''),NULLIF($8,''),NULLIF($9,''),$10,$11,$12,$13,NULLIF($14::bigint,0),$15)
 			RETURNING cursor`, event.ID, event.ProjectID, event.Type, event.SubjectType, event.SubjectID, event.ActorID, event.CommandID, event.CorrelationID, event.CausationID, event.OccurredAt, event.SchemaVersion, event.SourceSystem, event.SourceEventID, event.SourceSequence, event.Payload).Scan(&cursor)
 		if err != nil {
 			return err
@@ -565,6 +570,81 @@ func (r *Repository) Events(ctx context.Context, projectID string, after int64, 
 		page.NextCursor = page.Items[len(page.Items)-1].Cursor
 	}
 	return page, nil
+}
+
+// Workspace reads the projection, event watermark, and source freshness from
+// one repeatable-read snapshot, so pagination and concurrent ingestion cannot
+// produce a graph assembled from different versions of the project.
+func (r *Repository) Workspace(ctx context.Context, projectID string) (app.WorkspaceSnapshot, error) {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return app.WorkspaceSnapshot{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	value := app.WorkspaceSnapshot{
+		ProjectID: projectID, Sources: []app.WorkspaceSource{},
+		Resources: app.WorkspaceResources{
+			Tasks: []json.RawMessage{}, Agents: []json.RawMessage{}, Runs: []json.RawMessage{},
+			Attention: []json.RawMessage{}, Evidence: []json.RawMessage{}, Artifacts: []json.RawMessage{},
+			Claims: []json.RawMessage{}, Approvals: []json.RawMessage{},
+		},
+	}
+	var exists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM projects WHERE id=$1),
+		COALESCE((SELECT max(cursor) FROM events WHERE project_id=$1),0), transaction_timestamp()`,
+		projectID).Scan(&exists, &value.Cursor, &value.GeneratedAt); err != nil {
+		return app.WorkspaceSnapshot{}, err
+	}
+	if !exists {
+		return app.WorkspaceSnapshot{}, app.ErrNotFound
+	}
+	collections := map[string]*[]json.RawMessage{
+		"task": &value.Resources.Tasks, "agent": &value.Resources.Agents, "run": &value.Resources.Runs,
+		"attention": &value.Resources.Attention, "evidence": &value.Resources.Evidence,
+		"artifact": &value.Resources.Artifacts, "claim": &value.Resources.Claims, "approval": &value.Resources.Approvals,
+	}
+	rows, err := tx.Query(ctx, `SELECT kind,document FROM resources
+		WHERE project_id=$1 AND kind=ANY($2::text[]) ORDER BY kind,id`, projectID,
+		[]string{"task", "agent", "run", "attention", "evidence", "artifact", "claim", "approval"})
+	if err != nil {
+		return app.WorkspaceSnapshot{}, err
+	}
+	for rows.Next() {
+		var kind string
+		var raw json.RawMessage
+		if err := rows.Scan(&kind, &raw); err != nil {
+			rows.Close()
+			return app.WorkspaceSnapshot{}, err
+		}
+		collection := collections[kind]
+		*collection = append(*collection, raw)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return app.WorkspaceSnapshot{}, err
+	}
+	rows, err = tx.Query(ctx, `SELECT e.source_system,max(o.available_at) FROM events e
+		JOIN event_outbox o ON o.event_id=e.id
+		WHERE e.project_id=$1 AND e.source_system IS NOT NULL GROUP BY e.source_system ORDER BY e.source_system`, projectID)
+	if err != nil {
+		return app.WorkspaceSnapshot{}, err
+	}
+	for rows.Next() {
+		var source app.WorkspaceSource
+		if err := rows.Scan(&source.System, &source.LastSeen); err != nil {
+			rows.Close()
+			return app.WorkspaceSnapshot{}, err
+		}
+		value.Sources = append(value.Sources, source)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return app.WorkspaceSnapshot{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return app.WorkspaceSnapshot{}, err
+	}
+	return value, nil
 }
 
 func (r *Repository) Overview(ctx context.Context, projectID string) (map[string]any, error) {

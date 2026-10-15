@@ -576,3 +576,84 @@ func TestServiceBoundaryAndDeniedBranches(t *testing.T) {
 		t.Fatalf("missing claim review error = %v", err)
 	}
 }
+
+func TestWorkspaceReadCapabilitiesFailClosed(t *testing.T) {
+	ctx := context.Background()
+	repo := &workspaceTestRepository{memoryRepository: newMemoryRepository()}
+	service := NewService(repo, nil)
+	for _, value := range []Actor{actor("none"), actor("overview", "overview:read"), actor("tasks", "task:read")} {
+		if _, err := service.Workspace(ctx, value, "project"); !errors.Is(err, ErrDenied) {
+			t.Fatalf("actor %s workspace error=%v", value.ID, err)
+		}
+	}
+	if repo.calls != 0 {
+		t.Fatal("denied request reached repository")
+	}
+	value, err := service.Workspace(ctx, actor("reader", "resource:read"), "project")
+	if err != nil || value.ProjectID != "project" || repo.calls != 1 {
+		t.Fatalf("workspace=%+v calls=%d err=%v", value, repo.calls, err)
+	}
+	capabilities := []string{"task:read", "agent:read", "run:read", "attention:read", "evidence:read", "artifact:read", "claim:read", "approval:read"}
+	if _, err := service.Workspace(ctx, actor("scoped", capabilities...), "project"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Workspace(ctx, actor("reader", "resource:read"), ""); err == nil {
+		t.Fatal("blank project accepted")
+	}
+}
+
+type workspaceTestRepository struct {
+	*memoryRepository
+	calls int
+}
+
+func (r *workspaceTestRepository) Workspace(_ context.Context, projectID string) (WorkspaceSnapshot, error) {
+	r.calls++
+	return WorkspaceSnapshot{ProjectID: projectID}, nil
+}
+
+func TestSentryObservationIngestionRejectsControlState(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 10, 13, 20, 0, 0, 0, time.UTC)
+	repo := newMemoryRepository()
+	service := NewServiceWithDependencies(repo, nil, testClock{now}, &testIDs{})
+	ingester := actor("sentry-adapter", "event:ingest", "source:sentry")
+	valid := domain.Event{ProjectID: "project", Type: "task.observed", SubjectType: domain.ResourceTask,
+		SubjectID: "untrusted-subject", SourceSystem: "sentry", SourceEventID: "scan-1-task-1", SourceSequence: 1,
+		Payload: json.RawMessage(`{"external_id":"Software/agent-rooms#release","title":"First spatial release","status":"completed","dependencies":["Software/agent-rooms#api"]}`)}
+	for name, mutate := range map[string]func(*domain.Event){
+		"privileged resource": func(event *domain.Event) { event.Payload = json.RawMessage(`{"resource":{"status":"completed"}}`) },
+		"unexpected field": func(event *domain.Event) {
+			event.Payload = json.RawMessage(`{"external_id":"task","title":"Task","status":"done","owner_id":"admin"}`)
+		},
+		"unsafe URL": func(event *domain.Event) {
+			event.Payload = json.RawMessage(`{"external_id":"task","title":"Task","status":"done","external_url":"javascript:alert(1)"}`)
+		},
+		"missing external identity": func(event *domain.Event) { event.Payload = json.RawMessage(`{"title":"Task","status":"done"}`) },
+		"unsequenced observation":   func(event *domain.Event) { event.SourceSequence = 0 },
+		"supervised event type":     func(event *domain.Event) { event.Type = "task.completed" },
+		"other resource":            func(event *domain.Event) { event.SubjectType = domain.ResourceApproval },
+	} {
+		t.Run(name, func(t *testing.T) {
+			value := valid
+			mutate(&value)
+			if err := service.Ingest(ctx, ingester, []domain.Event{value}); err == nil {
+				t.Fatal("unsafe observation accepted")
+			}
+		})
+	}
+	valid.ActorID, valid.CommandID, valid.Cursor = "forged", "forged-command", 900
+	if err := service.Ingest(ctx, ingester, []domain.Event{valid}); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.events) != 1 {
+		t.Fatalf("events=%d", len(repo.events))
+	}
+	got := repo.events[0]
+	if got.SubjectID != domain.ObservedTaskID("project", "Software/agent-rooms#release") || got.ActorID != ingester.ID || got.CommandID != "" || got.Cursor != 0 {
+		t.Fatalf("observation attribution=%+v", got)
+	}
+	if domain.ObservedTaskID("other", "Software/agent-rooms#release") == got.SubjectID {
+		t.Fatal("task identity is not project scoped")
+	}
+}

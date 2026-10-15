@@ -1,11 +1,17 @@
 # Progress
 
-**Last updated:** 2026-07-28
+**Last updated:** 2026-10-14
 
 ## Current Phase
 
-Founding release implemented. Simplified production activation is approved and
-being applied.
+First spatial workspace release candidate is complete locally on
+`feat/spatial-workspace`. The observatory, authorized snapshots, typed Sentry
+observations, accessible inspection, safe controls, and WebXR implementation
+are built and locally verified. The Mac staging deployment is running over
+Tailscale HTTPS with OIDC, persistent databases, supervised service operation,
+and verified live updates in Chromium/WebKit. Physical Vision Pro acceptance
+and remote production promotion remain separate.
+[Release progress](releases/spatial-workspace.md) is tracked by Sentry.
 
 ## Completed Foundations
 
@@ -81,15 +87,28 @@ being applied.
 
 ### Milestone 10: Vision Pro
 
-**Status:** Not started
+**Status:** Desktop/WebXR local tailnet deployment verified; physical-device acceptance pending
+
+The first observatory reuses the existing control plane and MiradorXR's technical
+patterns. It adds desktop WebGPU/WebGL fallback and dedicated WebGL WebXR, with
+shared selection, natural-input contracts, and in-world task/evidence inspection.
+No headset frame-rate or comfort measurement has been claimed.
 
 ## Immediate Next Work
 
-1. Publish and merge the approved ingress simplification.
-2. Complete the OIDC provider/client registration and production activation.
-3. Configure Pip's least-privilege Hermes hooks, Agent Room service token, and
+1. Commit the reviewed spatial release and incorporated security repair, as
+   Michael authorized on 2026-10-14; rebuild the checkpoint on the local instance.
+2. Implement continuous independent Sentry delivery with durable retry and
+   explicit activity/connection freshness. The current import is one-time only.
+3. Accept the interface on the actual Vision Pro build, then choose a release
+   identifier for signed promotion.
+4. Verify the operator-designated remote machine's platform and deployment
+   configuration before signed promotion; the current Mac deployment is staging
+   for headset testing. The actual host identifier stays in the private runtime
+   record. The July status does not prove current remote activation.
+5. Configure Pip's least-privilege Hermes hooks, Agent Room service token, and
    MCP tools.
-4. Provision and test the encrypted off-host backup destination.
+6. Provision and test the encrypted off-host backup destination.
 
 ## Current Blockers
 

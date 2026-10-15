@@ -100,6 +100,22 @@ paths:
           description: Available projects and project-scoped capabilities
           content: {application/json: {schema: {$ref: "#/components/schemas/ProjectSummaryPage"}}}
         "401": {$ref: "#/components/responses/Unauthorized"}
+  /workspace:
+    get:
+      operationId: getWorkspaceSnapshot
+      summary: Get a complete consistent project workspace
+      description: Reads every workspace resource, event watermark, and source receipt timestamp from a single repeatable-read transaction. Requires read access to every included resource kind; partial snapshots are denied. Arrays are always present and unpaginated.
+      tags: [Coordination]
+      parameters:
+        - {$ref: "#/components/parameters/Project"}
+      responses:
+        "200":
+          description: Complete project workspace snapshot
+          content: {application/json: {schema: {$ref: "#/components/schemas/WorkspaceSnapshot"}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
   /overview:
     get:
       operationId: getProjectOverview
@@ -594,7 +610,7 @@ paths:
     post:
       operationId: ingestAdapterEvents
       summary: Ingest authenticated runtime events
-      description: Adapter-only endpoint served by the private listener. Event identifiers and actor attribution are replaced by canonical server values.
+      description: Available only on the private adapter listener. Payloads cannot contain resource replacements. Sentry uses task.observed with TaskObservation payload and a positive source_sequence; stable project-scoped task IDs are derived from external_id. Source completion never accepts supervised completion. Later observations preserve supervisory fields. Blocked source work derives source.task.blocked attention; a newer nonblocked observation resolves only that source-owned item. Human resolution suppresses the same blocked episode until the source unblocks and blocks again. Event identifiers and actor attribution are replaced by canonical server values.
       tags: [Adapter]
       security:
         - serviceToken: []
@@ -875,6 +891,36 @@ components:
       required: [items]
       properties:
         items: {type: array, items: {$ref: "#/components/schemas/ProjectSummary"}}
+    WorkspaceSnapshot:
+      type: object
+      additionalProperties: false
+      required: [project_id, cursor, generated_at, resources, sources]
+      properties:
+        project_id: {type: string}
+        cursor: {type: integer, format: int64, minimum: 0}
+        generated_at: {type: string, format: date-time}
+        resources:
+          type: object
+          additionalProperties: false
+          required: [tasks, agents, runs, attention, evidence, artifacts, claims, approvals]
+          properties:
+            tasks: {type: array, items: {$ref: "#/components/schemas/Task"}}
+            agents: {type: array, items: {$ref: "#/components/schemas/Agent"}}
+            runs: {type: array, items: {$ref: "#/components/schemas/Run"}}
+            attention: {type: array, items: {$ref: "#/components/schemas/Attention"}}
+            evidence: {type: array, items: {$ref: "#/components/schemas/Evidence"}}
+            artifacts: {type: array, items: {$ref: "#/components/schemas/Artifact"}}
+            claims: {type: array, items: {$ref: "#/components/schemas/Claim"}}
+            approvals: {type: array, items: {$ref: "#/components/schemas/Approval"}}
+        sources:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [system, last_seen]
+            properties:
+              system: {type: string}
+              last_seen: {type: string, format: date-time, description: "Most recent source event receipt time in this project, independent of its reported occurred_at."}
     ProjectOverview:
       type: object
       required: [project_id, counts, event_cursor, generated_at]
@@ -1008,7 +1054,21 @@ components:
             review_state: {type: string}
             approval_state: {type: string}
             blocked_reason: {type: string}
+            source_status: {type: string, description: Source-reported status; does not accept or change supervised task status.}
+            source_observed_at: {type: string, format: date-time}
+            source_observation: {$ref: "#/components/schemas/TaskObservation"}
             source: {$ref: "#/components/schemas/Source"}
+    TaskObservation:
+      type: object
+      additionalProperties: false
+      required: [external_id, title, status]
+      properties:
+        external_id: {type: string, minLength: 1, maxLength: 1024, description: Stable task identity within the source project.}
+        title: {type: string, minLength: 1, maxLength: 4096}
+        description: {type: string}
+        status: {type: string, minLength: 1, maxLength: 128}
+        external_url: {type: string, format: uri, pattern: "^https?://"}
+        dependencies: {type: array, maxItems: 1000, items: {type: string, minLength: 1, maxLength: 1024}, description: Stable external task IDs within the same project.}
     TaskTransition:
       allOf:
         - {$ref: "#/components/schemas/ResourceBase"}
@@ -1261,7 +1321,7 @@ components:
         payload: {}
     IngestEvent:
       type: object
-      required: [project_id, type, subject_type, subject_id, source_system, payload]
+      required: [project_id, type, subject_type, subject_id, source_system, source_event_id, payload]
       properties:
         project_id: {type: string}
         type: {type: string, pattern: "^[a-z][a-z0-9_.-]{0,127}$"}
@@ -1272,9 +1332,18 @@ components:
         occurred_at: {type: string, format: date-time}
         schema_version: {type: integer, enum: [0, 1]}
         source_system: {type: string, pattern: "^[a-z][a-z0-9_.-]{0,63}$"}
-        source_event_id: {type: string}
-        source_sequence: {type: integer, format: int64}
-        payload: {}
+        source_event_id: {type: string, minLength: 1, maxLength: 512}
+        source_sequence: {type: integer, format: int64, minimum: 0}
+        payload: {type: object, not: {properties: {resource: {}}, required: [resource]}}
+      allOf:
+        - if: {properties: {source_system: {const: sentry}}, required: [source_system]}
+          then:
+            required: [source_sequence]
+            properties:
+              type: {const: task.observed}
+              subject_type: {const: task}
+              source_sequence: {type: integer, minimum: 1}
+              payload: {$ref: "#/components/schemas/TaskObservation"}
     Problem:
       type: object
       required: [type, title, status, detail, code]

@@ -10,14 +10,17 @@ import type {
   Evidence,
   HealthSnapshot,
   Page,
+  PageCursor,
   Problem,
   Project,
   ProjectBrief,
+  ProjectOverview,
   Run,
   SemanticEvent,
   SessionEnvelope,
   Task,
   WorkSession,
+  WorkspaceSnapshot,
 } from "./types";
 
 const API_ROOT = "/api/v1";
@@ -77,6 +80,10 @@ function projectQuery(projectId: string, extra: Record<string, string> = {}): st
   return `?${params.toString()}`;
 }
 
+function collectionQuery(projectId: string, cursor?: PageCursor): string {
+  return projectQuery(projectId, cursor === undefined ? {} : { cursor: String(cursor) });
+}
+
 function mutate<T>(
   path: string,
   body: unknown,
@@ -105,35 +112,39 @@ export const api = {
       items: Array.isArray(value?.items) ? value.items : [],
     };
   },
-  agents: (projectId: string, signal?: AbortSignal) =>
-    request<Page<Agent>>(`/agents${projectQuery(projectId)}`, { signal }),
-  runs: (projectId: string, signal?: AbortSignal) =>
-    request<Page<Run>>(`/runs${projectQuery(projectId)}`, { signal }),
-  tasks: (projectId: string, signal?: AbortSignal) =>
-    request<Page<Task>>(`/tasks${projectQuery(projectId)}`, { signal }),
+  overview: (projectId: string, signal?: AbortSignal) =>
+    request<ProjectOverview>(`/overview${projectQuery(projectId)}`, { signal }),
+  workspace: (projectId: string, signal?: AbortSignal) =>
+    request<WorkspaceSnapshot>(`/workspace${projectQuery(projectId)}`, { signal }),
+  agents: (projectId: string, signal?: AbortSignal, cursor?: PageCursor) =>
+    request<Page<Agent>>(`/agents${collectionQuery(projectId, cursor)}`, { signal }),
+  runs: (projectId: string, signal?: AbortSignal, cursor?: PageCursor) =>
+    request<Page<Run>>(`/runs${collectionQuery(projectId, cursor)}`, { signal }),
+  tasks: (projectId: string, signal?: AbortSignal, cursor?: PageCursor) =>
+    request<Page<Task>>(`/tasks${collectionQuery(projectId, cursor)}`, { signal }),
   events: (projectId: string, after?: number, signal?: AbortSignal) =>
     request<Page<SemanticEvent>>(
-      `/events${projectQuery(projectId, after ? { cursor: String(after) } : {})}`,
+      `/events${collectionQuery(projectId, after)}`,
       { signal },
     ),
-  attention: (projectId: string, signal?: AbortSignal) =>
-    request<Page<AttentionItem>>(`/attention${projectQuery(projectId)}`, { signal }),
-  evidence: (projectId: string, signal?: AbortSignal) =>
-    request<Page<Evidence>>(`/evidence${projectQuery(projectId)}`, { signal }),
-  artifacts: (projectId: string, signal?: AbortSignal) =>
-    request<Page<Artifact>>(`/artifacts${projectQuery(projectId)}`, { signal }),
-  messages: (projectId: string, signal?: AbortSignal) =>
-    request<Page<ChatMessage>>(`/chat/messages${projectQuery(projectId)}`, { signal }),
-  budgets: (projectId: string, signal?: AbortSignal) =>
-    request<Page<Budget>>(`/budgets${projectQuery(projectId)}`, { signal }),
+  attention: (projectId: string, signal?: AbortSignal, cursor?: PageCursor) =>
+    request<Page<AttentionItem>>(`/attention${collectionQuery(projectId, cursor)}`, { signal }),
+  evidence: (projectId: string, signal?: AbortSignal, cursor?: PageCursor) =>
+    request<Page<Evidence>>(`/evidence${collectionQuery(projectId, cursor)}`, { signal }),
+  artifacts: (projectId: string, signal?: AbortSignal, cursor?: PageCursor) =>
+    request<Page<Artifact>>(`/artifacts${collectionQuery(projectId, cursor)}`, { signal }),
+  messages: (projectId: string, signal?: AbortSignal, cursor?: PageCursor) =>
+    request<Page<ChatMessage>>(`/chat/messages${collectionQuery(projectId, cursor)}`, { signal }),
+  budgets: (projectId: string, signal?: AbortSignal, cursor?: PageCursor) =>
+    request<Page<Budget>>(`/budgets${collectionQuery(projectId, cursor)}`, { signal }),
   health: (projectId: string, signal?: AbortSignal) =>
     request<HealthSnapshot>(`/health/components${projectQuery(projectId)}`, { signal }),
-  sessions: (projectId: string, signal?: AbortSignal) =>
-    request<Page<WorkSession>>(`/sessions${projectQuery(projectId)}`, { signal }),
-  claims: (projectId: string, signal?: AbortSignal) =>
-    request<Page<Claim>>(`/claims${projectQuery(projectId)}`, { signal }),
-  approvals: (projectId: string, signal?: AbortSignal) =>
-    request<Page<Approval>>(`/approvals${projectQuery(projectId)}`, { signal }),
+  sessions: (projectId: string, signal?: AbortSignal, cursor?: PageCursor) =>
+    request<Page<WorkSession>>(`/sessions${collectionQuery(projectId, cursor)}`, { signal }),
+  claims: (projectId: string, signal?: AbortSignal, cursor?: PageCursor) =>
+    request<Page<Claim>>(`/claims${collectionQuery(projectId, cursor)}`, { signal }),
+  approvals: (projectId: string, signal?: AbortSignal, cursor?: PageCursor) =>
+    request<Page<Approval>>(`/approvals${collectionQuery(projectId, cursor)}`, { signal }),
   brief: async (projectId: string, after = 0, signal?: AbortSignal) => {
     const value = await request<
       Omit<ProjectBrief, "event_counts" | "events" | "open_attention" | "pending_approvals" | "recommended_actions"> &

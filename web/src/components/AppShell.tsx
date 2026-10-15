@@ -4,6 +4,7 @@ import { useStream } from "../stream/StreamContext";
 import { RelativeTime, StatusPill } from "./Common";
 
 const navigation = [
+  { to: "/workspace", label: "Observatory", glyph: "✧" },
   { to: "/", label: "Attention", glyph: "⌁", end: true },
   { to: "/workers", label: "Workers & runs", glyph: "◉" },
   { to: "/tasks", label: "Tasks & review", glyph: "▦" },

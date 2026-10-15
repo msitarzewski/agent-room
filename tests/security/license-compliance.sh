@@ -59,13 +59,41 @@ diff -ruNB third_party/go-licenses "${temporary}/go-licenses"
 
 node <<'NODE'
 const lock = require("./web/package-lock.json");
+const fs = require("node:fs");
+const crypto = require("node:crypto");
+const manifest = require("./third_party/web-licenses/runtime-manifest.json");
+const bundle = fs.readFileSync(`./third_party/web-licenses/${manifest.bundle}`);
+if (crypto.createHash("sha256").update(bundle).digest("hex") !== manifest.sha256) {
+  throw new Error("Redistributed browser license bundle differs from its reviewed manifest");
+}
 const allowed = new Set(["Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "MIT"]);
+const reviewedCombinations = new Map([
+  ["node_modules/@bufbuild/protobuf", "(Apache-2.0 AND BSD-3-Clause)"],
+  ["node_modules/@fortawesome/free-solid-svg-icons", "(CC-BY-4.0 AND MIT)"],
+]);
 const unexpected = [];
+const runtime = new Set();
 for (const [path, metadata] of Object.entries(lock.packages ?? {})) {
   if (!path.startsWith("node_modules/") || metadata.dev === true) continue;
-  if (!allowed.has(metadata.license)) {
+  runtime.add(path);
+  const receipt = manifest.packages[path];
+  if (!receipt || receipt.version !== metadata.version || receipt.declared_license !== metadata.license || !receipt.files.length) {
+    unexpected.push(`${path}: missing or outdated redistribution review`);
+    continue;
+  }
+  for (const file of receipt.files) {
+    if (!file.source.startsWith("installed:")) continue;
+    const raw = fs.readFileSync(`./web/${file.source.slice("installed:".length)}`);
+    if (crypto.createHash("sha256").update(raw).digest("hex") !== file.sha256) {
+      unexpected.push(`${path}: upstream license text changed`);
+    }
+  }
+  if (!allowed.has(receipt.reviewed_license) && reviewedCombinations.get(path) !== receipt.reviewed_license) {
     unexpected.push(`${path.slice("node_modules/".length)}: ${metadata.license ?? "UNKNOWN"}`);
   }
+}
+for (const path of Object.keys(manifest.packages)) {
+  if (!runtime.has(path)) unexpected.push(`${path}: stale redistribution review`);
 }
 if (unexpected.length) {
   console.error(`Disallowed or unknown browser runtime license:\n${unexpected.join("\n")}`);

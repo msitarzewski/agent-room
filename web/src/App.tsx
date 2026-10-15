@@ -12,6 +12,7 @@ import { SessionsPage } from "./pages/SessionsPage";
 import { TasksPage } from "./pages/TasksPage";
 import { TimelinePage } from "./pages/TimelinePage";
 import { WorkersPage } from "./pages/WorkersPage";
+import { WorkspacePage } from "./pages/WorkspacePage";
 import { StreamProvider } from "./stream/StreamContext";
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -44,6 +45,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 
 const views: Record<string, ReactNode> = {
   "/": <AttentionPage />,
+  "/workspace": <WorkspacePage />,
   "/workers": <WorkersPage />,
   "/tasks": <TasksPage />,
   "/approvals": <ApprovalsPage />,
@@ -86,7 +88,6 @@ function ProtectedRoutes({ pathname, navigate }: {
     return <main className="bootstrap-state" role="alert"><span className="state-icon" aria-hidden="true">!</span><h1>Agent Room is unreachable</h1><p>{error}</p><button className="button button--primary" type="button" onClick={() => void refresh()}>Try again</button></main>;
   }
   if (!session) {
-    if (pathname !== "/") return <Redirect to="/" navigate={navigate} />;
     return <LoginPage navigate={navigate} />;
   }
   return (

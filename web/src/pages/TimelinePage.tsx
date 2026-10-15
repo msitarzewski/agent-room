@@ -3,8 +3,8 @@ import { api } from "../api/client";
 import { Freshness, PageHeader, RelativeTime, StatePanel, StatusPill } from "../components/Common";
 import { useCollection } from "../hooks/useCollection";
 
-const loadEvents = (projectId: string, signal?: AbortSignal) =>
-  api.events(projectId, undefined, signal);
+const loadEvents = (projectId: string, signal?: AbortSignal, cursor?: string | number) =>
+  api.events(projectId, cursor === undefined ? undefined : Number(cursor), signal);
 
 export function TimelinePage() {
   const collection = useCollection(loadEvents);

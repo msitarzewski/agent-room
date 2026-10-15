@@ -360,17 +360,13 @@ jobs:
           govulncheck ./...
           go_dependencies="$(go list -deps ./...)"
           if grep -q '^golang.org/x/crypto/openpgp' <<<"${go_dependencies}"; then
-            printf 'GO-2026-5932 exception is invalid: openpgp became reachable\n' >&2
+            printf 'golang.org/x/crypto/openpgp became reachable (GO-2026-5932)\n' >&2
             exit 1
           fi
-          osv_config="${RUNNER_TEMP}/osv-scanner.toml"
-          printf '%s\n' \
-            '[[IgnoredVulns]]' \
-            'id = "GO-2026-5932"' \
-            'ignoreUntil = 2026-10-27' \
-            'reason = "x/crypto/openpgp is unmaintained, but Agent Room imports argon2 only; govulncheck and the dependency guard prove openpgp is unreachable. Review by expiry."' \
-            >"${osv_config}"
-          osv-scanner scan source --recursive --config "${osv_config}" .
+          # No ignore list: osv-scanner's Go call analysis reports unreachable
+          # x/crypto advisories such as GO-2026-5932 as uncalled, and the guard
+          # above keeps openpgp out of the build.
+          osv-scanner scan source --recursive .
           npm --prefix web audit --audit-level=high
           tests/security/license-compliance.sh
       - name: Deployment and completeness gates

@@ -3,7 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
 import { vi } from "vitest";
 import { App } from "../App";
-import { AuthProvider } from "../auth/AuthContext";
+import { AuthProvider, safeLoginReturnTo } from "../auth/AuthContext";
+import { api } from "../api/client";
 import {
   artifact,
   approval,
@@ -106,12 +107,34 @@ describe("Agent Room application", () => {
     expect(document.body).not.toHaveTextContent(/identity provider|network membership|authorization code/i);
   });
 
-  it("returns unauthenticated protected routes to the public threshold", async () => {
-    await renderPath("/tasks", { authenticated: false });
+  it("preserves an unauthenticated protected destination while presenting the public threshold", async () => {
+    await renderPath("/workspace?project=project_alpha&task=task_1", { authenticated: false });
     expect(await screen.findByRole("heading", {
       name: "The work continues. The room remembers.",
     })).toBeInTheDocument();
-    expect(window.location.pathname).toBe("/");
+    expect(window.location.pathname).toBe("/workspace");
+    expect(window.location.search).toBe("?project=project_alpha&task=task_1");
+    const loginUrl = vi.spyOn(api, "loginUrl").mockReturnValue("#oidc-start");
+    await userEvent.setup().click(screen.getByRole("button", { name: "Enter quietly" }));
+    expect(loginUrl).toHaveBeenCalledWith("/workspace?project=project_alpha&task=task_1");
+  });
+
+  it("defaults root and legacy login entry to the root without a login loop", async () => {
+    const loginUrl = vi.spyOn(api, "loginUrl").mockReturnValue("#oidc-start");
+    const first = await renderPath("/", { authenticated: false });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Enter quietly" }));
+    expect(loginUrl).toHaveBeenLastCalledWith("/");
+    first.unmount();
+    await renderPath("/login?provider=ignored", { authenticated: false });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Enter quietly" }));
+    expect(loginUrl).toHaveBeenLastCalledWith("/");
+  });
+
+  it("preserves local query/fragment context and rejects unsafe or looping OIDC destinations", () => {
+    expect(safeLoginReturnTo("/workspace?project=alpha&task=task_1#evidence")).toBe("/workspace?project=alpha&task=task_1#evidence");
+    for (const target of ["", "https://outside.example/path", "//outside.example", "/\\outside.example", "/%2f%2foutside.example", "/%5coutside.example", "/login", "/safe/../login?again=yes", "/api/v1/auth/login", "/bad%escape", "/\noutside.example"]) {
+      expect(safeLoginReturnTo(target), target).toBe("/");
+    }
   });
 
   it("keeps a first login without project membership usable", async () => {

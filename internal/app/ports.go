@@ -34,6 +34,36 @@ type EventPage struct {
 	NextCursor int64          `json:"next_cursor,omitempty"`
 }
 
+// WorkspaceSnapshot is a complete project projection and its event watermark,
+// read from the same database snapshot. The resource arrays are always present.
+type WorkspaceSnapshot struct {
+	ProjectID   string             `json:"project_id"`
+	Cursor      int64              `json:"cursor"`
+	GeneratedAt time.Time          `json:"generated_at"`
+	Resources   WorkspaceResources `json:"resources"`
+	Sources     []WorkspaceSource  `json:"sources"`
+}
+
+type WorkspaceResources struct {
+	Tasks     []json.RawMessage `json:"tasks"`
+	Agents    []json.RawMessage `json:"agents"`
+	Runs      []json.RawMessage `json:"runs"`
+	Attention []json.RawMessage `json:"attention"`
+	Evidence  []json.RawMessage `json:"evidence"`
+	Artifacts []json.RawMessage `json:"artifacts"`
+	Claims    []json.RawMessage `json:"claims"`
+	Approvals []json.RawMessage `json:"approvals"`
+}
+
+type WorkspaceSource struct {
+	System   string    `json:"system"`
+	LastSeen time.Time `json:"last_seen"`
+}
+
+type WorkspaceRepository interface {
+	Workspace(context.Context, string) (WorkspaceSnapshot, error)
+}
+
 type Mutation struct {
 	Resource json.RawMessage
 	Event    domain.Event

@@ -1,0 +1,75 @@
+# October 2026 Tasks
+
+## Planned Work
+
+### 2026-10-13: [IN-PROGRESS] Zoomable control room
+
+- Explore an Agent Room workspace with semantic zoom from portfolio to project,
+  task, and evidence, with meaningful animation and real-time observations.
+- Reuse Sentry as an observation source and Agent Room's existing control plane;
+  keep Vikunja as an optional planning connector.
+- Evaluate WebGPU and fallback rendering with real records before selecting a
+  renderer. Preserve attention, evidence, authorization, and source freshness.
+- State: DOCS / IDLE. Local service and final source-inspection gates pass on
+  feat/spatial-workspace. Physical device acceptance and remote promotion remain.
+- [Release checklist](../../releases/spatial-workspace.md) tracks desktop/WebXR
+  implementation and validation in Sentry. No release number is assigned.
+- Existing weekly security repair is incorporated in the reviewed spatial
+  feature checkout; Michael authorized its commit with this checkpoint.
+- 2026-10-14 iteration: desktop/XR implementation and real Sentry ingestion pilot
+  are complete; final consolidated tests, security/license checks, visual review,
+  and release documentation are running. The pilot exposed and repaired source
+  sequence overflow and projection replay ordering. Headset acceptance remains
+  pending on the actual device.
+- Candidate verification: 110 frontend tests, 24 native browser checks, strict API,
+  type/lint/build, license, deployment-static, and authorization gates pass.
+  Final review repairs include collection pagination, projection replay, source
+  attention suppression, run-linked XR evidence, and dependency disclosure.
+  Consolidated security/race/coverage passes on Go 1.26.9 and x/text 0.41.0;
+  exact pinned Node/npm source gates also pass. Linux Firefox 12/12 and final
+  headed software-WebGL verification pass. The local candidate and its release
+  record are complete; this broader visual-workspace task remains IN-PROGRESS
+  through physical Vision Pro acceptance and promotion. Disposable resources
+  are removed. That initial milestone created no commit, PR, or deployment.
+- See [Zoomable control room plan](zoomable-control-room-plan.md).
+- 2026-10-14 follow-up: Michael authorized the same local loopback + Tailscale
+  Serve HTTPS deployment pattern as MiradorXR, using a dedicated port. State:
+  DOCS / IDLE. Native launch agent and persistent PostgreSQL/Dex containers are
+  running behind dedicated app/identity HTTPS ports. Five real task observations
+  reached the UI live. A lost OIDC workspace return path is repaired; 111 frontend
+  tests and build pass. Session/data restart persistence, deep-link login, 24 native
+  browser regressions, and route/auth boundaries pass. Sustained verification
+  found and repaired a real WebKit compressed-stream protocol failure. Local host
+  values and credentials stay ignored.
+- WebKit repair iteration: isolated TLS A/B confirms uncompressed events work;
+  scoped race/API regressions now pass for compression policy, ping/close, and
+  repeated reconnect cleanup. Full backend quality and live HTTPS recheck pass.
+  Source secret scan excludes private ignored runtime data through Git
+  inventory while preserving all source/history credential detection.
+- Local deployment complete: 115 frontend tests, 24 native browser regressions,
+  82.7% backend coverage with every critical package above 90%, and sustained real
+  Chromium/WebKit replay/heartbeat pass. The ten-item release checklist is complete.
+  The service stays running; the umbrella remains IN-PROGRESS for actual headset
+  acceptance and eventual promotion to the designated remote machine.
+- Final real-source refresh exposed a desktop/XR inspection gap: the task's
+  original human description stays intact, but latest source report details were
+  not exposed. Existing inspectors now show the latest report separately, with
+  full XR pagination. The release inspection item is complete again. Exact pinned
+  type/lint/API, 115 tests, production build, 24 browser checks, and actual WebKit
+  source inspection pass. Source/human authority rules remain intact.
+- Final reconciliation: Sentry reads the release as 10/10 Done; five real source
+  records update the persistent local UI without reload. Temporary publisher
+  credential is revoked and removed. The local service remains running for
+  physical headset acceptance; actual operator login stays private and active.
+
+### 2026-10-14: [IN-PROGRESS] Continuous Sentry observations
+
+- Michael requested a Memory Bank update, a commit checkpoint, and the next build.
+- Checkpoint the completed spatial release first, then implement independent
+  read-only Sentry collection, durable local delivery/retry, stable identity,
+  least-privilege ingestion, and explicit source freshness.
+- Clarify last project activity versus connection health and refresh idle elapsed
+  labels. Preserve the existing Sentry board/watcher/history/backups.
+- State: PLAN. Architecture/reuse discovery is running while the completed
+  candidate is checkpointed. Actual headset acceptance and remote activation are
+  separate. See `activeContext.md#next-implementation-continuous-observations`.

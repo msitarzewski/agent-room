@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -8,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -130,6 +132,27 @@ func (s *Service) Events(ctx context.Context, actor Actor, projectID string, aft
 		page.Items = make([]domain.Event, 0)
 	}
 	return page, err
+}
+
+// Workspace fails closed when the actor cannot read any of its resource kinds.
+// A partial graph could imply that hidden dependencies or approvals do not exist.
+func (s *Service) Workspace(ctx context.Context, actor Actor, projectID string) (WorkspaceSnapshot, error) {
+	if strings.TrimSpace(projectID) == "" {
+		return WorkspaceSnapshot{}, Invalid("project_id is required")
+	}
+	for _, kind := range []domain.ResourceType{
+		domain.ResourceTask, domain.ResourceAgent, domain.ResourceRun, domain.ResourceAttention,
+		domain.ResourceEvidence, domain.ResourceArtifact, domain.ResourceClaim, domain.ResourceApproval,
+	} {
+		if !canRead(actor, kind) {
+			return WorkspaceSnapshot{}, ErrDenied
+		}
+	}
+	provider, ok := s.repo.(WorkspaceRepository)
+	if !ok {
+		return WorkspaceSnapshot{}, ErrUnsupported
+	}
+	return provider.Workspace(ctx, projectID)
 }
 
 func (s *Service) Overview(ctx context.Context, actor Actor, projectID string) (map[string]any, error) {
@@ -603,6 +626,44 @@ func (s *Service) Ingest(ctx context.Context, actor Actor, events []domain.Event
 		if !json.Valid(event.Payload) || len(event.Payload) > 256<<10 {
 			return Invalid("event payload must be valid JSON and at most 256 KiB")
 		}
+		var payload map[string]json.RawMessage
+		if err := json.Unmarshal(event.Payload, &payload); err != nil || payload == nil {
+			return Invalid("event payload must be a JSON object")
+		}
+		if _, ok := payload["resource"]; ok {
+			return Invalid("ingestion cannot replace control-plane resources")
+		}
+		if event.SourceEventID == "" || len(event.SourceEventID) > 512 || event.SourceSequence < 0 {
+			return Invalid("ingestion requires a bounded source_event_id and nonnegative source_sequence")
+		}
+		if event.SourceSystem == "sentry" {
+			if event.Type != "task.observed" || event.SubjectType != domain.ResourceTask || event.SourceSequence <= 0 {
+				return Invalid("sentry ingestion requires task.observed and a positive source_sequence")
+			}
+			var observation domain.TaskObservation
+			decoder := json.NewDecoder(bytes.NewReader(event.Payload))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&observation); err != nil {
+				return Invalid("invalid task observation payload")
+			}
+			if strings.TrimSpace(observation.ExternalID) == "" || len(observation.ExternalID) > 1024 ||
+				strings.TrimSpace(observation.Title) == "" || len(observation.Title) > 4096 ||
+				strings.TrimSpace(observation.Status) == "" || len(observation.Status) > 128 || len(observation.Dependencies) > 1000 {
+				return Invalid("task observation requires bounded external_id, title, status, and dependencies")
+			}
+			if observation.ExternalURL != "" {
+				parsed, err := url.Parse(observation.ExternalURL)
+				if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
+					return Invalid("task observation external_url must be an HTTP or HTTPS URL without credentials")
+				}
+			}
+			for _, dependency := range observation.Dependencies {
+				if strings.TrimSpace(dependency) == "" || len(dependency) > 1024 || dependency == observation.ExternalID {
+					return Invalid("task observation contains an invalid dependency")
+				}
+			}
+			event.SubjectID = domain.ObservedTaskID(event.ProjectID, observation.ExternalID)
+		}
 		// External event identifiers and attribution are untrusted. The original
 		// native identifier belongs in source metadata; the coordination event
 		// always receives a server-generated ID and authenticated actor.
@@ -617,6 +678,8 @@ func (s *Service) Ingest(ctx context.Context, actor Actor, events []domain.Event
 			event.SchemaVersion = 1
 		}
 		event.ActorID = actor.ID
+		event.Cursor = 0
+		event.CommandID = ""
 	}
 	if err := s.repo.Ingest(ctx, events); err != nil {
 		return err

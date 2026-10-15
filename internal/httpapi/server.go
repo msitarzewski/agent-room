@@ -106,6 +106,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/logout", s.logout)
 	mux.HandleFunc("GET /api/v1/projects", s.projects)
 	mux.HandleFunc("GET /api/v1/overview", s.overview)
+	mux.HandleFunc("GET /api/v1/workspace", s.workspace)
 	mux.HandleFunc("GET /api/v1/brief", s.brief)
 	mux.HandleFunc("POST /api/v1/brief/acknowledge", s.acknowledgeBrief)
 	mux.HandleFunc("GET /api/v1/health/components", s.componentHealth)
@@ -378,6 +379,19 @@ func (s *Server) get(kind domain.ResourceType) http.Handler {
 		w.Header().Set("ETag", strconv.FormatInt(base.Version, 10))
 		writeRawJSON(w, http.StatusOK, value)
 	})
+}
+
+func (s *Server) workspace(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := requireProject(w, r)
+	if !ok {
+		return
+	}
+	value, err := s.service.Workspace(r.Context(), currentActor(r), projectID)
+	if err != nil {
+		writeProblem(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
 }
 
 func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
@@ -714,8 +728,8 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	after, err := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
-	if err != nil && r.URL.Query().Get("after") != "" {
-		writeProblemStatus(w, http.StatusBadRequest, "invalid_cursor", "after must be an integer cursor")
+	if (err != nil && r.URL.Query().Get("after") != "") || after < 0 {
+		writeProblemStatus(w, http.StatusBadRequest, "invalid_cursor", "after must be a nonnegative integer cursor")
 		return
 	}
 	socketKey := currentSession(r).User.ID + ":" + projectID
@@ -731,11 +745,27 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, err)
 		return
 	}
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: s.wsOrigins, CompressionMode: websocket.CompressionContextTakeover})
+	// WebKit has compressed-frame interoperability failures on this stream.
+	// Keep the control channel uncompressed across browsers; snapshots carry
+	// the bulk data, and avoiding reconnect loops matters more than bandwidth.
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: s.wsOrigins, CompressionMode: websocket.CompressionDisabled})
 	if err != nil {
 		return
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
+	if replay.NextCursor != 0 {
+		resync, _ := json.Marshal(realtime.Message{
+			Type: "resync_required", OccurredAt: time.Now().UTC(),
+			Data: json.RawMessage(`{"reason":"replay_limit"}`),
+		})
+		writeCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		err := conn.Write(writeCtx, websocket.MessageText, resync)
+		cancel()
+		if err != nil {
+			return
+		}
+		replay.Items = nil
+	}
 	validate := func(ctx context.Context) error {
 		session, err := s.auth.Resolve(ctx, r)
 		if err != nil {
@@ -745,12 +775,11 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		return err
 	}
 	if err := realtime.WriteLoop(r.Context(), conn, messages, replay.Items, validate); err != nil {
-		code := websocket.StatusCode(4403)
-		reason := "project access revoked"
 		if errors.Is(err, auth.ErrUnauthenticated) {
-			code, reason = websocket.StatusCode(4401), "session expired or revoked"
+			_ = conn.Close(websocket.StatusCode(4401), "session expired or revoked")
+		} else if errors.Is(err, app.ErrDenied) {
+			_ = conn.Close(websocket.StatusCode(4403), "project access revoked")
 		}
-		_ = conn.Close(code, reason)
 	}
 }
 

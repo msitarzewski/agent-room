@@ -62,11 +62,36 @@ application consumes the same versioned HTTP contract documented in
 [`api/openapi/agent-room.v1.yaml`](api/openapi/agent-room.v1.yaml); adapter
 events use [`api/arp/event-envelope.schema.json`](api/arp/event-envelope.schema.json).
 
+## Spatial observatory
+
+Open **Observatory** in the sidebar, or visit `/workspace`. Select a project to
+unfold its tasks and recorded dependencies, then select a task to inspect runs,
+evidence, artifacts, review state, and source observations. Project and task
+selections are shareable through the URL. The searchable directory supports
+keyboard navigation and remains available when graphics cannot render.
+
+The desktop scene uses WebGPU when available and falls back to WebGL 2. Drag to
+explore, scroll to move closer, and use **Recenter view** to restore framing.
+Motion reflects reported running work and respects reduced-motion preferences.
+Attention remains within reach; source completion is separate from accepted
+completion. Review decisions require confirmation, and controls retain the
+existing project capabilities, resource versions, and command audit.
+
+In a secure browser with immersive WebXR support, **Enter immersive** opens the
+same project and selection using a dedicated WebGL 2 renderer. Select with the
+device's natural input, pinch the handle to reposition the workspace, and use **Exit
+immersive** or the headset's system control to return. Real Vision Pro comfort,
+input, and frame pacing still require acceptance on the exact visionOS build.
+The development emulator and sample environments are omitted from production.
+
+The [spatial release checklist](memory-bank/releases/spatial-workspace.md)
+records implementation, verification, and device acceptance requirements.
+
 ## Prerequisites
 
 Development uses the versions pinned by the repository:
 
-- Go 1.26.5 (the `toolchain` in [`go.mod`](go.mod))
+- Go 1.26.9 (the `toolchain` in [`go.mod`](go.mod))
 - Node.js 24.8.0 and npm 11.6.0
 - Docker with Compose for PostgreSQL 18 and the local Dex provider
 - Git, `curl`, and `jq`
@@ -131,6 +156,15 @@ authorization and an isolated target; see
 [deploy/README.md](deploy/README.md#development-and-security-verification).
 
 ## Native Apple Silicon development
+
+For the already configured local tailnet installation, open the URL in
+`data/local/deployment.json` and sign in with the `username` and `password` in
+`data/local/secrets/login.json`. These are private generated credentials. The
+app is served over Tailscale HTTPS port 4445, with its identity provider on port
+4446, using a supervised native daemon and persistent local containers. See the
+[local deployment runbook](memory-bank/build-deployment.md#local-tailnet-deployment)
+for status, restart, update, and stop procedures. This is also the WebXR entry
+point for Vision Pro Safari; physical headset acceptance is still pending.
 
 The supported workstation shape is a native Go daemon and frontend build, with
 PostgreSQL and Dex in loopback-published containers. Do not use the production
@@ -254,6 +288,45 @@ sudo deploy/rollback.sh \
   --version <installed-version> \
   --public-url https://<public-host>
 ```
+
+## Sentry observations
+
+The private adapter endpoint accepts typed Sentry task observations. This
+release provides the ingestion contract and projection; an automatically
+scheduled production Sentry connector is not included. Sentry's own board,
+watcher, and backups continue operating independently.
+
+Give an observation publisher only `event:ingest` and `source:sentry` for its
+chosen project. Send `POST /api/v1/ingest?project_id=<project-id>` to the private
+adapter listener with its bearer service token. The body contains an `events`
+array; each event supplies `project_id`, `type: "task.observed"`,
+`subject_type: "task"`, a nonempty `subject_id`, `source_system: "sentry"`, a
+stable `source_event_id`, and a positive monotonically increasing
+`source_sequence` for that source task. The server derives the canonical task
+ID from the project and the payload's `external_id`; the supplied subject ID
+does not choose an arbitrary resource.
+
+The payload requires `external_id`, `title`, and `status`. It optionally includes
+`description`, an HTTP(S) `external_url`, and `dependencies` containing external
+task IDs from the same project. Unknown payload fields and resource replacements
+are rejected. Use the current observation time for `occurred_at`, or omit it
+for server time; the endpoint accepts at most 30 days of clock skew into the
+past and five minutes into the future. Retries retain the source event ID;
+later observations advance the sequence. See the precise
+[TaskObservation contract](api/openapi/agent-room.v1.yaml).
+
+New observations create supervised tasks in `inbox`. Later source updates
+retain human-owned fields and record the latest observation separately. A
+blocked source task creates deduplicated attention, and a newer unblocked
+observation resolves only that source-owned item. A human resolution stays
+resolved until a new unblocked-to-blocked episode. Source `Done` never accepts a
+completion claim.
+
+`GET /api/v1/workspace?project_id=<project-id>` returns one authorized,
+transactionally consistent snapshot of the resources and source receipt times
+used by the scene. It requires read access to every included resource kind;
+partial graphs fail closed. WebSocket catchup and resync messages refresh the
+snapshot. No private adapter credentials belong in browser configuration.
 
 ## Hermes and Pip
 

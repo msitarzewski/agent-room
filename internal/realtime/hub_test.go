@@ -106,3 +106,77 @@ func TestWriteLoopHonorsCancellationAndJSONHelper(t *testing.T) {
 		t.Fatalf("cancellation error=%v", err)
 	}
 }
+
+func TestWriteLoopRespondsToPingAndStopsOnPeerClose(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	serverDone := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			serverDone <- err
+			return
+		}
+		defer conn.CloseNow()
+		serverDone <- WriteLoop(r.Context(), conn, make(chan Message), nil, nil)
+	}))
+	defer server.Close()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	conn.CloseRead(ctx)
+	if err := conn.Ping(ctx); err != nil {
+		t.Fatalf("server did not consume/respond to ping: %v", err)
+	}
+	if err := conn.Close(websocket.StatusNormalClosure, "done"); err != nil {
+		t.Fatalf("peer close handshake failed: %v", err)
+	}
+	select {
+	case err := <-serverDone:
+		if err != context.Canceled {
+			t.Fatalf("peer close error=%v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("idle stream retained its peer after close")
+	}
+}
+
+func TestWriteLoopRejectsClientDataOnOneWayStream(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	serverDone := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			serverDone <- err
+			return
+		}
+		defer conn.CloseNow()
+		serverDone <- WriteLoop(r.Context(), conn, make(chan Message), nil, nil)
+	}))
+	defer server.Close()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"unexpected":"command"}`)); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = conn.Read(ctx)
+	if websocket.CloseStatus(err) != websocket.StatusPolicyViolation {
+		t.Fatalf("unexpected data close status=%d err=%v", websocket.CloseStatus(err), err)
+	}
+	// The Go peer has received the policy close; finish its transport just as
+	// the browser does so the server's close reader can finish its handshake.
+	conn.CloseNow()
+	select {
+	case <-serverDone:
+	case <-ctx.Done():
+		t.Fatal("unexpected data did not stop one-way stream")
+	}
+}

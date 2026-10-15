@@ -1,6 +1,6 @@
 # Agent Room Memory Bank
 
-**Last updated:** 2026-07-28
+**Last updated:** 2026-10-14
 
 This index routes future sessions to the smallest useful context set. `boot.md` remains the founding product specification; the Memory Bank records working context, accepted decisions, implementation patterns, and operational procedures derived from it.
 
@@ -9,10 +9,13 @@ This index routes future sessions to the smallest useful context set. `boot.md` 
 1. [quick-start.md](./quick-start.md) — minimum project orientation
 2. [activeContext.md](./activeContext.md) — current state and pending decisions
 3. [progress.md](./progress.md) — roadmap and completion state
-4. [tasks/2026-07/README.md](./tasks/2026-07/README.md) — current month
+4. [tasks/2026-10/README.md](./tasks/2026-10/README.md) — current month
 
 ## Recent Task Records
 
+- [First spatial workspace release](./releases/spatial-workspace.md) — approved scope, stable Sentry checklist, and ongoing validation evidence
+- [Zoomable control room plan](./tasks/2026-10/zoomable-control-room-plan.md) — proposed visual workspace, Sentry observations, renderer investigation, and recovery steps
+- [July 2026 tasks](./tasks/2026-07/README.md) — founding release and prior work
 - [270726_founding-agent-room-release.md](./tasks/2026-07/270726_founding-agent-room-release.md) — implemented and verified founding control-plane release
 - [270726_open-source-publication-readiness.md](./tasks/2026-07/270726_open-source-publication-readiness.md) — Apache-2.0 licensing, governance, redistribution, and privacy release
 - [270726_product-foundation.md](./tasks/2026-07/270726_product-foundation.md) — mission, Memory Bank, Hermes Pip integration, and deployment foundation
@@ -32,7 +35,7 @@ This index routes future sessions to the smallest useful context set. `boot.md` 
 
 ## Operations
 
-- [build-deployment.md](./build-deployment.md) — development-to-production contract for co-located Caddy and Agent Room
+- [build-deployment.md](./build-deployment.md) — local tailnet lifecycle and signed Linux/Caddy promotion contract
 - [decisions.md](./decisions.md) — accepted architectural and product decisions
 
 ## Update Policy

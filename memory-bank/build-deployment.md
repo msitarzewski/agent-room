@@ -1,8 +1,96 @@
 # Build and Deployment
 
-**Status:** Approved deployment architecture; production activation in progress
+**Status:** Local tailnet deployment running; signed Linux production promotion separate
 
-**Last updated:** 2026-07-28
+**Last updated:** 2026-10-14
+
+## Local Tailnet Deployment
+
+Michael authorized MiradorXR's local loopback + Tailscale Serve HTTPS pattern.
+This macOS deployment extends the native Apple Silicon procedure in `README.md`
+and existing `deploy/compose/compose.yaml` PostgreSQL/Dex definitions. It runs
+the production web build with `AGENTROOM_DEV=false` and normal OIDC authorization.
+
+| Component | Local binding | Tailnet HTTPS |
+| --- | --- | --- |
+| Native application | `127.0.0.1:4445` | dedicated port 4445 |
+| Dex identity provider | `127.0.0.1:5557` | dedicated port 4446, `/dex` issuer |
+| PostgreSQL | `127.0.0.1:55440` | none |
+| Administration | `127.0.0.1:54490` | none |
+| Private adapter | `127.0.0.1:54491` | none |
+
+Tailscale Serve owns HTTPS and WebSocket proxying. The application trusts only
+loopback proxies and its configured HTTPS origin. MiradorXR's port 4444 and all
+other existing tailnet mappings are retained; Funnel is not enabled.
+
+Actual URLs are in `data/local/deployment.json`. Operator credentials are in
+`data/local/secrets/login.json`; use the `username` and `password` values at the
+OIDC login screen. These ignored files stay private, outside Git and Sentry docs.
+`data/local/agentroom.conf` references private secret files. Application and Dex
+use separate non-superuser database roles and databases; Dex signing keys and
+identity sessions persist in PostgreSQL. The Compose project is `agentroom-local`.
+
+### Local Lifecycle
+
+The native `bin/agentroomd` is supervised by per-user launch agent
+`local.agentroom`. Its installed LaunchAgents entry links to
+`data/local/local.agentroom.plist`. It starts at user login and restarts after
+failure; database containers use `unless-stopped`. Docker Desktop, Tailscale,
+and an awake workstation are required for remote headset access.
+
+Check or restart the existing installation from the repository root:
+
+```sh
+docker compose -f data/local/compose.json up --detach --wait postgres dex
+launchctl print "gui/$(id -u)/local.agentroom"
+launchctl kickstart -k "gui/$(id -u)/local.agentroom"
+curl --fail http://127.0.0.1:54490/readyz
+tailscale serve status
+```
+
+The readiness success response is HTTP 204. For a browser document check, send
+`Accept: text/html` to the HTTPS `/workspace` URL. An unauthenticated workspace
+API read must return 401. Login preserves the selected project/task deep link.
+Diagnostic logs and browser/restart evidence are in `data/local/logs/`.
+
+For updates, rerun the repository checks, rebuild `web/dist`, and rebuild native
+binaries with the pinned Go toolchain. The daemon reads the web distribution
+from disk; native daemon changes require `launchctl kickstart` after building.
+Use the existing CLI with `--config data/local/agentroom.conf` for migrations,
+doctor, and scoped administration. Keep private snapshots of both `agentroom`
+and `agentroom_identity` databases before changes; the initial restart snapshots
+are in `data/local/backups/`. This local instance has not installed the Linux
+pgBackRest/off-host backup policy described below.
+
+To stop this instance while retaining its data:
+
+```sh
+launchctl bootout "gui/$(id -u)/local.agentroom"
+docker compose -f data/local/compose.json stop
+tailscale serve --https=4445 off
+tailscale serve --https=4446 off
+```
+
+To reload a stopped launch agent, use `launchctl bootstrap "gui/$(id -u)"
+data/local/local.agentroom.plist`, then restore only its two Serve mappings to
+the loopback app and Dex ports:
+
+```sh
+tailscale serve --bg --https=4445 --yes http://127.0.0.1:4445
+tailscale serve --bg --https=4446 --yes http://127.0.0.1:5557
+```
+
+Never reset all Serve routes or remove database
+volumes to restart this instance. Preserve the checkout, private runtime files,
+and LaunchAgents link. Sentry's independent services are unaffected.
+
+Physical Vision Pro acceptance and signed Linux promotion remain separate from
+the local WebXR build. Read `releases/spatial-workspace.md` for their checklist.
+
+The operator-designated remote machine is the eventual deployment home. This
+local installation is a staging step for headset testing. Its actual host
+identifier stays in `data/local/deployment.json`; verify that host's platform
+before producing the promoted artifact and activating the remote service.
 
 ## Topology
 

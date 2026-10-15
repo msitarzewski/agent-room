@@ -22,5 +22,21 @@
     "occurred_at": {"type": "string", "format": "date-time"},
     "schema_version": {"const": 1},
     "payload": {}
+  },
+  "allOf": [{"if": {"properties": {"source_system": {"const": "sentry"}},"required": ["source_system"]},"then": {"required": ["source_event_id","source_sequence"],"properties": {"type": {"const": "task.observed"},"subject_type": {"const": "task"},"source_sequence": {"type": "integer","minimum": 1},"payload": {"$ref": "#/$defs/TaskObservation"}}}}],
+  "$defs": {
+    "TaskObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["external_id", "title", "status"],
+      "properties": {
+        "external_id": {"type": "string","minLength": 1,"maxLength": 1024},
+        "title": {"type": "string","minLength": 1,"maxLength": 4096},
+        "description": {"type": "string"},
+        "status": {"type": "string","minLength": 1,"maxLength": 128},
+        "external_url": {"type": "string","format": "uri","pattern": "^https?://"},
+        "dependencies": {"type": "array","maxItems": 1000,"items": {"type": "string","minLength": 1,"maxLength": 1024}}
+      }
+    }
   }
 }

@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -132,17 +134,36 @@ type Session struct {
 
 type Task struct {
 	Base
-	Title         string   `json:"title"`
-	Description   string   `json:"description,omitempty"`
-	OwnerID       string   `json:"owner_id,omitempty"`
-	Status        string   `json:"status"`
-	Priority      string   `json:"priority"`
-	Dependencies  []string `json:"dependencies"`
-	BudgetID      string   `json:"budget_id,omitempty"`
-	ReviewState   string   `json:"review_state,omitempty"`
-	ApprovalState string   `json:"approval_state,omitempty"`
-	BlockedReason string   `json:"blocked_reason,omitempty"`
-	Source        Source   `json:"source"`
+	Title             string           `json:"title"`
+	Description       string           `json:"description,omitempty"`
+	OwnerID           string           `json:"owner_id,omitempty"`
+	Status            string           `json:"status"`
+	Priority          string           `json:"priority"`
+	Dependencies      []string         `json:"dependencies"`
+	BudgetID          string           `json:"budget_id,omitempty"`
+	ReviewState       string           `json:"review_state,omitempty"`
+	ApprovalState     string           `json:"approval_state,omitempty"`
+	BlockedReason     string           `json:"blocked_reason,omitempty"`
+	Source            Source           `json:"source"`
+	SourceStatus      string           `json:"source_status,omitempty"`
+	SourceObservedAt  *time.Time       `json:"source_observed_at,omitempty"`
+	SourceObservation *TaskObservation `json:"source_observation,omitempty"`
+}
+
+// TaskObservation is source-reported work metadata. It never grants a source
+// authority to accept completion, change ownership, or decide an approval.
+type TaskObservation struct {
+	ExternalID   string   `json:"external_id"`
+	Title        string   `json:"title"`
+	Description  string   `json:"description,omitempty"`
+	Status       string   `json:"status"`
+	ExternalURL  string   `json:"external_url,omitempty"`
+	Dependencies []string `json:"dependencies,omitempty"`
+}
+
+func ObservedTaskID(projectID, externalID string) string {
+	digest := sha256.Sum256([]byte(projectID + "\x00" + externalID))
+	return "sentry_task_" + hex.EncodeToString(digest[:16])
 }
 
 type TaskTransition struct {

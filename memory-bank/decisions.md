@@ -1,8 +1,46 @@
 # Decisions
 
-**Last updated:** 2026-07-28
+**Last updated:** 2026-10-14
 
 Only accepted decisions belong here. Open technical choices remain in `techContext.md` and `build-deployment.md`.
+
+## 2026-10-14: Local Tailnet Deployment Uses MiradorXR's HTTPS Pattern
+
+**Status:** Local staging step toward the operator-designated remote machine.
+
+**Context:** The first desktop/WebXR candidate needs a secure origin reachable
+from Vision Pro on the existing tailnet, using this Apple Silicon workstation.
+
+**Decision:** Run the existing native Go daemon and production web build behind
+Tailscale Serve on dedicated HTTPS app port 4445. Use HTTPS port 4446 for a local
+Dex identity provider, persistent isolated PostgreSQL databases, normal OIDC
+authorization, and a per-user launch agent. Preserve existing Serve mappings.
+Private runtime values and generated operator credentials stay in ignored
+`data/local/`. This does not replace the signed Linux/Caddy promotion contract.
+Michael confirmed that the remote machine is the eventual home; the local
+installation supports headset testing first. Its actual host identifier is in
+the private deployment record. Verify its platform before building the promoted
+artifact; this decision does not authorize remote activation.
+
+**Consequences:** The headset can use the same web application over an HTTPS
+origin without a native visionOS package. The workstation, Docker Desktop, and
+Tailscale must remain available. Device acceptance and production promotion
+still require their own evidence. No automatic Sentry connector is installed.
+
+**References:** `build-deployment.md#local-tailnet-deployment`;
+`releases/spatial-workspace.md`.
+
+## 2026-10-13: Shared Spatial Workspace and MiradorXR Technical Reference
+
+**Status:** Accepted for the user-authorized first release.
+
+**Context:** Michael requested an original magical desktop/WebXR workspace and identified the team's tested MiradorXR implementation as the technical reference.
+
+**Decision:** Extend the existing React/TypeScript client and Go/PostgreSQL control plane. Use Three.js, React Three Fiber, and react-three/xr with shared selection and domain data. Use WebGPU on desktop where available and the proven WebGL immersive stage because installed Fiber/XR session code assumes WebGL manager interfaces. Keep all controls on the existing command API. Sentry observations retain their own source state.
+
+**Consequences:** Input, lifecycle, loading, and resource-ownership patterns are reusable. Scene design is original. Desktop graphics and XR rendering have explicit lifecycle boundaries; no WebGPU XR capability is claimed until its actual library combination is validated.
+
+**References:** `releases/spatial-workspace.md`; `tasks/2026-10/zoomable-control-room-plan.md`.
 
 ## 2026-07-27: Human Control Plane Mission
 

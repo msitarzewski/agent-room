@@ -163,6 +163,101 @@ func TestServerAndMCPIntegrationBoundaries(t *testing.T) {
 		return rawRequest(t, method, public.URL+path, body, headers, sessionCookie)
 	}
 
+	t.Run("workspace snapshot and long stream replay stay complete", func(t *testing.T) {
+		const workspaceProject = "workspace-http"
+		if _, err := repository.Pool().Exec(ctx, `INSERT INTO projects(id,name) VALUES($1,'HTTP workspace')`, workspaceProject); err != nil {
+			t.Fatal(err)
+		}
+		ingester := app.Actor{ID: "sentry-http", Capabilities: map[string]struct{}{"event:ingest": {}, "source:sentry": {}}}
+		events := make([]domain.Event, 1101)
+		for index := range events {
+			payload, _ := json.Marshal(domain.TaskObservation{ExternalID: fmt.Sprintf("task-%d", index), Title: "Observed HTTP task", Status: "working"})
+			events[index] = domain.Event{ProjectID: workspaceProject, Type: "task.observed", SubjectType: domain.ResourceTask, SubjectID: "source-task", SourceSystem: "sentry", SourceEventID: fmt.Sprintf("http-scan-%d", index), SourceSequence: 1, Payload: payload}
+		}
+		if err := service.Ingest(ctx, ingester, events); err != nil {
+			t.Fatal(err)
+		}
+		response := api(http.MethodGet, "/api/v1/workspace?project_id="+workspaceProject, nil, nil)
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("workspace status=%d body=%s", response.StatusCode, readBody(response))
+		}
+		defer response.Body.Close()
+		var snapshot app.WorkspaceSnapshot
+		if err := json.NewDecoder(response.Body).Decode(&snapshot); err != nil {
+			t.Fatal(err)
+		}
+		if len(snapshot.Resources.Tasks) != 1101 || snapshot.Cursor == 0 || len(snapshot.Sources) != 1 || snapshot.Sources[0].System != "sentry" || snapshot.Resources.Approvals == nil || snapshot.Resources.Agents == nil {
+			t.Fatalf("workspace tasks=%d cursor=%d sources=%+v", len(snapshot.Resources.Tasks), snapshot.Cursor, snapshot.Sources)
+		}
+		unauthenticated := rawRequest(t, http.MethodGet, public.URL+"/api/v1/workspace?project_id="+workspaceProject, nil, nil, nil)
+		expectHTTPProblem(t, unauthenticated, http.StatusUnauthorized, "authentication_required")
+		missingProject := api(http.MethodGet, "/api/v1/workspace", nil, nil)
+		expectHTTPProblem(t, missingProject, http.StatusBadRequest, "project_required")
+		if _, err := repository.Pool().Exec(ctx, `INSERT INTO user_accounts(id,username,display_name,capabilities) VALUES('workspace-scoped','workspace-scoped','Scoped',ARRAY['task:read']::text[]); INSERT INTO project_memberships(project_id,user_id,capabilities) VALUES('workspace-http','workspace-scoped',ARRAY['task:read']::text[])`); err != nil {
+			t.Fatal(err)
+		}
+		_, token, err := authManager.CreateSession(ctx, auth.User{ID: "workspace-scoped", Username: "workspace-scoped", DisplayName: "Scoped", Capabilities: []string{"task:read"}}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		limitedCookie := &http.Cookie{Name: auth.DevCookieName, Value: token}
+		limited := rawRequest(t, http.MethodGet, public.URL+"/api/v1/workspace?project_id="+workspaceProject, nil, nil, limitedCookie)
+		expectHTTPProblem(t, limited, http.StatusForbidden, "capability_denied")
+		crossProject := rawRequest(t, http.MethodGet, public.URL+"/api/v1/workspace?project_id="+projectID, nil, nil, limitedCookie)
+		expectHTTPProblem(t, crossProject, http.StatusForbidden, "capability_denied")
+		streamContext, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		connection, response, err := websocket.Dial(streamContext, "ws"+strings.TrimPrefix(public.URL, "http")+"/api/v1/stream?project_id="+workspaceProject+"&after=0", &websocket.DialOptions{HTTPHeader: http.Header{"Cookie": {sessionCookie.String()}, "Origin": {origin}}})
+		if err != nil {
+			if response != nil {
+				t.Fatalf("long-replay websocket status=%d body=%s err=%v", response.StatusCode, readBody(response), err)
+			}
+			t.Fatal(err)
+		}
+		defer connection.CloseNow()
+		_, message, err := connection.Read(streamContext)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var value realtime.Message
+		if err := json.Unmarshal(message, &value); err != nil {
+			t.Fatal(err)
+		}
+		if value.Type != "resync_required" {
+			t.Fatalf("long backlog silently truncated: %s", message)
+		}
+		connection.CloseNow()
+		for iteration := 0; iteration < 8; iteration++ {
+			idle, handshake, err := websocket.Dial(streamContext, "ws"+strings.TrimPrefix(public.URL, "http")+"/api/v1/stream?project_id="+workspaceProject+"&after="+strconv.FormatInt(snapshot.Cursor, 10), &websocket.DialOptions{
+				HTTPHeader: http.Header{"Cookie": {sessionCookie.String()}, "Origin": {origin}}, CompressionMode: websocket.CompressionContextTakeover,
+			})
+			if err != nil {
+				if handshake != nil {
+					t.Fatalf("idle reconnect %d status=%d err=%v", iteration, handshake.StatusCode, err)
+				}
+				t.Fatal(err)
+			}
+			if extensions := handshake.Header.Get("Sec-WebSocket-Extensions"); extensions != "" {
+				idle.CloseNow()
+				t.Fatalf("control stream negotiated compression: %s", extensions)
+			}
+			idle.CloseNow()
+			deadline := time.Now().Add(time.Second)
+			for {
+				server.limits.mu.Lock()
+				remaining := server.limits.sockets["httpapi-operator:"+workspaceProject]
+				server.limits.mu.Unlock()
+				if remaining == 0 {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("idle peer disconnect retained %d socket slots", remaining)
+				}
+				time.Sleep(time.Millisecond)
+			}
+		}
+	})
+
 	t.Run("web handlers traverse success and validation branches", func(t *testing.T) {
 		for _, path := range []string{
 			"/api/v1/projects",

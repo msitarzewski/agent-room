@@ -82,6 +82,16 @@ export interface Task extends Versioned {
   review_state?: "not_requested" | "requested" | "approved" | "rejected";
   approval_state?: "not_required" | "pending" | "approved" | "rejected";
   blocked_reason?: string;
+  source_status?: string;
+  source_observed_at?: string;
+  source_observation?: {
+    external_id: string;
+    title: string;
+    status: string;
+    description?: string;
+    external_url?: string;
+    dependencies?: string[];
+  };
   source: Source;
 }
 
@@ -239,7 +249,33 @@ export interface WorkSession extends Versioned {
 
 export interface Page<T> {
   items: T[];
-  next_cursor?: string | number;
+  next_cursor?: string | number | null;
+}
+
+export type PageCursor = string | number;
+
+export interface ProjectOverview {
+  project_id: Identifier;
+  counts: Record<string, number>;
+  event_cursor: number;
+  generated_at: string;
+}
+
+export interface WorkspaceSnapshot {
+  project_id: Identifier;
+  cursor: number;
+  generated_at: string;
+  resources: {
+    tasks: Task[];
+    agents: Agent[];
+    runs: Run[];
+    attention: AttentionItem[];
+    evidence: Evidence[];
+    artifacts: Artifact[];
+    claims: Claim[];
+    approvals: Approval[];
+  };
+  sources: { system: string; last_seen: string }[];
 }
 
 export interface Problem {
@@ -254,6 +290,7 @@ export interface Problem {
 export type StreamStatus = "connecting" | "connected" | "reconnecting" | "disconnected" | "error";
 
 export interface StreamMessage<T = unknown> {
+  project_id?: Identifier;
   cursor: number;
   type: string;
   occurred_at: string;

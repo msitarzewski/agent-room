@@ -1,8 +1,8 @@
 # System Patterns
 
-**Status:** Foundational patterns; validate during implementation
+**Status:** Founding control plane and local spatial candidate validated
 
-**Last updated:** 2026-07-27
+**Last updated:** 2026-10-14
 
 ## Layered Control-Plane Architecture
 
@@ -161,3 +161,46 @@ Policy may allow narrowly scoped reversible actions. Destructive or irreversible
 Chat messages, command proposals, accepted commands, and resulting events are separate records.
 
 Natural-language text may propose an action. It cannot silently mutate canonical state.
+
+## Spatial Read Boundary
+
+`internal/postgres/repository.go:578` reads workspace resources, the event
+watermark, and source receipt times in one read-only repeatable-read transaction.
+The application checks every included resource kind before returning a snapshot;
+partial hidden graphs fail closed. The scene and HTML inspector share this
+snapshot. GPU selection and placement never write domain state.
+
+`web/src/hooks/useCollection.ts:56` serializes refreshes, coalesces events during
+an active request, cancels project switches, and clears protected state on
+authorization loss. Failed refreshes retain explicitly stale data. Stream events
+are project-scoped, including reconnect and resync signals. Event cursors are
+not treated as commit-order guarantees; every relevant batch refreshes state.
+
+## Source Observations and Supervision
+
+Sentry's typed `task.observed` contract derives stable project-scoped identity
+from `external_id`. New tasks enter `inbox`; later observations update source
+metadata separately from human-owned title, status, assignment, dependencies,
+review, and approval. See `internal/app/service.go:608` and
+`internal/postgres/projector.go:147`.
+
+Projection identity locks serialize first delivery; source sequences reject
+stale updates. Trusted command replay preserves source watermarks. Private
+ingestion cannot supply resource replacements or trusted command attribution.
+Source-owned blocked attention has a separate identity, resolves only from a
+newer nonblocked observation, and honors human resolution until a new blocked
+episode. Source completion never accepts evidence or a completion claim.
+
+## Desktop and Immersive Resource Ownership
+
+`web/src/workspace/SceneCanvas.tsx:458` owns a desktop WebGPU renderer with WebGL2
+fallback and a separate WebGL XR stage sharing domain state. The installed
+Fiber/XR versions require the WebGL XR manager interface. Request immersive
+sessions synchronously within user activation; handle cancellation and clean
+session/store/listener/texture ownership. Move the workspace, never the headset
+camera. Keep HTML directory and controls available when graphics fail.
+
+Project identity determines stable geography. Actual dependency edges determine
+task layout. Instancing, bounded labels, demand rendering, visibility pause,
+and reduced motion limit scene work. The pinned production build removes the
+upstream opt-in emulator branch and fails if its reviewed shape changes.

@@ -5,6 +5,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -97,7 +98,7 @@ func TestRepositoryCommandEventProjectionRoundTrip(t *testing.T) {
 	}
 	failed := domain.Event{
 		ProjectID: "project-1", Type: "run.failed", SubjectType: domain.ResourceRun, SubjectID: "run-native-1",
-		ActorID: "attacker", OccurredAt: time.Date(2026, 7, 27, 12, 1, 0, 0, time.UTC), SchemaVersion: 1,
+		ActorID: "attacker", OccurredAt: time.Now().UTC().Truncate(time.Second).Add(-time.Minute), SchemaVersion: 1,
 		SourceSystem: "codex", SourceEventID: "native-2", SourceSequence: 2, Payload: json.RawMessage(`{"error_code":"exit_1"}`),
 	}
 	if err := service.Ingest(ctx, actor, []domain.Event{failed}); err != nil {
@@ -263,6 +264,27 @@ func TestRepositoryCommandEventProjectionRoundTrip(t *testing.T) {
 	if budget.TokenUsed != 12 || budget.Status != "exhausted" {
 		t.Fatalf("concurrent budget accounting lost usage: %+v", budget)
 	}
+	if err := service.Ingest(ctx, actor, []domain.Event{{ProjectID: "project-1", Type: "budget.rate_limit_observed", SubjectType: domain.ResourceBudget,
+		SubjectID: "budget-1", SourceSystem: "meter", SourceEventID: "budget-rate-limit", Payload: json.RawMessage(`{}`)}}); err != nil {
+		t.Fatal(err)
+	}
+	budgetRaw, err = service.Get(ctx, actor, "project-1", domain.ResourceBudget, "budget-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(budgetRaw, &budget); err != nil {
+		t.Fatal(err)
+	}
+	if budget.Status != "exhausted" || budget.TokenUsed != 12 {
+		t.Fatalf("source event cleared enforced budget: %+v", budget)
+	}
+	if err := service.Ingest(ctx, actor, []domain.Event{{ProjectID: "project-1", Type: "approval.requested", SubjectType: domain.ResourceApproval,
+		SubjectID: "source-approval", SourceSystem: "codex", SourceEventID: "source-approval", Payload: json.RawMessage(`{}`)}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Get(ctx, actor, "project-1", domain.ResourceApproval, "source-approval"); err != app.ErrNotFound {
+		t.Fatalf("source created privileged approval: %v", err)
+	}
 	if _, err := service.TransitionTask(ctx, actor, "project-1", "task-1", "review", "", "budget-denied", 3, ""); err != app.ErrBudgetExceeded {
 		t.Fatalf("enforced exhausted budget did not deny command: %v", err)
 	}
@@ -288,6 +310,421 @@ func TestRepositoryCommandEventProjectionRoundTrip(t *testing.T) {
 	if err != nil || !revokeReplayed {
 		t.Fatalf("idempotent service-token revocation replayed=%v err=%v", revokeReplayed, err)
 	}
+	t.Run("workspace includes every resource and isolates source observations", func(t *testing.T) {
+		if _, err := repo.Pool().Exec(ctx, `INSERT INTO projects(id,name) VALUES('workspace-project','Workspace'),('empty-project','Empty')`); err != nil {
+			t.Fatal(err)
+		}
+		sentry := app.Actor{ID: "sentry", Capabilities: map[string]struct{}{"event:ingest": {}, "source:sentry": {}}}
+		events := make([]domain.Event, 260)
+		for index := range events {
+			payload, _ := json.Marshal(domain.TaskObservation{ExternalID: fmt.Sprintf("task-%03d", index), Title: "Observed work", Status: "completed"})
+			events[index] = domain.Event{ProjectID: "workspace-project", Type: "task.observed", SubjectType: domain.ResourceTask,
+				SubjectID: "untrusted", SourceSystem: "sentry", SourceEventID: fmt.Sprintf("scan-1-%d", index), SourceSequence: 1,
+				OccurredAt: time.Now().UTC().Add(-time.Hour), Payload: payload}
+		}
+		if err := service.Ingest(ctx, sentry, events); err != nil {
+			t.Fatal(err)
+		}
+		snapshot, err := service.Workspace(ctx, actor, "workspace-project")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(snapshot.Resources.Tasks) != 260 || len(snapshot.Sources) != 1 || snapshot.Sources[0].System != "sentry" || snapshot.Sources[0].LastSeen.Before(time.Now().Add(-time.Minute)) {
+			t.Fatalf("incomplete workspace tasks=%d sources=%+v", len(snapshot.Resources.Tasks), snapshot.Sources)
+		}
+		for _, raw := range snapshot.Resources.Tasks {
+			var task domain.Task
+			if err := json.Unmarshal(raw, &task); err != nil {
+				t.Fatal(err)
+			}
+			if task.ProjectID != "workspace-project" || task.Status != "inbox" || task.SourceStatus != "completed" {
+				t.Fatalf("leaked or accepted observation: %+v", task)
+			}
+		}
+		taskID := domain.ObservedTaskID("workspace-project", "task-000")
+		if _, err := service.TransitionTask(ctx, actor, "workspace-project", taskID, "ready", "", "observed-ready", 1, ""); err != nil {
+			t.Fatal(err)
+		}
+		newer := events[0]
+		newer.SourceSequence, newer.SourceEventID = 3_000_000_000, "scan-3-0"
+		newer.Payload = json.RawMessage(`{"external_id":"task-000","title":"New observation","status":"blocked"}`)
+		if err := service.Ingest(ctx, sentry, []domain.Event{newer}); err != nil {
+			t.Fatal(err)
+		}
+		older := newer
+		older.SourceSequence, older.SourceEventID = 2, "scan-2-0"
+		older.Payload = json.RawMessage(`{"external_id":"task-000","title":"Old observation","status":"completed"}`)
+		if err := service.Ingest(ctx, sentry, []domain.Event{older}); err != nil {
+			t.Fatal(err)
+		}
+		if err := service.Ingest(ctx, sentry, []domain.Event{newer}); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := service.Get(ctx, actor, "workspace-project", domain.ResourceTask, taskID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var task domain.Task
+		if err := json.Unmarshal(raw, &task); err != nil {
+			t.Fatal(err)
+		}
+		if task.Status != "ready" || task.SourceStatus != "blocked" || task.Version != 3 || task.Title != "Observed work" {
+			t.Fatalf("observation changed supervisor state or regressed: %+v", task)
+		}
+		attentionID := "attn_" + stableID("workspace-project", sourceTaskBlocked, string(domain.ResourceTask), taskID)
+		attentionRaw, err := service.Get(ctx, actor, "workspace-project", domain.ResourceAttention, attentionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var sourceAttention domain.Attention
+		if err := json.Unmarshal(attentionRaw, &sourceAttention); err != nil {
+			t.Fatal(err)
+		}
+		if sourceAttention.Kind != "source.task.blocked" || sourceAttention.Status != "open" || sourceAttention.Title != "Source reports blocked: New observation" || sourceAttention.Version != 1 {
+			t.Fatalf("source attention=%+v", sourceAttention)
+		}
+		if _, err := service.Create(ctx, actor, domain.ResourceAttention, "workspace-project", "human-attention-create", domain.Attention{Base: domain.Base{ID: "human-attention"}, Kind: "review", Severity: "high", Title: "Human review", ResourceType: "task", ResourceID: taskID, Status: "open"}, ""); err != nil {
+			t.Fatal(err)
+		}
+		repeated := newer
+		repeated.SourceSequence, repeated.SourceEventID = 3_000_000_001, "blocked-repeat"
+		repeated.Payload = json.RawMessage(`{"external_id":"task-000","title":"New observation","status":" Blocked "}`)
+		if err := service.Ingest(ctx, sentry, []domain.Event{repeated}); err != nil {
+			t.Fatal(err)
+		}
+		attentionRaw, err = service.Get(ctx, actor, "workspace-project", domain.ResourceAttention, attentionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(attentionRaw, &sourceAttention); err != nil {
+			t.Fatal(err)
+		}
+		if sourceAttention.Version != 1 || sourceAttention.Status != "open" {
+			t.Fatalf("repeat duplicated source attention: %+v", sourceAttention)
+		}
+		unblocked := repeated
+		unblocked.SourceSequence, unblocked.SourceEventID = 3_000_000_002, "source-unblocked"
+		unblocked.Payload = json.RawMessage(`{"external_id":"task-000","title":"New observation","status":"Upcoming"}`)
+		if err := service.Ingest(ctx, sentry, []domain.Event{unblocked}); err != nil {
+			t.Fatal(err)
+		}
+		staleBlocked := repeated
+		staleBlocked.SourceEventID = "stale-source-blocked"
+		if err := service.Ingest(ctx, sentry, []domain.Event{staleBlocked}); err != nil {
+			t.Fatal(err)
+		}
+		attentionRaw, err = service.Get(ctx, actor, "workspace-project", domain.ResourceAttention, attentionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(attentionRaw, &sourceAttention); err != nil {
+			t.Fatal(err)
+		}
+		if sourceAttention.Status != "resolved" || sourceAttention.Version != 2 || sourceAttention.ResolvedAt == nil {
+			t.Fatalf("source attention did not resolve or stale source reopened it: %+v", sourceAttention)
+		}
+		humanRaw, err := service.Get(ctx, actor, "workspace-project", domain.ResourceAttention, "human-attention")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var humanAttention domain.Attention
+		if err := json.Unmarshal(humanRaw, &humanAttention); err != nil {
+			t.Fatal(err)
+		}
+		if humanAttention.Status != "open" || humanAttention.Version != 1 {
+			t.Fatalf("source changed human attention: %+v", humanAttention)
+		}
+		taskRaw, err := service.Get(ctx, actor, "workspace-project", domain.ResourceTask, taskID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(taskRaw, &task); err != nil {
+			t.Fatal(err)
+		}
+		if task.Status != "ready" || task.SourceStatus != "Upcoming" {
+			t.Fatalf("source attention lifecycle changed supervised task: %+v", task)
+		}
+		newEpisode := repeated
+		newEpisode.SourceSequence, newEpisode.SourceEventID = 3_000_000_003, "new-blocked-episode"
+		if err := service.Ingest(ctx, sentry, []domain.Event{newEpisode}); err != nil {
+			t.Fatal(err)
+		}
+		attentionRaw, err = service.Get(ctx, actor, "workspace-project", domain.ResourceAttention, attentionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(attentionRaw, &sourceAttention); err != nil {
+			t.Fatal(err)
+		}
+		if sourceAttention.Status != "open" || sourceAttention.Version != 3 {
+			t.Fatalf("new source blockage did not reopen attention: %+v", sourceAttention)
+		}
+		humanResolver := app.Actor{ID: "human", Capabilities: map[string]struct{}{"attention:manage": {}}}
+		if _, err := service.SetAttentionStatus(ctx, humanResolver, "workspace-project", attentionID, "resolved", "human-resolves-source-attention", 3, ""); err != nil {
+			t.Fatal(err)
+		}
+		stillBlocked := newEpisode
+		stillBlocked.SourceSequence, stillBlocked.SourceEventID = 3_000_000_004, "still-blocked-after-human-resolution"
+		stillBlocked.Payload = json.RawMessage(`{"external_id":"task-000","title":"Newer source title","status":"Blocked"}`)
+		if err := service.Ingest(ctx, sentry, []domain.Event{stillBlocked}); err != nil {
+			t.Fatal(err)
+		}
+		attentionRaw, err = service.Get(ctx, actor, "workspace-project", domain.ResourceAttention, attentionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(attentionRaw, &sourceAttention); err != nil {
+			t.Fatal(err)
+		}
+		if sourceAttention.Status != "resolved" || sourceAttention.Version != 4 {
+			t.Fatalf("still-blocked source undid human resolution: %+v", sourceAttention)
+		}
+		unblocked.SourceSequence, unblocked.SourceEventID = 3_000_000_005, "source-unblocked-after-human-resolution"
+		if err := service.Ingest(ctx, sentry, []domain.Event{unblocked}); err != nil {
+			t.Fatal(err)
+		}
+		newEpisode.SourceSequence, newEpisode.SourceEventID = 3_000_000_006, "new-blocked-episode-after-human-resolution"
+		if err := service.Ingest(ctx, sentry, []domain.Event{newEpisode}); err != nil {
+			t.Fatal(err)
+		}
+		attentionRaw, err = service.Get(ctx, actor, "workspace-project", domain.ResourceAttention, attentionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(attentionRaw, &sourceAttention); err != nil {
+			t.Fatal(err)
+		}
+		if sourceAttention.Status != "open" || sourceAttention.Version != 5 {
+			t.Fatalf("true new blocked episode did not reopen human-resolved attention: %+v", sourceAttention)
+		}
+		for iteration := 0; iteration < 10; iteration++ {
+			externalID := fmt.Sprintf("concurrent-first-%d", iteration)
+			start := make(chan struct{})
+			failures := make(chan error, 2)
+			for sequence := 1; sequence <= 2; sequence++ {
+				go func(sequence int) {
+					<-start
+					payload, _ := json.Marshal(domain.TaskObservation{ExternalID: externalID, Title: "Concurrent observation", Status: fmt.Sprintf("sequence-%d", sequence)})
+					failures <- service.Ingest(ctx, sentry, []domain.Event{{ProjectID: "workspace-project", Type: "task.observed", SubjectType: domain.ResourceTask, SubjectID: "untrusted", SourceSystem: "sentry", SourceEventID: fmt.Sprintf("%s-%d", externalID, sequence), SourceSequence: int64(sequence), Payload: payload}})
+				}(sequence)
+			}
+			close(start)
+			for range 2 {
+				if err := <-failures; err != nil {
+					t.Fatal(err)
+				}
+			}
+			raw, err := service.Get(ctx, actor, "workspace-project", domain.ResourceTask, domain.ObservedTaskID("workspace-project", externalID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var task domain.Task
+			if err := json.Unmarshal(raw, &task); err != nil {
+				t.Fatal(err)
+			}
+			if task.SourceStatus != "sequence-2" {
+				t.Fatalf("concurrent first observation regressed: %+v", task)
+			}
+		}
+
+		empty, err := service.Workspace(ctx, actor, "empty-project")
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, _ := json.Marshal(empty)
+		var fields map[string]any
+		if err := json.Unmarshal(encoded, &fields); err != nil {
+			t.Fatal(err)
+		}
+		resources := fields["resources"].(map[string]any)
+		for name, value := range resources {
+			array, ok := value.([]any)
+			if !ok || len(array) != 0 {
+				t.Fatalf("empty %s=%v", name, value)
+			}
+		}
+		if empty.Cursor != 0 || len(empty.Sources) != 0 || empty.GeneratedAt.IsZero() {
+			t.Fatalf("empty workspace=%+v", empty)
+		}
+		if _, err := service.Workspace(ctx, actor, "missing-project"); err != app.ErrNotFound {
+			t.Fatalf("missing project err=%v", err)
+		}
+		if _, err := service.Create(ctx, actor, domain.ResourceClaim, "workspace-project", "rebuild-claim", domain.Claim{Base: domain.Base{ID: "human-claim"}, TaskID: taskID, AgentID: "human", Status: "pending"}, ""); err != nil {
+			t.Fatal(err)
+		}
+		latestTaskRaw, err := service.Get(ctx, actor, "workspace-project", domain.ResourceTask, taskID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(latestTaskRaw, &task); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := service.TransitionTask(ctx, actor, "workspace-project", taskID, "working", "Manual update after the latest source observation", "last-task-command-before-rebuild", task.Version, ""); err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.RebuildProjections(ctx); err != nil {
+			t.Fatal(err)
+		}
+		rebuiltRaw, err := service.Get(ctx, actor, "workspace-project", domain.ResourceTask, taskID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(rebuiltRaw, &task); err != nil {
+			t.Fatal(err)
+		}
+		if task.Status != "working" || task.SourceStatus != " Blocked " || task.Title != "Observed work" {
+			t.Fatalf("rebuild lost manual/source task state: %+v", task)
+		}
+		var retainedSource string
+		var retainedSequence int64
+		if err := repo.Pool().QueryRow(ctx, `SELECT source_system,source_sequence FROM resources WHERE project_id='workspace-project' AND kind='task' AND id=$1`, taskID).Scan(&retainedSource, &retainedSequence); err != nil {
+			t.Fatal(err)
+		}
+		if retainedSource != "sentry" || retainedSequence != 3_000_000_006 {
+			t.Fatalf("rebuild lost source watermark: %s/%d", retainedSource, retainedSequence)
+		}
+		staleAfterRebuild := unblocked
+		staleAfterRebuild.SourceEventID = "stale-source-after-rebuild"
+		if err := service.Ingest(ctx, sentry, []domain.Event{staleAfterRebuild}); err != nil {
+			t.Fatal(err)
+		}
+		attentionRaw, err = service.Get(ctx, actor, "workspace-project", domain.ResourceAttention, attentionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(attentionRaw, &sourceAttention); err != nil {
+			t.Fatal(err)
+		}
+		if sourceAttention.Status != "open" || sourceAttention.Version != 5 {
+			t.Fatalf("rebuild allowed stale source attention: %+v", sourceAttention)
+		}
+		humanRaw, err = service.Get(ctx, actor, "workspace-project", domain.ResourceAttention, "human-attention")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(humanRaw, &humanAttention); err != nil {
+			t.Fatal(err)
+		}
+		if humanAttention.Status != "open" || humanAttention.Title != "Human review" {
+			t.Fatalf("rebuild lost human attention: %+v", humanAttention)
+		}
+		rebuiltApprovalRaw, err := service.Get(ctx, actor, "project-1", domain.ResourceApproval, approval.ID)
+		if err != nil {
+			t.Fatalf("rebuild lost trusted approval: %v", err)
+		}
+		var rebuiltApproval domain.Approval
+		if err := json.Unmarshal(rebuiltApprovalRaw, &rebuiltApproval); err != nil {
+			t.Fatal(err)
+		}
+		if rebuiltApproval.ConsumedAt == nil || rebuiltApproval.ConsumedBy != approval.ConsumedBy || rebuiltApproval.Version != approval.Version {
+			t.Fatalf("rebuild lost approval consumption: %+v", rebuiltApproval)
+		}
+		if _, err := service.Get(ctx, actor, "workspace-project", domain.ResourceClaim, "human-claim"); err != nil {
+			t.Fatalf("rebuild lost trusted claim: %v", err)
+		}
+	})
+
+	t.Run("resource pagination visits every tied timestamp exactly once", func(t *testing.T) {
+		const project = "pagination-project"
+		if _, err := repo.Pool().Exec(ctx, `INSERT INTO projects(id,name) VALUES($1,'Pagination regression')`, project); err != nil {
+			t.Fatal(err)
+		}
+		at := time.Now().UTC().Truncate(time.Second)
+		observations := make([]domain.Event, 123)
+		expected := map[string]bool{}
+		for i := range observations {
+			externalID := fmt.Sprintf("pagination-task-%03d", i)
+			expected[domain.ObservedTaskID(project, externalID)] = true
+			payload, _ := json.Marshal(domain.TaskObservation{ExternalID: externalID, Title: "Pagination task", Status: "Upcoming"})
+			observations[i] = domain.Event{ProjectID: project, Type: "task.observed", SubjectType: domain.ResourceTask, SubjectID: "source", SourceSystem: "sentry", SourceEventID: externalID, SourceSequence: 1, OccurredAt: at, Payload: payload}
+		}
+		sentry := app.Actor{ID: "pagination-sentry", Capabilities: map[string]struct{}{"event:ingest": {}, "source:sentry": {}}}
+		if err := service.Ingest(ctx, sentry, observations); err != nil {
+			t.Fatal(err)
+		}
+		seen := map[string]int{}
+		cursor := ""
+		for pageNumber := 0; pageNumber < 10; pageNumber++ {
+			page, err := service.List(ctx, actor, project, domain.ResourceTask, cursor, 25)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, raw := range page.Items {
+				var task domain.Task
+				if err := json.Unmarshal(raw, &task); err != nil {
+					t.Fatal(err)
+				}
+				if !expected[task.ID] {
+					t.Fatalf("unexpected paginated task %q", task.ID)
+				}
+				seen[task.ID]++
+			}
+			if page.NextCursor == "" {
+				break
+			}
+			if page.NextCursor == cursor {
+				t.Fatal("pagination cursor did not advance")
+			}
+			cursor = page.NextCursor
+		}
+		if len(seen) != len(expected) {
+			t.Fatalf("pagination skipped resources: got=%d want=%d", len(seen), len(expected))
+		}
+		for id := range expected {
+			if seen[id] != 1 {
+				t.Fatalf("task %s visited %d times", id, seen[id])
+			}
+		}
+	})
+
+	t.Run("workspace cursor and projection agree during concurrent commands", func(t *testing.T) {
+		const project = "workspace-concurrent"
+		if _, err := repo.Pool().Exec(ctx, `INSERT INTO projects(id,name) VALUES($1,'Concurrent workspace')`, project); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := service.Create(ctx, actor, domain.ResourceTask, project, "concurrent-task-create",
+			domain.Task{Base: domain.Base{ID: "task"}, Title: "Concurrent task", Status: "ready", Priority: "normal", Dependencies: []string{}}, ""); err != nil {
+			t.Fatal(err)
+		}
+		failures := make(chan error, 1)
+		go func() {
+			for i := 0; i < 40; i++ {
+				status := "working"
+				if i%2 == 1 {
+					status = "blocked"
+				}
+				if _, err := service.TransitionTask(ctx, actor, project, "task", status, "Concurrency test transition", fmt.Sprintf("concurrent-transition-%d", i), int64(i+1), ""); err != nil {
+					failures <- err
+					return
+				}
+			}
+			failures <- nil
+		}()
+		for i := 0; i < 40; i++ {
+			snapshot, err := service.Workspace(ctx, actor, project)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var task domain.Task
+			if len(snapshot.Resources.Tasks) != 1 {
+				t.Fatalf("tasks=%d", len(snapshot.Resources.Tasks))
+			}
+			if err := json.Unmarshal(snapshot.Resources.Tasks[0], &task); err != nil {
+				t.Fatal(err)
+			}
+			var eventVersion int64
+			if err := repo.Pool().QueryRow(ctx, `SELECT (payload->'resource'->>'version')::bigint FROM events WHERE project_id=$1 AND cursor=$2`, project, snapshot.Cursor).Scan(&eventVersion); err != nil {
+				t.Fatal(err)
+			}
+			if eventVersion != task.Version {
+				t.Fatalf("snapshot cursor=%d event version=%d task version=%d", snapshot.Cursor, eventVersion, task.Version)
+			}
+		}
+		if err := <-failures; err != nil {
+			t.Fatal(err)
+		}
+	})
+
 }
 
 type integrationController struct {

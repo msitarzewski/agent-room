@@ -19,6 +19,38 @@ interface StreamContextValue {
 
 const StreamContext = createContext<StreamContextValue | null>(null);
 
+export const STREAM_EVENT = "agentroom:stream";
+export const STREAM_REFRESH_DELAY = 80;
+
+/** The socket adds project scope even to lifecycle and resync messages. */
+export function subscribeProjectChanges(
+  projectId: string,
+  onChange: () => void,
+  onDenied: () => void,
+): () => void {
+  let timer: number | undefined;
+  const receive = (event: Event) => {
+    const message = (event as CustomEvent<StreamMessage>).detail;
+    if (!message || message.project_id !== projectId || message.type === "heartbeat") return;
+    if (message.type === "authorization_denied") {
+      window.clearTimeout(timer);
+      timer = undefined;
+      onDenied();
+      return;
+    }
+    if (timer !== undefined) return;
+    timer = window.setTimeout(() => {
+      timer = undefined;
+      onChange();
+    }, STREAM_REFRESH_DELAY);
+  };
+  window.addEventListener(STREAM_EVENT, receive);
+  return () => {
+    window.clearTimeout(timer);
+    window.removeEventListener(STREAM_EVENT, receive);
+  };
+}
+
 function streamUrl(projectId: string, cursor: string | null): string {
   const url = new URL("/api/v1/stream", window.location.origin);
   url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -48,7 +80,15 @@ export function StreamProvider({ children }: { children: ReactNode }) {
       return;
     }
     let disposed = false;
+    retryRef.current = 0;
+    setLastMessageAt(null);
     const cursorKey = `agent-room:cursor:${projectId}`;
+
+    const publish = (message: StreamMessage) => {
+      window.dispatchEvent(new CustomEvent(STREAM_EVENT, {
+        detail: { ...message, project_id: projectId },
+      }));
+    };
 
     const connect = () => {
       if (disposed) return;
@@ -57,28 +97,34 @@ export function StreamProvider({ children }: { children: ReactNode }) {
       socketRef.current = socket;
 
       socket.addEventListener("open", () => {
+        if (disposed || socketRef.current !== socket) return;
         retryRef.current = 0;
         setStatus("connected");
+        publish({ type: "stream_connected", cursor: 0, occurred_at: new Date().toISOString() });
       });
       socket.addEventListener("message", (event) => {
+        if (disposed || socketRef.current !== socket) return;
         try {
           const message = JSON.parse(String(event.data)) as StreamMessage;
+          if (typeof message.type !== "string") throw new Error("Invalid stream message.");
           if (message.type === "heartbeat") return;
           if (message.type === "resync_required") {
             sessionStorage.removeItem(cursorKey);
           } else if (message.cursor) {
-            sessionStorage.setItem(cursorKey, String(message.cursor));
+            const previous = Number(sessionStorage.getItem(cursorKey) ?? 0);
+            if (message.cursor > previous) sessionStorage.setItem(cursorKey, String(message.cursor));
           }
           setLastMessageAt(message.occurred_at);
-          window.dispatchEvent(new CustomEvent("agentroom:stream", { detail: message }));
+          publish(message);
         } catch {
           setStatus("error");
         }
       });
       socket.addEventListener("close", (event) => {
-        if (disposed) return;
+        if (disposed || socketRef.current !== socket) return;
         if (event.code === 4401 || event.code === 4403) {
           setStatus("error");
+          publish({ type: "authorization_denied", cursor: 0, occurred_at: new Date().toISOString() });
           return;
         }
         setStatus("reconnecting");
@@ -87,6 +133,7 @@ export function StreamProvider({ children }: { children: ReactNode }) {
         timerRef.current = window.setTimeout(connect, delay);
       });
       socket.addEventListener("error", () => {
+        if (disposed || socketRef.current !== socket) return;
         setStatus("error");
       });
     };

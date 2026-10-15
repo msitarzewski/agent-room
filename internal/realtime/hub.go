@@ -73,6 +73,21 @@ func (h *Hub) Subscribe(projectID string) (<-chan Message, func()) {
 }
 
 func WriteLoop(ctx context.Context, conn *websocket.Conn, messages <-chan Message, initial []domain.Event, validate func(context.Context) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// This channel is server-to-client only. A single reader must still
+	// consume ping/pong/close frames and cancel idle writes on peer disconnect.
+	// The caller owns conn.Close; keep the reader alive after a validation
+	// failure so the caller can deliver the authenticated close reason.
+	ctx, cancelRead := context.WithCancel(ctx)
+	go func() {
+		defer cancelRead()
+		_, _, err := conn.Reader(ctx)
+		if err == nil {
+			_ = conn.Close(websocket.StatusPolicyViolation, "unexpected data message")
+		}
+	}()
 	for _, event := range initial {
 		raw, _ := json.Marshal(event)
 		if err := write(ctx, conn, Message{Cursor: event.Cursor, Type: event.Type, OccurredAt: event.OccurredAt, Data: raw}); err != nil {

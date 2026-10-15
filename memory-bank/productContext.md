@@ -1,6 +1,6 @@
 # Product Context
 
-**Last updated:** 2026-07-27
+**Last updated:** 2026-10-14
 
 ## Initial Customer
 
@@ -56,6 +56,18 @@ The default experience answers:
 5. What should happen next?
 
 The primary surface is an attention inbox supported by active work, timeline, evidence, chat, cost, and health views.
+
+The spatial observatory adds an original portfolio → project → task → evidence
+experience at `/workspace`, alongside those views. Stable geography and real
+dependencies help the user regain context; persistent attention and accessible
+inspectors keep decisions and evidence close. Desktop and immersive WebXR share
+the same authorized records and selected work. Decorative sculpture never
+implies unobserved activity, and source completion remains separate from human
+acceptance. The default home continues to be Attention during device acceptance.
+
+Michael authorized this first visual release on 2026-10-13. MiradorXR supplies
+proven technical patterns; its visual design is not the template. See
+`memory-bank/releases/spatial-workspace.md` for scope and validation evidence.
 
 ## Success Measures
 

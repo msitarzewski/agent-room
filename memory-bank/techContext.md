@@ -1,8 +1,8 @@
 # Technical Context
 
-**Last updated:** 2026-07-28
+**Last updated:** 2026-10-14
 
-**Implementation status:** Founding release implemented and applied
+**Implementation status:** Founding release applied; local spatial release candidate verified and ready for review
 
 ## Known Environment
 
@@ -71,6 +71,9 @@ registration remains environment configuration and is not recorded here.
 - database: PostgreSQL 18 with `pgx/v5` and generated `sqlc` queries
 - migrations: embedded, sequential SQL migrations
 - frontend: React 19, TypeScript, and Vite
+- spatial frontend: Three.js 0.186.1, React Three Fiber 9.8.1,
+  react-three/xr 6.6.31; desktop WebGPU with WebGL2 fallback and dedicated
+  WebGL2 WebXR stage, sharing selection and authorized snapshot data
 - browser testing: Playwright across Chromium, Firefox, and WebKit
 - component testing: Vitest, React Testing Library, and axe checks
 - observability: structured `slog` plus OpenTelemetry traces and metrics
@@ -82,6 +85,23 @@ registration remains environment configuration and is not recorded here.
 - public ingress: Caddy HTTPS to Agent Room HTTP on `127.0.0.1:8443`
 
 See `memory-bank/decisions.md#2026-07-27-go-modular-monolith-on-postgresql`.
+
+## Spatial Compatibility and Acceptance
+
+MiradorXR is the team's tested technical reference for natural input, session
+activation, resource cleanup, and progressive detail. Agent Room's observatory
+design is original. Installed Fiber 9.8.1 requires XR methods missing from
+Three's current WebGPU XR manager; the first release therefore uses separate
+desktop and immersive renderers. Production excludes emulator/sample-room assets.
+
+Desktop browser checks cover Chromium and WebKit, responsive layout,
+accessibility, reduced motion, fallback, and evidence navigation. WebXR tests
+cover lifecycle/input contracts, cancellation, and desktop continuity. Exact
+Vision Pro visionOS build, natural selection, comfort, and frame pacing still
+need physical-device acceptance. The requested 27.4 beta 4 build is a user
+target, not a verified local device or a performance result.
+
+See `memory-bank/releases/spatial-workspace.md` for current evidence and scope.
 
 ## Open Operational Decisions
 

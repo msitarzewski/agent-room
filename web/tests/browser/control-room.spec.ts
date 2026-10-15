@@ -72,6 +72,20 @@ async function fulfillApi(route: Route, empty = false) {
       expires_at: "2026-07-27T20:00:00Z", csrf_token: "browser-csrf",
     } });
   }
+  if (url.pathname === "/api/v1/overview") {
+    return route.fulfill({ json: { project_id: "project_alpha", counts: empty ? {} : { task: 2, attention: 1 }, event_cursor: 42, generated_at: new Date().toISOString() } });
+  }
+  if (url.pathname === "/api/v1/workspace") {
+    const resources = Object.fromEntries(["tasks", "agents", "runs", "attention", "evidence", "artifacts", "claims", "approvals"].map((kind) => [kind, empty ? [] : data[`/api/v1/${kind}`] ?? []]));
+    if (!empty) {
+      resources.tasks = [
+        { ...(data["/api/v1/tasks"]?.[0] as Record<string, unknown>), dependencies: ["task_dependency"], source_status: "completed" },
+        { ...base, id: "task_dependency", title: "Validate identity boundary", status: "blocked", priority: "normal", dependencies: [], blocked_reason: "Waiting for provider evidence", source },
+      ];
+      resources.artifacts = (resources.artifacts ?? []).map((artifact) => ({ ...(artifact as Record<string, unknown>), task_id: "task_1" }));
+    }
+    return route.fulfill({ json: { project_id: "project_alpha", cursor: 42, generated_at: new Date().toISOString(), resources, sources: empty ? [] : [{ system: "codex", last_seen: new Date().toISOString() }] } });
+  }
   if (route.request().method() === "POST") {
     return route.fulfill({ json: { id: "updated", version: 2, project_id: "project_alpha", updated_at: new Date().toISOString() } });
   }
@@ -95,7 +109,7 @@ async function fulfillApi(route: Route, empty = false) {
       recommended_actions: ["Triage open attention items"], generated_at: "2026-07-27T12:00:00Z",
     } });
   }
-  return route.fulfill({ json: { items: empty ? [] : (data[url.pathname] ?? []), next_cursor: null } });
+  return route.fulfill({ json: { items: empty && url.pathname !== "/api/v1/projects" ? [] : (data[url.pathname] ?? []), next_cursor: null } });
 }
 
 async function boot(page: Page, empty = false) {
@@ -212,6 +226,50 @@ test("keyboard users can bypass navigation", async ({ page }) => {
   await expect(skip).toBeFocused();
   await skip.press("Enter");
   await expect(page.locator("#main-content")).toBeFocused();
+});
+
+test("unfolds the observatory into task evidence and a real dependency", async ({ page }, testInfo) => {
+  await boot(page);
+  await page.getByRole("link", { name: "Observatory" }).click();
+  await expect(page.getByRole("heading", { name: "Your observatory" })).toBeVisible();
+  const directory = page.getByRole("region", { name: "Your project directory" });
+  await directory.getByRole("button", { name: /Agent Room/ }).click();
+  await expect(page.getByRole("heading", { name: "Work in this project" })).toBeVisible();
+  await page.getByRole("button", { name: /Build secure session flow.*dependencies/ }).click();
+  const inspector = page.getByRole("complementary", { name: "Workspace inspector" });
+  await expect(inspector.getByRole("heading", { name: "Build secure session flow" })).toBeVisible();
+  await expect(inspector.getByText("Authentication test report")).toBeVisible();
+  await expect(inspector.getByText("Source reports: completed. Supervised state: review.")).toBeVisible();
+  await expect(inspector.getByRole("link", { name: /test-report.json/ })).toHaveAttribute("href", /project_id=project_alpha/);
+  await inspector.getByRole("button", { name: "Validate identity boundary" }).click();
+  await expect(inspector.getByText("Waiting for provider evidence")).toBeVisible();
+  await expect(page).toHaveURL(/project=project_alpha.*task=task_dependency/);
+  await expect(page.getByRole("heading", { name: /Attention 1/ })).toBeVisible();
+  await expect(page.locator(".workspace-scene")).toHaveAttribute("data-renderer", /^(WebGPU|WebGL 2|Accessible workspace)$/, { timeout: 15_000 });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: testInfo.outputPath("observatory-project.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  const dimensions = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, document: document.documentElement.scrollWidth }));
+  expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport);
+  await expect(inspector.getByRole("heading", { name: "Validate identity boundary" })).toBeVisible();
+  const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
+  expect(results.violations).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath("observatory-mobile.png"), fullPage: true });
+});
+
+test("keeps observatory keyboard access, reduced motion, and empty state honest", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await boot(page, true);
+  await page.getByRole("link", { name: "Observatory" }).click();
+  await expect(page.getByText("Reduced motion", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /Agent Room.*0 tasks/ }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("No tasks have been recorded for this project.")).toBeVisible();
+  await expect(page.getByText("Nothing waiting for you in this project.")).toBeVisible();
+  const dimensions = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, document: document.documentElement.scrollWidth }));
+  expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport);
+  const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
+  expect(results.violations).toEqual([]);
 });
 
 for (const viewport of [
