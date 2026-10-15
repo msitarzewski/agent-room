@@ -5,6 +5,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -62,6 +63,8 @@ func TestRepositoryCommandEventProjectionRoundTrip(t *testing.T) {
 		"resource:write": {}, "resource:read": {}, "task:transition": {}, "event:read": {}, "event:ingest": {},
 		"approval:request": {}, "approval:decide": {}, "run:cancel": {},
 		"source:codex": {}, "source:meter": {},
+		// This operator fixture explicitly exercises privileged legacy event compatibility.
+		"source:admin": {},
 	}}
 	task := domain.Task{Base: domain.Base{ID: "task-1"}, Title: "Verify release", Status: "ready", Priority: "high", Source: domain.Source{System: "test"}}
 	created, err := service.Create(ctx, actor, domain.ResourceTask, "project-1", "create-1", task, "")
@@ -876,6 +879,239 @@ func TestRepositoryCommandEventProjectionRoundTrip(t *testing.T) {
 		conflict.ExternalID = "another-project"
 		if err := publish(12, "identity-conflict", conflict); err == nil {
 			t.Fatal("source identity takeover accepted")
+		}
+	})
+
+	t.Run("coordination commands runtime identities and recipient queries survive rebuild", func(t *testing.T) {
+		const project = "coordination-project"
+		if _, err := repo.EnsureProject(ctx, project, "Coordination integration"); err != nil {
+			t.Fatal(err)
+		}
+		worker := app.Actor{ID: "agent:coord-owner", Capabilities: map[string]struct{}{"event:ingest": {}, "source:codex": {}, "coordination:create": {}, "coordination:read": {}, "coordination:resolve": {}, "coordination:cancel": {}, "overview:read": {}}}
+		recipient := app.Actor{ID: "agent:coord-recipient", Capabilities: map[string]struct{}{"event:ingest": {}, "source:codex": {}, "coordination:respond": {}, "coordination:read": {}}}
+		at := time.Now().UTC().Truncate(time.Microsecond)
+		marshal := func(v any) json.RawMessage { raw, _ := json.Marshal(v); return raw }
+		presence := func(who app.Actor) domain.Event {
+			return domain.Event{ProjectID: project, SubjectType: domain.ResourceAgent, SubjectID: "native", Type: "agent.observed", SourceSystem: "codex", SourceEventID: who.ID + "-presence", SourceSequence: 10, Payload: marshal(domain.AgentObservation{AgentID: who.ID, InstanceID: "instance", DisplayName: who.ID + " Display", Status: "idle", ObservedAt: at})}
+		}
+		if err := service.Ingest(ctx, worker, []domain.Event{presence(worker)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := service.Ingest(ctx, recipient, []domain.Event{presence(recipient)}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := service.Create(ctx, actor, domain.ResourceTask, project, "coord-task-create", domain.Task{Base: domain.Base{ID: "coord-task"}, Title: "Human-owned wording", Description: "Keep human description", OwnerID: worker.ID, Status: "working", Priority: "normal", Dependencies: []string{}}, ""); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := service.Create(ctx, actor, domain.ResourceEvidence, project, "coord-evidence-create", domain.Evidence{Base: domain.Base{ID: "coord-evidence"}, TaskID: "coord-task", Kind: "test", Summary: "Fixture evidence", Source: domain.Source{System: "test"}}, ""); err != nil {
+			t.Fatal(err)
+		}
+		session := domain.Event{ProjectID: project, SubjectType: domain.ResourceSession, SubjectID: "native", Type: "session.observed", SourceSystem: "codex", SourceEventID: "coord-session", SourceSequence: 10, Payload: marshal(domain.SessionObservation{AgentID: worker.ID, SessionID: "real-explicit-test-thread", Status: "active", ObservedAt: at})}
+		run := domain.Event{ProjectID: project, SubjectType: domain.ResourceRun, SubjectID: "native", Type: "run.observed", SourceSystem: "codex", SourceEventID: "coord-run", SourceSequence: 10, Payload: marshal(domain.RunObservation{AgentID: worker.ID, RunID: "explicit-fixture-run", SessionID: "real-explicit-test-thread", TaskID: "coord-task", Status: "running", Summary: "Explicitly reported fixture run", ObservedAt: at})}
+		if err := service.Ingest(ctx, worker, []domain.Event{session, run}); err != nil {
+			t.Fatal(err)
+		}
+		stale := presence(worker)
+		stale.SourceEventID = "coord-stale"
+		stale.SourceSequence = 9
+		stale.Payload = marshal(domain.AgentObservation{AgentID: worker.ID, InstanceID: "instance", DisplayName: "Stale overwrite", Status: "disconnected", ObservedAt: at.Add(time.Second)})
+		if err := service.Ingest(ctx, worker, []domain.Event{stale}); err != nil {
+			t.Fatal(err)
+		}
+		input := app.CreateCoordinationInput{ID: "coord-request", Kind: "review", Title: "Check evidence", Body: "Actual request context", Recipient: domain.CoordinationRecipient{Type: "agent", ID: recipient.ID}, TaskID: "coord-task", EvidenceIDs: []string{"coord-evidence"}}
+		created, err := service.CreateCoordination(ctx, worker, project, "coord-create", input, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if retried, err := service.CreateCoordination(ctx, worker, project, "coord-create", input, ""); err != nil || !retried.Replayed || retried.Event.Cursor != created.Event.Cursor {
+			t.Fatalf("create retry=%+v err=%v", retried, err)
+		}
+		outsider := app.Actor{ID: "agent:coord-outsider", Capabilities: map[string]struct{}{"coordination:read": {}, "coordination:respond": {}, "event:read": {}, "overview:read": {}}}
+		if _, err := service.Get(ctx, outsider, project, domain.ResourceCoordinationRequest, input.ID); !errors.Is(err, app.ErrNotFound) {
+			t.Fatalf("private get=%v", err)
+		}
+		page, err := service.List(ctx, outsider, project, domain.ResourceCoordinationRequest, "", 1)
+		if err != nil || len(page.Items) != 0 {
+			t.Fatalf("private page=%+v err=%v", page, err)
+		}
+		response := app.CoordinationActionInput{Body: "Evidence reviewed", EvidenceIDs: []string{"coord-evidence"}}
+		if _, err := service.ActCoordination(ctx, outsider, project, input.ID, "respond", "coord-forbidden", 1, response, ""); !errors.Is(err, app.ErrDenied) {
+			t.Fatalf("wrong responder=%v", err)
+		}
+		responded, err := service.ActCoordination(ctx, recipient, project, input.ID, "respond", "coord-response", 1, response, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if retry, err := service.ActCoordination(ctx, recipient, project, input.ID, "respond", "coord-response", 1, response, ""); err != nil || !retry.Replayed || retry.Event.Cursor != responded.Event.Cursor {
+			t.Fatalf("response retry=%+v err=%v", retry, err)
+		}
+		if _, err := service.ActCoordination(ctx, outsider, project, input.ID, "respond", "coord-response", 1, response, ""); !errors.Is(err, app.ErrIdempotency) {
+			t.Fatalf("foreign idempotency=%v", err)
+		}
+		if _, err := service.ActCoordination(ctx, worker, project, input.ID, "resolve", "coord-stale-close", 1, app.CoordinationActionInput{}, ""); !errors.Is(err, app.ErrVersionConflict) {
+			t.Fatalf("version check=%v", err)
+		}
+		closed, err := service.ActCoordination(ctx, worker, project, input.ID, "resolve", "coord-close", 2, app.CoordinationActionInput{Note: "Accepted context only"}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 30; i++ {
+			next := input
+			next.ID = fmt.Sprintf("coord-open-%02d", i)
+			if _, err := service.CreateCoordination(ctx, worker, project, next.ID, next, ""); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// Narrow recipient filtering occurs before pagination, including tied timestamps.
+		seen := map[string]bool{}
+		cursor := ""
+		for {
+			page, err := service.List(ctx, recipient, project, domain.ResourceCoordinationRequest, cursor, 7)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, raw := range page.Items {
+				var req domain.CoordinationRequest
+				if err := json.Unmarshal(raw, &req); err != nil {
+					t.Fatal(err)
+				}
+				if seen[req.ID] || req.Recipient.ID != recipient.ID {
+					t.Fatalf("duplicate or leaked item=%+v", req)
+				}
+				seen[req.ID] = true
+			}
+			if page.NextCursor == "" {
+				break
+			}
+			cursor = page.NextCursor
+		}
+		if len(seen) != 31 {
+			t.Fatalf("request pagination=%d", len(seen))
+		}
+		check := func() {
+			t.Helper()
+			overview, err := service.Overview(ctx, app.Actor{ID: "operator", Capabilities: map[string]struct{}{"resource:read": {}}}, project)
+			if err != nil {
+				t.Fatal(err)
+			}
+			summary := overview["coordination"].(app.CoordinationSummary)
+			if summary.Counts.RunningWork != 1 || summary.Counts.AgentPresence != 2 || summary.Counts.Requests != 30 || !summary.Truncated || len(summary.Items) != 24 {
+				t.Fatalf("coordination summary=%+v", summary)
+			}
+			for _, item := range summary.Items {
+				if item.Kind == "request" && (item.OwnerName == "" || item.RecipientName == "" || item.Detail != "Actual request context") {
+					t.Fatalf("missing attribution=%+v", item)
+				}
+			}
+			raw, err := repo.Get(ctx, project, domain.ResourceCoordinationRequest, input.ID)
+			if err != nil || string(raw) != string(closed.Resource) {
+				var req domain.CoordinationRequest
+				_ = json.Unmarshal(raw, &req)
+				if err != nil || req.Status != "resolved" || req.Version != 3 || req.Response.ActorID != recipient.ID {
+					t.Fatalf("rebuild=%+v err=%v", req, err)
+				}
+			}
+			raw, err = repo.Get(ctx, project, domain.ResourceAgent, worker.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var agent domain.Agent
+			_ = json.Unmarshal(raw, &agent)
+			if agent.DisplayName == "Stale overwrite" || agent.PresenceExpiresAt == nil {
+				t.Fatalf("stale changed lease=%+v", agent)
+			}
+		}
+		check()
+		if err := repo.RebuildProjections(ctx); err != nil {
+			t.Fatal(err)
+		}
+		check()
+		overview, err := service.Overview(ctx, outsider, project)
+		if err != nil {
+			t.Fatal(err)
+		}
+		summary := overview["coordination"].(app.CoordinationSummary)
+		if summary.Complete || len(summary.Items) != 0 || summary.Counts.Requests != 0 {
+			t.Fatalf("scoped summary leaked=%+v", summary)
+		}
+		if _, exists := overview["counts"].(map[string]int64)["coordination_request"]; exists {
+			t.Fatal("raw private request count leaked")
+		}
+		if err := service.Ingest(ctx, app.Actor{ID: "sentry", Capabilities: map[string]struct{}{"event:ingest": {}, "source:sentry": {}}}, []domain.Event{{ProjectID: project, SubjectID: input.ID, SubjectType: domain.ResourceCoordinationRequest, Type: "coordination_request.created", SourceSystem: "sentry", SourceEventID: "forged", SourceSequence: 1, Payload: json.RawMessage(`{}`)}}); err == nil {
+			t.Fatal("publisher coordination forgery")
+		}
+	})
+
+	t.Run("narrow runtime source cannot mutate human or foreign participant records", func(t *testing.T) {
+		const project = "runtime-scope-project"
+		if _, err := repo.EnsureProject(ctx, project, "Runtime scope integration"); err != nil {
+			t.Fatal(err)
+		}
+		setup := app.Actor{ID: "human-operator", Human: true, Capabilities: map[string]struct{}{"resource:write": {}}}
+		targets := []struct {
+			kind      domain.ResourceType
+			id, event string
+			value     any
+		}{
+			{domain.ResourceTask, "human-task", "task.completed", domain.Task{Base: domain.Base{ID: "human-task"}, Title: "Human-owned task", Description: "Keep human fields", OwnerID: "human-operator", Status: "working", Priority: "high", Dependencies: []string{}}},
+			{domain.ResourceRun, "other-run", "run.cancelled", domain.Run{Base: domain.Base{ID: "other-run"}, AgentID: "agent:someone-else", Status: "running", ControlStatus: "executed", ControlAction: "pause", Capabilities: []string{}}},
+			{domain.ResourceSession, "other-session", "session.closed", domain.Session{Base: domain.Base{ID: "other-session"}, AgentID: "agent:someone-else", Status: "active"}},
+			{domain.ResourceApproval, "human-approval", "approval.resolved", domain.Approval{Base: domain.Base{ID: "human-approval"}, Status: "pending", RequestedBy: "human-operator", Reason: "Explicit human decision", ExpiresAt: time.Now().Add(time.Hour)}},
+		}
+		before := map[string]string{}
+		for _, target := range targets {
+			created, err := service.Create(ctx, setup, target.kind, project, "runtime-scope-create-"+target.id, target.value, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var document any
+			_ = json.Unmarshal(created.Resource, &document)
+			canonical, _ := json.Marshal(document)
+			before[target.id] = string(canonical)
+		}
+		var priorCursor int64
+		if err := repo.Pool().QueryRow(ctx, `SELECT max(cursor) FROM events WHERE project_id=$1`, project).Scan(&priorCursor); err != nil {
+			t.Fatal(err)
+		}
+		for _, system := range []string{"codex", "claude", "hermes"} {
+			worker := app.Actor{ID: "agent:narrow", Capabilities: map[string]struct{}{"event:ingest": {}, "source:" + system: {}}}
+			for _, target := range targets {
+				event := domain.Event{ProjectID: project, SubjectType: target.kind, SubjectID: target.id, Type: target.event, SourceSystem: system, SourceEventID: system + "-scope-" + target.id, SourceSequence: 100, Payload: json.RawMessage(`{}`)}
+				if err := service.Ingest(ctx, worker, []domain.Event{event}); !errors.Is(err, app.ErrDenied) {
+					t.Fatalf("%s mutated %s: %v", system, target.id, err)
+				}
+			}
+		}
+		for _, target := range targets {
+			raw, err := repo.Get(ctx, project, target.kind, target.id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var document any
+			_ = json.Unmarshal(raw, &document)
+			canonical, _ := json.Marshal(document)
+			if string(canonical) != before[target.id] {
+				t.Fatalf("denied runtime changed %s", target.id)
+			}
+		}
+		var afterCursor int64
+		if err := repo.Pool().QueryRow(ctx, `SELECT max(cursor) FROM events WHERE project_id=$1`, project).Scan(&afterCursor); err != nil || afterCursor != priorCursor {
+			t.Fatalf("denied runtime created events: prior=%d after=%d err=%v", priorCursor, afterCursor, err)
+		}
+		if err := repo.RebuildProjections(ctx); err != nil {
+			t.Fatal(err)
+		}
+		for _, target := range targets {
+			raw, err := repo.Get(ctx, project, target.kind, target.id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var document any
+			_ = json.Unmarshal(raw, &document)
+			canonical, _ := json.Marshal(document)
+			if string(canonical) != before[target.id] {
+				t.Fatalf("rebuild changed protected %s", target.id)
+			}
 		}
 	})
 

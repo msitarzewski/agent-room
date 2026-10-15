@@ -1,7 +1,7 @@
 # Spatial workspace — first release
 
-**Updated:** 2026-10-14
-**State:** COMPLETE — local tailnet deployment verified; physical headset acceptance pending
+**Updated:** 2026-10-15
+**State:** COMPLETE — local deployment verified; Michael reports immersive mode works; remaining device acceptance pending
 **Authorization:** Michael requested planning, implementation, continuous release documentation, repair of unfinished code, local deployment using MiradorXR's tailnet pattern, and the 2026-10-14 commit checkpoint. No release number has been assigned. Publication, signed production promotion, and live headset acceptance remain separate.
 **Branch:** `feat/spatial-workspace`
 
@@ -56,6 +56,11 @@ Vision Pro acceptance must check exact visionOS build, natural input, comfort, r
 
 ## Remaining device and promotion acceptance
 
+2026-10-15: Michael reported, "Immersive works!" This confirms user-reported
+immersive operation on the target headset. Exact model/OS build, detailed input
+and inspection behavior, comfort, recovery, and measured frame pacing have not
+yet been recorded. Preserve the completed implementation checklist above.
+
 1. Record the actual Vision Pro model, visionOS build, Safari version, secure
    origin, and active renderer. Confirm session permission/cancellation and
    natural selection without requesting raw hand tracking.
@@ -75,9 +80,11 @@ The current Mac deployment is local staging toward the operator-designated remot
 machine. Verify that machine's platform before selecting and promoting its artifact.
 Its actual host identifier stays in the private deployment record.
 
-Automatic production Sentry delivery remains a separate connector deployment.
-The typed private ingestion contract and real-data pilot are implemented and
-verified; this candidate does not install or schedule a new Sentry process.
+The subsequent [continuous Sentry release](continuous-sentry-observations.md)
+installed an independent local publisher for the existing Agent Room project.
+Michael's explicit 2026-10-15 approval expanded it to all 99 discovered projects
+with full operator project permissions and source-only publisher access. Remote
+connector deployment remains separate.
 
 ## Iteration log
 

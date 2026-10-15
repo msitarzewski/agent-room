@@ -5,6 +5,7 @@ import { vi } from "vitest";
 import { App } from "../App";
 import { AuthProvider, safeLoginReturnTo } from "../auth/AuthContext";
 import { api } from "../api/client";
+import type { ProjectBrief } from "../api/types";
 import {
   artifact,
   approval,
@@ -25,6 +26,7 @@ interface FetchOptions {
   authenticated?: boolean;
   degradedHealth?: boolean;
   nullProjects?: boolean;
+  brief?: ProjectBrief;
 }
 
 interface ControlledSocket {
@@ -57,7 +59,9 @@ function mockApi(options: FetchOptions = {}) {
       return Promise.resolve(Response.json({ title: "Unavailable", detail: "Adapter is offline.", status: 503 }, { status: 503 }));
     }
     if (url.pathname === "/api/v1/brief/acknowledge" && init?.method === "POST") {
-      return Promise.resolve(Response.json({ reviewed_cursor: 42, replayed: false }));
+      if (typeof init.body !== "string") throw new Error("Expected a JSON review command.");
+      const command = JSON.parse(init.body) as { through_cursor: number };
+      return Promise.resolve(Response.json({ reviewed_cursor: command.through_cursor, replayed: false }));
     }
     if (url.pathname === "/api/v1/projects" && options.nullProjects) {
       return Promise.resolve(Response.json({ items: null }));
@@ -71,7 +75,7 @@ function mockApi(options: FetchOptions = {}) {
         : health));
     }
     if (url.pathname === "/api/v1/brief") {
-      return Promise.resolve(Response.json(projectBrief));
+      return Promise.resolve(Response.json(options.brief ?? projectBrief));
     }
     const items = options.empty ? [] : (endpointItems[url.pathname] ?? []);
     return Promise.resolve(Response.json({ items, next_cursor: null }));
@@ -150,6 +154,8 @@ describe("Agent Room application", () => {
     const { container, calls } = await renderPath("/");
     expect(await screen.findByRole("heading", { name: "What needs you now" })).toBeInTheDocument();
     expect(screen.getByText("Review authentication evidence")).toBeInTheDocument();
+    expect(screen.getByText("Project coordination update")).toBeInTheDocument();
+    expect(screen.getByText(/work events · .* source checks · .* task reports/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Mark changes reviewed" }));
     await screen.findByText(/Changes through event 42 were marked reviewed/);
     const briefAck = calls.find((call) => call.url === "/api/v1/brief/acknowledge");
@@ -163,6 +169,17 @@ describe("Agent Room application", () => {
     expect(new Headers(mutation?.init?.headers).get("X-CSRF-Token")).toBe("test-csrf");
     expect(new Headers(mutation?.init?.headers).get("If-Match")).toBe("1");
     expect((await axe(container)).violations).toEqual([]);
+  });
+
+  it("separates routine source checks and task reports from work events without changing review cursors", async () => {
+    const brief = { ...projectBrief, through_cursor: 51, event_counts: { "project.observed": 7, "task.observed": 3, "review.requested": 1 } };
+    const { calls } = await renderPath("/", { brief });
+    expect(await screen.findByText("1 work events · 7 source checks · 3 task reports")).toBeInTheDocument();
+    expect(screen.getByText("project.observed")).toBeInTheDocument();
+    expect(screen.getByText("task.observed")).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Mark changes reviewed" }));
+    await screen.findByText(/Changes through event 51 were marked reviewed/);
+    expect(calls.find((call) => call.url === "/api/v1/brief/acknowledge")?.init?.body).toBe(JSON.stringify({ expected_cursor: 40, through_cursor: 51 }));
   });
 
   it("shows real run controls only when capabilities advertise them", async () => {

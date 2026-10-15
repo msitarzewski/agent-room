@@ -1,8 +1,20 @@
 # Progress
 
-**Last updated:** 2026-10-14
+**Last updated:** 2026-10-15
 
 ## Current Phase
+
+2026-10-15 product clarification: agents are the primary participants; Michael
+is mostly a passenger. The approved coordination iteration now implements typed
+requests, ownership, reviews, handoffs, and explicit runtime self-reporting, with
+human escalations separate. Actual coding agents exercised native-session
+reporting, MCP ownership/evidence, and peer request/response/resolution. The
+99-project desktop/XR portfolio uses four semantic regions and twelve-project
+pages. Full isolated gates and actual Chromium/WebKit HTTPS acceptance pass.
+Automatic provider hooks and worker execution are still absent. See
+`decisions.md#2026-10-15-agents-are-the-primary-participants`.
+Read [Agent coordination workspace](releases/agent-coordination-workspace.md)
+for the complete verification and remaining device/promotion checks.
 
 First spatial workspace release candidate is complete locally on
 `feat/spatial-workspace`. The observatory, authorized snapshots, typed Sentry
@@ -13,13 +25,13 @@ and verified live updates in Chromium/WebKit. Physical Vision Pro acceptance
 and remote production promotion remain separate.
 [Release progress](releases/spatial-workspace.md) is tracked by Sentry.
 
-Spatial checkpoint `95f166b` is committed. The independent continuous Sentry
-publisher is implemented and deployed for the existing Agent Room project:
-13 real task records, durable retry, complete scan reports, no backlog or
-quarantine, and live Chromium/WebKit acceptance. Source collection, delivery
-receipt, and connection health have separate labels. Full portfolio provisioning
-was rejected by automatic approval review and remains a separate scope decision;
-no additional projects or operator memberships were created. Read the
+Spatial checkpoint `95f166b` and continuous-feed implementation `880b5e1` are
+committed. Michael explicitly approved full portfolio setup on 2026-10-15:
+99 projects are now provisioned with full operator project permissions and an
+exact-scoped, source-ingestion-only publisher. Durable delivery and live
+Chromium/WebKit portfolio checks pass, with no backlog or quarantine. Source
+collection, delivery receipt, and connection health have separate labels. The
+earlier automatic-review scope rejection is resolved by that approval. Read the
 [continuous-feed release](releases/continuous-sentry-observations.md).
 
 ## Completed Foundations
@@ -96,7 +108,7 @@ no additional projects or operator memberships were created. Read the
 
 ### Milestone 10: Vision Pro
 
-**Status:** Desktop/WebXR local tailnet deployment verified; physical-device acceptance pending
+**Status:** Local deployment verified; Michael reports immersive mode works (2026-10-15); remaining device acceptance pending
 
 The first observatory reuses the existing control plane and MiradorXR's technical
 patterns. It adds desktop WebGPU/WebGL fallback and dedicated WebGL WebXR, with
@@ -107,8 +119,9 @@ No headset frame-rate or comfort measurement has been claimed.
 
 1. Accept the interface on the actual Vision Pro build, then choose a release
    identifier for signed promotion.
-2. Resolve whether to provision the remaining 96 discovered Sentry projects;
-   the current publisher is deliberately scoped to the existing project.
+2. Improve the brief's routine-scan counting and wording at
+   `web/src/pages/AttentionPage.tsx:127`; distinguish source checks from meaningful
+   work updates. Full portfolio provisioning is now complete.
 3. Verify the operator-designated remote machine's platform and deployment
    configuration before signed promotion; the current Mac deployment is staging
    for headset testing. The actual host identifier stays in the private runtime

@@ -7,6 +7,7 @@ import type {
   BriefAcknowledgement,
   ChatMessage,
   Claim,
+  CoordinationRequest,
   Evidence,
   HealthSnapshot,
   Page,
@@ -143,6 +144,12 @@ export const api = {
     request<Page<WorkSession>>(`/sessions${collectionQuery(projectId, cursor)}`, { signal }),
   claims: (projectId: string, signal?: AbortSignal, cursor?: PageCursor) =>
     request<Page<Claim>>(`/claims${collectionQuery(projectId, cursor)}`, { signal }),
+  coordinationRequests: (projectId: string, signal?: AbortSignal, cursor?: PageCursor) =>
+    request<Page<CoordinationRequest>>(`/requests${collectionQuery(projectId, cursor)}`, { signal }),
+  respondToRequest: (item: CoordinationRequest, body: string) =>
+    mutate<CoordinationRequest>(`/requests/${encodeURIComponent(item.id)}/respond`, { body }, item.version, item.project_id),
+  closeRequest: (item: CoordinationRequest, action: "resolve" | "cancel", note: string) =>
+    mutate<CoordinationRequest>(`/requests/${encodeURIComponent(item.id)}/${action}`, { note }, item.version, item.project_id),
   approvals: (projectId: string, signal?: AbortSignal, cursor?: PageCursor) =>
     request<Page<Approval>>(`/approvals${collectionQuery(projectId, cursor)}`, { signal }),
   brief: async (projectId: string, after = 0, signal?: AbortSignal) => {

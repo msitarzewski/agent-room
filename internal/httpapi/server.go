@@ -113,7 +113,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/stream", s.stream)
 	for path, kind := range map[string]domain.ResourceType{
 		"agents": domain.ResourceAgent, "runs": domain.ResourceRun, "sessions": domain.ResourceSession,
-		"tasks": domain.ResourceTask, "attention": domain.ResourceAttention, "evidence": domain.ResourceEvidence,
+		"requests": domain.ResourceCoordinationRequest, "tasks": domain.ResourceTask, "attention": domain.ResourceAttention, "evidence": domain.ResourceEvidence,
 		"artifacts": domain.ResourceArtifact, "approvals": domain.ResourceApproval, "interventions": domain.ResourceIntervention,
 		"budgets": domain.ResourceBudget, "claims": domain.ResourceClaim, "audit": domain.ResourceAudit,
 		"organizations": domain.ResourceOrganization, "humans": domain.ResourceHuman, "projects-state": domain.ResourceProject,
@@ -127,6 +127,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/events", s.events)
 	mux.Handle("GET /api/v1/chat/messages", s.list(domain.ResourceChatMessage))
 	mux.HandleFunc("POST /api/v1/chat/messages", s.createChat)
+	mux.HandleFunc("POST /api/v1/requests", s.createCoordination)
+	mux.HandleFunc("POST /api/v1/requests/{id}/{action}", s.actCoordination)
 	mux.HandleFunc("POST /api/v1/tasks/{id}/transition", s.transitionTask)
 	mux.HandleFunc("POST /api/v1/attention/{id}/acknowledge", s.attention("acknowledged"))
 	mux.HandleFunc("POST /api/v1/attention/{id}/resolve", s.attention("resolved"))
@@ -145,6 +147,11 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) AdapterHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/ingest", s.ingest)
+	mux.Handle("GET /api/v1/requests", s.list(domain.ResourceCoordinationRequest))
+	mux.Handle("GET /api/v1/requests/{id}", s.get(domain.ResourceCoordinationRequest))
+	mux.HandleFunc("POST /api/v1/requests", s.createCoordination)
+	mux.HandleFunc("POST /api/v1/requests/{id}/{action}", s.actCoordination)
+	mux.HandleFunc("GET /api/v1/overview", s.overview)
 	mux.Handle("/api/v1/mcp", s.mcpHandler())
 	return s.adapterMiddleware(mux)
 }
@@ -500,6 +507,38 @@ func (s *Server) createChat(w http.ResponseWriter, r *http.Request) {
 	writeResult(w, result, err, http.StatusCreated)
 }
 
+func (s *Server) createCoordination(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := requireProject(w, r)
+	if !ok {
+		return
+	}
+	idem, ok := requireIdempotency(w, r)
+	if !ok {
+		return
+	}
+	var input app.CreateCoordinationInput
+	if err := decodeJSON(r, &input); err != nil {
+		writeProblem(w, err)
+		return
+	}
+	result, err := s.service.CreateCoordination(r.Context(), currentActor(r), projectID, idem, input, r.RemoteAddr)
+	writeResult(w, result, err, http.StatusCreated)
+}
+
+func (s *Server) actCoordination(w http.ResponseWriter, r *http.Request) {
+	projectID, version, idem, ok := mutationHeaders(w, r)
+	if !ok {
+		return
+	}
+	var input app.CoordinationActionInput
+	if err := decodeJSON(r, &input); err != nil {
+		writeProblem(w, err)
+		return
+	}
+	result, err := s.service.ActCoordination(r.Context(), currentActor(r), projectID, r.PathValue("id"), r.PathValue("action"), idem, version, input, r.RemoteAddr)
+	writeResult(w, result, err, http.StatusOK)
+}
+
 func (s *Server) transitionTask(w http.ResponseWriter, r *http.Request) {
 	projectID, version, idem, ok := mutationHeaders(w, r)
 	if !ok {
@@ -740,6 +779,35 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	defer s.limits.releaseSocket(socketKey)
 	messages, cancel := s.hub.Subscribe(projectID)
 	defer cancel()
+	// Request bodies have recipient isolation even for project event readers.
+	filtered := make(chan realtime.Message)
+	filterCtx, stopFilter := context.WithCancel(r.Context())
+	defer stopFilter()
+	actor := currentActor(r)
+	go func() {
+		defer close(filtered)
+		for {
+			select {
+			case <-filterCtx.Done():
+				return
+			case message, ok := <-messages:
+				if !ok {
+					return
+				}
+				if strings.HasPrefix(message.Type, "coordination_request.") {
+					var event domain.Event
+					if json.Unmarshal(message.Data, &event) != nil || !app.CoordinationEventVisible(actor, event) {
+						continue
+					}
+				}
+				select {
+				case filtered <- message:
+				case <-filterCtx.Done():
+					return
+				}
+			}
+		}
+	}()
 	replay, err := s.service.Events(r.Context(), currentActor(r), projectID, after, 1000)
 	if err != nil {
 		writeProblem(w, err)
@@ -774,7 +842,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		_, err = s.auth.ActorForProject(ctx, session.User, projectID)
 		return err
 	}
-	if err := realtime.WriteLoop(r.Context(), conn, messages, replay.Items, validate); err != nil {
+	if err := realtime.WriteLoop(r.Context(), conn, filtered, replay.Items, validate); err != nil {
 		if errors.Is(err, auth.ErrUnauthenticated) {
 			_ = conn.Close(websocket.StatusCode(4401), "session expired or revoked")
 		} else if errors.Is(err, app.ErrDenied) {
@@ -816,7 +884,9 @@ func currentActor(r *http.Request) app.Actor {
 	if actor, ok := r.Context().Value(actorKey).(app.Actor); ok {
 		return actor
 	}
-	return currentSession(r).User.Actor()
+	actor := currentSession(r).User.Actor()
+	actor.Human = true
+	return actor
 }
 
 func requireProject(w http.ResponseWriter, r *http.Request) (string, bool) {

@@ -1,10 +1,10 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 import { api, ApiError } from "../api/client";
-import type { Page, Project, ProjectOverview, StreamMessage, Task, WorkspaceSnapshot } from "../api/types";
+import type { CoordinationSummary, Page, Project, ProjectOverview, StreamMessage, Task, WorkspaceSnapshot } from "../api/types";
 import { loadAllPages, useCollection } from "../hooks/useCollection";
 import { STREAM_EVENT, STREAM_REFRESH_DELAY, StreamProvider, useStream } from "../stream/StreamContext";
-import { loadPortfolio, loadWorkspace } from "../workspace/data";
+import { loadPortfolio, loadWorkspace, portfolioSignals, projectRegion, sourceCoverageCurrent, SOURCE_CURRENT_WINDOW_MS } from "../workspace/data";
 import { useWorkspace } from "../workspace/useWorkspace";
 import { authenticatedSession, task } from "./fixtures";
 
@@ -43,6 +43,43 @@ afterEach(() => {
 });
 
 describe("complete collection loading", () => {
+  it("separates current complete coverage from recent receipt, partial scans and future clocks", () => {
+    const now = Date.parse("2026-10-15T12:00:00Z");
+    const source = { system: "sentry", last_seen: new Date(now).toISOString(), scan_status: "complete" as const, last_successful_collection_at: new Date(now - SOURCE_CURRENT_WINDOW_MS).toISOString() };
+    expect(sourceCoverageCurrent([source], now)).toBe(true);
+    expect(sourceCoverageCurrent([source], now + 1)).toBe(false);
+    for (const timestamp of [undefined, "invalid", new Date(now + 1).toISOString(), new Date(now + 100 * 86400_000).toISOString()]) {
+      expect(sourceCoverageCurrent([{ ...source, last_successful_collection_at: timestamp }], now)).toBe(false);
+    }
+    expect(sourceCoverageCurrent(undefined, now)).toBe(false);
+    expect(sourceCoverageCurrent([], now)).toBe(false);
+    expect(sourceCoverageCurrent([{ ...source, scan_status: "partial" }], now)).toBe(false);
+    expect(sourceCoverageCurrent([{ ...source, scan_status: "unreadable" }], now)).toBe(false);
+    expect(sourceCoverageCurrent([source, { ...source, system: "runtime", scan_status: undefined }], now)).toBe(false);
+  });
+
+  it("prioritizes recorded asks and work while requiring complete authorized current coverage for Quiet", () => {
+    const now = Date.now();
+    const coordination: CoordinationSummary = { counts: { running_work: 0, agent_presence: 0, unfinished_tasks: 0, blocked_tasks: 0, canonical_blocked_tasks: 0, source_blocked_tasks: 0, requests: 0, reviews: 0, human_escalations: 0, human_approvals: 0 }, items: [], truncated: false, complete: true };
+    const overview: ProjectOverview = { project_id: "project_alpha", counts: {}, event_cursor: 0, generated_at: new Date(now).toISOString(), coordination, sources: [{ system: "sentry", last_seen: new Date(now).toISOString(), scan_status: "complete", last_successful_collection_at: new Date(now).toISOString() }] };
+    expect(projectRegion(overview, now)).toBe("quiet");
+    for (const count of ["blocked_tasks", "requests", "reviews", "human_escalations", "human_approvals", "open_attention"] as const) {
+      expect(projectRegion({ ...overview, sources: [], coordination: { ...coordination, complete: false, counts: { ...coordination.counts, [count]: 1 } } }, now)).toBe("coordination");
+    }
+    for (const count of ["running_work", "agent_presence", "unfinished_tasks", "source_unfinished_tasks"] as const) {
+      expect(projectRegion({ ...overview, sources: [], coordination: { ...coordination, counts: { ...coordination.counts, [count]: 1 } } }, now)).toBe("work");
+    }
+    expect(projectRegion(undefined, now)).toBe("unknown");
+    expect(projectRegion({ ...overview, coordination: undefined }, now)).toBe("unknown");
+    expect(projectRegion({ ...overview, coordination: { ...coordination, complete: false } }, now)).toBe("unknown");
+    expect(projectRegion({ ...overview, coordination: { ...coordination, truncated: true } }, now)).toBe("unknown");
+    expect(projectRegion({ ...overview, sources: [] }, now)).toBe("unknown");
+    const project = { id: overview.project_id, name: "Authorized project", capabilities: [], version: 1, updated_at: overview.generated_at };
+    const record = { kind: "run" as const, resource_type: "run", id: "running", title: "Actual work", status: "running", updated_at: overview.generated_at, human_escalation: false };
+    expect(portfolioSignals([project], { [project.id]: { project, state: "ready", error: null, overview: { ...overview, coordination: { ...coordination, items: [record, { ...record, kind: "attention", id: "failure" }] } } } }).map((item) => item.id)).toEqual(["failure", "running"]);
+    expect(portfolioSignals([project], {})).toEqual([]);
+  });
+
   it("loads more than 50 records through opaque cursors and preserves cancellation", async () => {
     const records = Array.from({ length: 123 }, (_, index) => ({ ...task, id: `task_${index}` }));
     const fetch = vi.fn()

@@ -2,6 +2,52 @@
 
 ## Planned Work
 
+### 2026-10-15: [COMPLETED] Portfolio legibility and agent coordination at 99 projects
+
+- Michael's immersive screenshot shows similar unlabeled project icons without
+  useful grouping, urgency, or asks. He requested design thoughts and subsequently approved the agent-first
+  implementation plan.
+- State: DOCS / RUNNING, completing commit/clean build. The implementation and
+  actual local acceptance pass: 137 frontend tests, 28 native browser checks
+  plus four final fit checks, backend 84.7% with all critical packages above 90%,
+  security/license/advisory/completeness gates, and real 99-project HTTPS checks
+  in Chromium/WebKit. Four named regions unfold twelve projects at a time.
+- Existing REST/MCP/resource/event/scene patterns now carry typed peer requests,
+  attributed summaries, human escalation, and metadata-only leased reporting.
+  Actual coding participants completed ownership/evidence/request/response/
+  resolution; the release task remains in explicit review rather than silently
+  accepting completion. Runtime source and audit privacy findings are repaired.
+- Preserve source/human authority and honest unknown data. Sentry's 99-project
+  source-only publisher is unchanged. No new background service or executor.
+- Track implementation in [Agent coordination workspace](../../releases/agent-coordination-workspace.md).
+- See [99-project immersive feedback](zoomable-control-room-plan.md#99-project-immersive-feedback--2026-10-15).
+
+### 2026-10-15: [COMPLETED] Approved Sentry portfolio provisioning
+
+- Michael explicitly approved all discovered projects, full operator project
+  permissions, and source-ingestion access only for the publisher. The earlier
+  permission scope blocker is resolved by that approval.
+- State: DOCS / IDLE. Fresh discovery found 99 projects; the existing CLI added
+  98 and reconciled full operator access across all 99. The existing publisher
+  has exact project scopes and only source-ingestion capabilities. Previous
+  credential is revoked and removed; databases/queue are backed up privately.
+- All 99 scan reports delivered, no backlog/quarantine/unmapped projects.
+  Chromium/WebKit verify the full portfolio, source reports, and project/task
+  selection. The 13 original tasks preserve their human-owned fields.
+- Keep all secrets, host-specific configuration, and detailed evidence ignored
+  under owner-only `data/local/`. No new background process is needed.
+- See [approved portfolio expansion](../../releases/continuous-sentry-observations.md#approved-portfolio-expansion--2026-10-15).
+
+### 2026-10-15: Immersive device confirmation
+
+- Michael reports, "Immersive works!" User-reported immersive operation is
+  recorded in the [spatial release](../../releases/spatial-workspace.md#remaining-device-and-promotion-acceptance).
+- Exact build, detailed interaction, comfort, recovery, and frame pacing remain
+  to be recorded. No source/runtime changes or new release identifier.
+- Recommended next: real portfolio expansion with view-only operator access,
+  brief signal/wording polish, complete headset workflow checks, then verified
+  pipx promotion. Portfolio setup remains pending an explicit scope decision.
+
 ### 2026-10-13: [IN-PROGRESS] Zoomable control room
 
 - Explore an Agent Room workspace with semantic zoom from portfolio to project,

@@ -1,6 +1,6 @@
 # Agent Room Memory Bank
 
-**Last updated:** 2026-10-14
+**Last updated:** 2026-10-15
 
 This index routes future sessions to the smallest useful context set. `boot.md` remains the founding product specification; the Memory Bank records working context, accepted decisions, implementation patterns, and operational procedures derived from it.
 
@@ -13,6 +13,7 @@ This index routes future sessions to the smallest useful context set. `boot.md` 
 
 ## Recent Task Records
 
+- [Agent coordination workspace](./releases/agent-coordination-workspace.md) — approved agent-first request workflow, grouped portfolio, and shared desktop/XR coordination
 - [Continuous Sentry observations](./releases/continuous-sentry-observations.md) — automatic collection, durable delivery, scoped setup, and activity/source freshness
 - [First spatial workspace release](./releases/spatial-workspace.md) — approved scope, stable Sentry checklist, and ongoing validation evidence
 - [Zoomable control room plan](./tasks/2026-10/zoomable-control-room-plan.md) — proposed visual workspace, Sentry observations, renderer investigation, and recovery steps

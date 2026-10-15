@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/msitarzewski/agent-room/internal/adapters"
 	"github.com/msitarzewski/agent-room/internal/auth"
 	"github.com/msitarzewski/agent-room/internal/config"
 	"github.com/msitarzewski/agent-room/internal/postgres"
@@ -24,6 +27,9 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) > 1 && os.Args[1] == "report" {
+		return report(os.Args[2:])
+	}
 	for _, arg := range os.Args[1:] {
 		if arg == "version" {
 			fmt.Printf("agentroomctl %s commit=%s built=%s\n", version.Version, version.Commit, version.BuildTime)
@@ -35,7 +41,7 @@ func run() error {
 		return err
 	}
 	if len(command) == 0 {
-		return errors.New("command required: migrate, bootstrap, project, membership, service-token, projection, doctor, version")
+		return errors.New("command required: report, migrate, bootstrap, project, membership, service-token, projection, doctor, version")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -150,6 +156,45 @@ func run() error {
 	default:
 		return fmt.Errorf("unknown command %q", command[0])
 	}
+}
+
+func report(args []string) error {
+	var options adapters.ReportOptions
+	flags := flag.NewFlagSet("report", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	flags.StringVar(&options.ProjectID, "project-id", "", "authorized project ID")
+	flags.StringVar(&options.Runtime, "runtime", "codex", "codex, claude, or hermes")
+	flags.StringVar(&options.AgentID, "agent-id", "", "authenticated token actor ID")
+	flags.StringVar(&options.InstanceID, "instance-id", "", "stable reporter instance ID")
+	flags.StringVar(&options.DisplayName, "display-name", "", "agent display name")
+	flags.StringVar(&options.SessionID, "session-id", "", "actual native session ID; Codex defaults to CODEX_THREAD_ID")
+	flags.StringVar(&options.AgentStatus, "status", "active", "active, idle, blocked, or disconnected")
+	flags.StringVar(&options.SessionStatus, "session-status", "", "active, idle, or closed")
+	flags.StringVar(&options.RunID, "run-id", "", "optional explicit native run ID")
+	flags.StringVar(&options.RunStatus, "run-status", "", "running, idle, blocked, completed, failed, or cancelled")
+	flags.StringVar(&options.TaskID, "task-id", "", "canonical task ID for the explicitly identified run")
+	flags.StringVar(&options.Summary, "summary", "", "optional bounded run metadata; never a transcript")
+	flags.StringVar(&options.StateDir, "state-dir", "", "absolute owner-only durable state directory")
+	flags.StringVar(&options.TokenFile, "token-file", "", "owner-only bearer token file")
+	flags.StringVar(&options.AdapterURL, "adapter-url", "", "private HTTPS or loopback HTTP adapter endpoint")
+	flags.DurationVar(&options.Timeout, "timeout", 5*time.Second, "HTTP timeout from 1s to 30s")
+	flags.BoolVar(&options.RetryOnly, "retry", false, "deliver only previously queued observations")
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			flags.SetOutput(os.Stdout)
+			flags.PrintDefaults()
+			return nil
+		}
+		return errors.New("invalid report arguments; use agentroomctl report --help")
+	}
+	if flags.NArg() != 0 {
+		return errors.New("report accepts named metadata flags only")
+	}
+	result, err := adapters.Report(options)
+	if encodeErr := json.NewEncoder(os.Stdout).Encode(result); encodeErr != nil {
+		return errors.New("report result cannot be written")
+	}
+	return err
 }
 
 func splitCapabilities(value string) []string {

@@ -33,6 +33,74 @@ the interaction direction is approved.
 
 ## Semantic zoom
 
+### 99-project immersive feedback — 2026-10-15
+
+Michael reports immersive mode works, but the populated portfolio is a "parade
+of icons" with no meaningful grouping, urgency, or asks. Proposed next iteration;
+Michael approved proceeding with this agent-first iteration on 2026-10-15.
+Implementation and verification are tracked in
+[Agent coordination workspace](../../releases/agent-coordination-workspace.md).
+
+Michael then clarified: "this project is really for agents. I'm a passenger
+here. mostly." This supersedes the human-centered Needs You emphasis of the
+first response. Primary participants are agents coordinating work; the human
+mostly watches, occasionally joins, steers, or authorizes an exception.
+Machine-readable records/tools are the agents' workspace, and XR is a window
+onto the same coordination state. Repository inventory is supporting context.
+
+Observed implementation gaps:
+
+- `web/src/workspace/scene.ts:50` places projects by identity; at
+  `web/src/workspace/scene.ts:117` their default color is uniform, with an amber
+  exception based only on attention passed into the scene.
+- `web/src/workspace/scene.ts:175` suppresses labels above 16 nodes unless they
+  are selected, hovered, or carry attention, leaving most of the 99 anonymous.
+- `web/src/pages/WorkspacePage.tsx:175` supplies only the current project's
+  resource snapshot. Its existing portfolio summaries are confined to the HTML
+  directory. HTML attention at `web/src/pages/WorkspacePage.tsx:170` is outside
+  the XR world, whose controls are at `web/src/workspace/SceneCanvas.tsx:449`.
+- A read-only local aggregate found one open attention item and one
+  source-blocked task, no running runs, pending approvals, or pending completion
+  claims. These are observed counts, not UI fixtures or proposed fake data.
+
+Proposed direction:
+
+- Extend the existing authorized overview at
+  `internal/postgres/repository.go:665` with explicit actionable signals rather
+  than treating total resource counts as open attention/approvals. Reuse the
+  existing bounded portfolio loader at `web/src/workspace/data.ts:30`; avoid
+  fetching full task/approval collections for all 99 projects merely to color
+  the scene. Preserve partial/denied/unknown data honestly.
+- Named regions for observed work in motion, agent coordination waiting, and quiet/archived context.
+  Quiet regions begin collapsed with names/counts and unfold on selection.
+  Stable anchors and stable project positions preserve spatial memory.
+- Reserve color for actual meaning: amber blocked/warning, violet explicit
+  decision/review requests, teal recorded running work, dim blue-gray quiet
+  known state. Critical attention receives a clear red badge; unknown/stale
+  sources have a distinct label/outline. Pair color with text, shape, and count.
+- An in-world coordination surface presents real agent requests, handoffs,
+  dependency waits, and peer reviews with owner/recipient, reason, age, evidence,
+  and allowed next action. A smaller Human Escalations surface contains only
+  requests needing human authority or intervention. Reuse current Label/
+  TaskInspector and safe command APIs. Selecting a request opens its actual
+  agent/work/project/evidence context. Recipient and handoff behavior require
+  explicit contracts; current attention records alone do not prove they exist.
+- Sentry's Active/recent-Git classifications do not prove an agent is running.
+  Source Done does not become human review/acceptance. Never invent asks to
+  decorate a sparse scene. Separate source freshness from operational urgency.
+- Extend persistent identities at `internal/domain/models.go:61`, run/session/
+  task records, and normalized runtime events at
+  `internal/adapters/normalize.go:30`. Existing Codex, Claude, and Hermes adapters
+  supply integration foundations; actual live runtime wiring and agent request/
+  handoff behavior still need verification. Do not represent all 99 repositories
+  as active agents, fabricate conversations, or make the human relay routine asks.
+- Extend the shared scene model for desktop and XR together, with real
+  99-project acceptance, actionable-signal propagation, accessibility/labels,
+  deterministic layout, loading races, and no-ask/unknown-state regressions.
+
+No new service, graphics engine, inferred dependency graph, or release identifier
+is needed. This refines the existing first release's supervisory usefulness.
+
 Zoom changes the information an object reveals while retaining its identity
 and position.
 

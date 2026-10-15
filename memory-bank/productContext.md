@@ -1,12 +1,26 @@
 # Product Context
 
-**Last updated:** 2026-10-14
+**Last updated:** 2026-10-15
 
 ## Initial Customer
 
-A developer or technical founder concurrently supervising roughly two to ten coding agents across repositories, terminals, tools, and machines.
+Coding agents coordinating across repositories, terminals, tools, and machines,
+initially in groups of roughly two to ten. A developer or technical founder is
+the beneficiary and occasional participant, mostly observing their progress.
+
+Michael's 2026-10-15 clarification: agents are the primary users; he is "a
+passenger here. mostly." The human should not become the routine work dispatcher.
 
 ## Jobs to Be Done
+
+An agent needs to discover current context, ownership, dependencies, and evidence
+without reconstructing another agent's work from unrelated tools.
+
+When an agent needs help, review, context, or a handoff, it needs an attributable
+request addressed to the responsible participant with a clear next action.
+
+Agents should resolve routine coordination within granted capabilities and
+escalate permission, policy, or unresolved decisions to the appropriate human.
 
 When returning after an absence, the user needs to understand current work and blockers without reopening every terminal.
 
@@ -36,26 +50,32 @@ Raw telemetry should use compatible OpenTelemetry conventions where practical. A
 
 ## Product Principles
 
-1. Attention over activity.
+1. Agent coordination and progress before human interruption.
 2. Evidence over claims.
 3. Safe intervention over passive observation.
 4. Automatic capture over manual reporting.
 5. Open standards over proprietary telemetry.
 6. Local trust first; hosted scale later.
 7. Awareness before immersion.
-8. Each milestone eliminates a recurring supervisory action.
+8. Each milestone removes coordination friction or a recurring human intervention.
 
 ## Core Experience
 
 The default experience answers:
 
-1. What needs me now?
-2. What is currently working?
-3. What changed since I last looked?
-4. What evidence supports completed work?
-5. What should happen next?
+1. Who is working on what, and with which authority?
+2. What is waiting on another agent, context, review, or a dependency?
+3. What changed, and who needs to know?
+4. What evidence supports a handoff or completion?
+5. What can agents do next, and which exceptions need a human?
 
-The primary surface is an attention inbox supported by active work, timeline, evidence, chat, cost, and health views.
+Machine-readable coordination records and authorized tools are the primary
+agent interface. Browser and immersive views should make that same coordination
+understandable to a passenger or participant. The current application home is
+the existing attention inbox; the agent-first observatory now provides typed
+coordination inspection and grouped desktop/XR context. Future automatic runtime
+onboarding and autonomous orchestration remain outside the verified explicit
+reporter and request workflow.
 
 The spatial observatory adds an original portfolio → project → task → evidence
 experience at `/workspace`, alongside those views. Stable geography and real
@@ -71,6 +91,9 @@ proven technical patterns; its visual design is not the template. See
 
 ## Success Measures
 
+- Agents discover ownership/context and exchange attributable requests and handoffs.
+- Routine coordination reaches the responsible agent without requiring human relay.
+- Human interruptions are limited to meaningful exceptions within the policy model.
 - First worker connected and visible in under 10 minutes.
 - Two runtimes represented without provider-specific UI.
 - Active work and blockers understood within 30 seconds after a 30-minute absence.

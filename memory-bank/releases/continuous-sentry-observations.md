@@ -1,6 +1,6 @@
 # Continuous Sentry observations
 
-**Updated:** 2026-10-14
+**Updated:** 2026-10-15
 **State:** DOCS / IDLE — local release complete
 **Authorization:** Michael requested a Memory Bank update, commit checkpoint, and the next build after continuous Sentry delivery was identified as the next engineering step.
 **Checkpoint:** `95f166b` — spatial observatory and local deployment, committed and rebuilt from a clean tree.
@@ -77,6 +77,42 @@ per-project authorization failures, shared endpoint outages, retry identity,
 restart recovery, sequence adoption, zero-task project freshness, and unchanged
 human supervision. Use isolated fixtures/databases for faults and real authorized
 repository observations for the deployed acceptance check.
+
+## Approved portfolio expansion — 2026-10-15
+
+Michael explicitly approved: provision all discovered Sentry projects, give his
+operator account full project permissions, and give the publisher source-ingestion
+access only. This resolves the earlier automatic-review scope rejection.
+
+Fresh discovery found 99 projects and 214 task records before the operational
+documentation update. The existing CLI added 98 projects and reconciled full
+operator memberships across all 99, preserving existing project IDs and names.
+The same publisher now uses those exact project IDs and only
+`event:ingest,source:sentry`, with a new 30-day credential. The previous credential
+was revoked, rejected with 401, and removed. No new background process was added;
+Sentry's board, watcher, history, and backups remain independent and unchanged.
+
+Initial full-portfolio delivery collected 215 actual task records and delivered
+all 99 project scan reports: 52 complete and 47 partial because Sentry retained
+window-limited or unreadable records. There were no unreadable project scans,
+pending events, quarantined records, unmapped projects, or delivery errors. Scan
+completeness remains explicit rather than claiming all retained tasks were read.
+
+Authenticated Chromium and WebKit checks each verify all 99 authorized project
+cards and source reports, the full operator capability set, rendered portfolio,
+and scoped project/task selection without application or API errors. Chromium
+uses WebGL2 and WebKit uses WebGPU in these checks. A read-only comparison with
+the pre-change database backup confirms all 13 original tasks retain their
+human-owned fields; one additional real task arrived during collection.
+
+Both databases and the durable queue were backed up privately before setup.
+Exact publisher scopes and the two ingestion capabilities are verified;
+out-of-scope private requests and public bearer-token requests are rejected with
+403. Credentials, configuration, source paths, logs, and detailed evidence stay
+ignored under owner-only `data/local/`; no runtime files are tracked. No source
+code change, new release identifier, commit, push, or remote activation is part
+of this operational expansion. Brief wording and remaining headset workflow/
+comfort checks remain separate follow-up work.
 
 ## Iteration log
 

@@ -2,7 +2,7 @@
 
 **Status:** Founding control plane and local spatial candidate validated
 
-**Last updated:** 2026-10-14
+**Last updated:** 2026-10-15
 
 ## Layered Control-Plane Architecture
 
@@ -10,11 +10,69 @@ Agent Room separates five responsibilities:
 
 1. **Integration and data plane** — receives native worker and system signals.
 2. **Canonical coordination record** — stores normalized agents, work, events, situations, evidence, and audit state.
-3. **Human control plane** — evaluates policy and handles approvals and interventions.
-4. **Human experience** — presents attention, work, evidence, chat, health, voice, and spatial views.
+3. **Authorized coordination** — routes explicit requests, ownership, review, and policy-bound interventions between participants.
+4. **Human experience** — exposes agent work and coordination through browser/spatial observation, participation, and explicit escalation.
 5. **Optional orchestration** — recommends or performs policy-authorized coordination.
 
 Dependencies point inward toward domain contracts. Presentation and adapters do not own canonical state.
+
+## Typed Participant Requests
+
+`internal/app/service.go:CreateCoordination()` and `ActCoordination()` extend
+the existing command/event/projection/audit transaction. `coordination_request`
+is a resource kind, with help/context/handoff/review intent, authenticated owner,
+named recipient, same-project task/evidence links, and an explicit lifecycle.
+Recipient responses and owner resolution/cancellation require capabilities,
+the current version, and an idempotency key. Operator overrides retain actual
+actor attribution; a human-addressed request requires human participation.
+
+Recipient privacy applies at every read boundary: direct/list resources,
+workspace snapshots, overview items, recorded events, and live stream frames.
+Full project readers can observe all requests. Narrow readers see only their
+owned/incoming records. Source ingestion cannot create these commands. Request
+resolution never implies task acceptance, execution, or ownership transfer.
+Coordination audit reads omit duplicated request/response bodies, including
+historical rows; stored history remains immutable. Audit attribution stays
+available and authorized participants read bodies through the request boundary.
+
+## Honest Coordination Geography
+
+`internal/postgres/repository.go:summarizeCoordination()` derives actionable
+counts and at most 24 attributed items from one authorized project snapshot.
+Supervised unfinished work, source-declared work, running runs, leased presence,
+requests, reviews, and human escalations remain distinct signals. Unclaimed
+source inbox cards are context; source completion is never accepted completion.
+Missing read permissions make summary coverage incomplete.
+
+`web/src/workspace/data.ts:projectRegion()` and `web/src/workspace/scene.ts:buildWorkspaceScene()`
+reuse those summaries for four stable regions: Coordination, Work recorded,
+Quiet, and Coverage unknown. Progressive pages reveal twelve named projects.
+Known asks/work remain visible with coverage qualifiers. Quiet requires complete
+authorized coverage and a complete source collection within fifteen minutes.
+Labels, shapes, and text explain colors; real Agent records establish
+participants. A repository never becomes an agent because it is active in Git.
+
+## Explicit Runtime Reporting
+
+`cmd/agentroomctl/main.go:report()` runs before daemon/database configuration.
+`internal/adapters/reporter.go:Report()` persists bounded metadata observations
+before private HTTP delivery. Actor/project/runtime/instance/endpoint identity
+binds the private state; uncertain retries preserve exact bodies and sequences.
+Only HTTP 202 acknowledges delivery; invalid/expired records remain quarantined.
+HTTPS or loopback HTTP, refused redirects/proxies, owner-only files, and fixed
+nonsecret operational errors protect credentials.
+
+Typed agent/session/run observations bind `agent_id` to the authenticated actor.
+Canonical session/run IDs derive from project/runtime/actor/native identity.
+Presence has a five-minute lease; native runs require explicit real IDs.
+Codex's explicit reporter uses `CODEX_THREAD_ID`, not its parent conversation
+identifier. No transcript, raw tool body, arbitrary usage/error payload, or
+conversation file is collected. This fallback observes actual callers; it does
+not install provider hooks, start workers, or schedule autonomous work.
+Ordinary `source:codex`, `source:claude`, and `source:hermes` credentials accept
+only these three typed observations. Legacy lifecycle ingestion requires an
+explicit privileged compatibility grant; it is not part of runtime reporter
+permissions. Legacy codec exports need semantic mapping before live wiring.
 
 ## Authority and Provenance
 

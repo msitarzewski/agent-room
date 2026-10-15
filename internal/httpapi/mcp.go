@@ -76,6 +76,19 @@ type mcpReviewInput struct {
 	IdempotencyKey  string `json:"idempotency_key" jsonschema:"non-empty idempotency key of at most 200 characters"`
 }
 
+type mcpCoordinationCreateInput struct {
+	app.CreateCoordinationInput
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+type mcpCoordinationActionInput struct {
+	RequestID       string `json:"request_id"`
+	Action          string `json:"action" jsonschema:"respond, resolve or cancel"`
+	ExpectedVersion int64  `json:"expected_version"`
+	IdempotencyKey  string `json:"idempotency_key"`
+	app.CoordinationActionInput
+}
+
 func (s *Server) mcpHandler() http.Handler {
 	return mcp.NewStreamableHTTPHandler(func(request *http.Request) *mcp.Server {
 		projectID := request.URL.Query().Get("project_id")
@@ -179,6 +192,24 @@ func (s *Server) mcpHandler() http.Handler {
 					return nil, mcpMutationOutput{}, app.ErrDenied
 				}
 				result, err := s.service.RequestTaskReview(ctx, actor, projectID, input.TaskID, input.Reason, input.IdempotencyKey, input.ExpectedVersion, "mcp")
+				output, err := mcpMutationResult(result, err)
+				return nil, output, err
+			})
+		mcp.AddTool(server, &mcp.Tool{Name: "list_coordination_requests", Description: "Read explicit requests owned by or addressed to this participant; full project readers see all."},
+			func(ctx context.Context, _ *mcp.CallToolRequest, input mcpListInput) (*mcp.CallToolResult, mcpListOutput, error) {
+				page, err := s.service.List(ctx, actor, projectID, domain.ResourceCoordinationRequest, input.Cursor, input.Limit)
+				output, err := mcpListPage(page, err)
+				return nil, output, err
+			})
+		mcp.AddTool(server, &mcp.Tool{Name: "create_coordination_request", Description: "Ask a named participant for help, context, handoff or review. Does not execute work or transfer task ownership."},
+			func(ctx context.Context, _ *mcp.CallToolRequest, input mcpCoordinationCreateInput) (*mcp.CallToolResult, mcpMutationOutput, error) {
+				result, err := s.service.CreateCoordination(ctx, actor, projectID, input.IdempotencyKey, input.CreateCoordinationInput, "mcp")
+				output, err := mcpMutationResult(result, err)
+				return nil, output, err
+			})
+		mcp.AddTool(server, &mcp.Tool{Name: "act_coordination_request", Description: "Named recipient responds; requester resolves or cancels. Requires current version and idempotency key; human recipients require human participation."},
+			func(ctx context.Context, _ *mcp.CallToolRequest, input mcpCoordinationActionInput) (*mcp.CallToolResult, mcpMutationOutput, error) {
+				result, err := s.service.ActCoordination(ctx, actor, projectID, input.RequestID, input.Action, input.IdempotencyKey, input.ExpectedVersion, input.CoordinationActionInput, "mcp")
 				output, err := mcpMutationResult(result, err)
 				return nil, output, err
 			})

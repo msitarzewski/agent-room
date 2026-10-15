@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -230,6 +231,18 @@ func (r *Repository) Get(ctx context.Context, projectID string, kind domain.Reso
 }
 
 func (r *Repository) List(ctx context.Context, projectID string, kind domain.ResourceType, cursor string, limit int) (app.Page, error) {
+	return r.listResources(ctx, projectID, kind, cursor, limit, "", "")
+}
+
+func (r *Repository) ListCoordination(ctx context.Context, projectID string, actor app.Actor, cursor string, limit int) (app.Page, error) {
+	participantType := "agent"
+	if actor.Human {
+		participantType = "human"
+	}
+	return r.listResources(ctx, projectID, domain.ResourceCoordinationRequest, cursor, limit, actor.ID, participantType)
+}
+
+func (r *Repository) listResources(ctx context.Context, projectID string, kind domain.ResourceType, cursor string, limit int, participantID, participantType string) (app.Page, error) {
 	cursorTime := time.Now().UTC().Add(time.Hour)
 	cursorID := "\uffff"
 	if cursor != "" {
@@ -250,7 +263,9 @@ func (r *Repository) List(ctx context.Context, projectID string, kind domain.Res
 	rows, err := r.pool.Query(ctx, `SELECT document, updated_at, id
 		FROM resources WHERE project_id=$1 AND kind=$2
 		AND (updated_at,id) < ($3,$4)
-		ORDER BY updated_at DESC,id DESC LIMIT $5`, projectID, kind, cursorTime, cursorID, limit+1)
+		AND ($6='' OR (document->>'owner_id'=$6 AND document->>'owner_type'=$7)
+		 OR (document->'recipient'->>'id'=$6 AND document->'recipient'->>'type'=$7))
+		ORDER BY updated_at DESC,id DESC LIMIT $5`, projectID, kind, cursorTime, cursorID, limit+1, participantID, participantType)
 	if err != nil {
 		return app.Page{}, err
 	}
@@ -586,7 +601,7 @@ func (r *Repository) Workspace(ctx context.Context, projectID string) (app.Works
 		Resources: app.WorkspaceResources{
 			Tasks: []json.RawMessage{}, Agents: []json.RawMessage{}, Runs: []json.RawMessage{},
 			Attention: []json.RawMessage{}, Evidence: []json.RawMessage{}, Artifacts: []json.RawMessage{},
-			Claims: []json.RawMessage{}, Approvals: []json.RawMessage{},
+			Claims: []json.RawMessage{}, Approvals: []json.RawMessage{}, Requests: []json.RawMessage{},
 		},
 	}
 	var exists bool
@@ -601,11 +616,11 @@ func (r *Repository) Workspace(ctx context.Context, projectID string) (app.Works
 	collections := map[string]*[]json.RawMessage{
 		"task": &value.Resources.Tasks, "agent": &value.Resources.Agents, "run": &value.Resources.Runs,
 		"attention": &value.Resources.Attention, "evidence": &value.Resources.Evidence,
-		"artifact": &value.Resources.Artifacts, "claim": &value.Resources.Claims, "approval": &value.Resources.Approvals,
+		"artifact": &value.Resources.Artifacts, "claim": &value.Resources.Claims, "approval": &value.Resources.Approvals, "coordination_request": &value.Resources.Requests,
 	}
 	rows, err := tx.Query(ctx, `SELECT kind,document FROM resources
 		WHERE project_id=$1 AND kind=ANY($2::text[]) ORDER BY kind,id`, projectID,
-		[]string{"task", "agent", "run", "attention", "evidence", "artifact", "claim", "approval"})
+		[]string{"task", "agent", "run", "attention", "evidence", "artifact", "claim", "approval", "coordination_request"})
 	if err != nil {
 		return app.WorkspaceSnapshot{}, err
 	}
@@ -669,6 +684,10 @@ func projectSources(ctx context.Context, tx pgx.Tx, projectID string) ([]app.Wor
 }
 
 func (r *Repository) Overview(ctx context.Context, projectID string) (map[string]any, error) {
+	return r.OverviewForActor(ctx, projectID, app.Actor{Capabilities: map[string]struct{}{"resource:read": {}}})
+}
+
+func (r *Repository) OverviewForActor(ctx context.Context, projectID string, actor app.Actor) (map[string]any, error) {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, err
@@ -701,10 +720,304 @@ func (r *Repository) Overview(ctx context.Context, projectID string) (map[string
 	if err != nil {
 		return nil, err
 	}
+	documents := map[domain.ResourceType][]json.RawMessage{}
+	rows, err = tx.Query(ctx, `SELECT kind,document FROM resources WHERE project_id=$1 AND kind=ANY($2::text[]) ORDER BY kind,id`, projectID, []string{"task", "agent", "run", "coordination_request", "claim", "approval", "attention"})
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var kind domain.ResourceType
+		var raw json.RawMessage
+		if err := rows.Scan(&kind, &raw); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		documents[kind] = append(documents[kind], raw)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	coordination, err := summarizeCoordination(documents, actor, generatedAt)
+	if err != nil {
+		return nil, err
+	}
+	names := map[string]string{}
+	for _, raw := range documents[domain.ResourceAgent] {
+		var agent domain.Agent
+		if json.Unmarshal(raw, &agent) == nil {
+			names[agent.ID] = agent.DisplayName
+		}
+	}
+	ids := []string{}
+	for _, item := range coordination.Items {
+		if item.OwnerID != "" {
+			ids = append(ids, item.OwnerID)
+		}
+		if item.Recipient != nil {
+			ids = append(ids, item.Recipient.ID)
+		}
+	}
+	if len(ids) > 0 {
+		people, err := tx.Query(ctx, `SELECT id,display_name FROM user_accounts WHERE id=ANY($1::text[]) AND NOT disabled`, ids)
+		if err != nil {
+			return nil, err
+		}
+		for people.Next() {
+			var id, name string
+			if err := people.Scan(&id, &name); err != nil {
+				people.Close()
+				return nil, err
+			}
+			names[id] = name
+		}
+		people.Close()
+		if err := people.Err(); err != nil {
+			return nil, err
+		}
+	}
+	for i := range coordination.Items {
+		item := &coordination.Items[i]
+		item.OwnerName = boundedCoordinationText(names[item.OwnerID], 256)
+		if item.Recipient != nil {
+			item.RecipientName = boundedCoordinationText(names[item.Recipient.ID], 256)
+		}
+	}
+	if !actor.Can("resource:read") {
+		delete(counts, "coordination_request")
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	return map[string]any{"project_id": projectID, "counts": counts, "event_cursor": cursor, "generated_at": generatedAt, "sources": sources}, nil
+	return map[string]any{"project_id": projectID, "counts": counts, "event_cursor": cursor, "generated_at": generatedAt, "sources": sources, "coordination": coordination}, nil
+}
+
+// Recipient registration is checked against canonical project membership or
+// persistent agent records; source activity alone never provisions a participant.
+func (r *Repository) CoordinationRecipientExists(ctx context.Context, projectID string, recipient domain.CoordinationRecipient) (bool, error) {
+	var exists bool
+	if recipient.Type == "human" {
+		err := r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM user_accounts u WHERE u.id=$2 AND NOT u.disabled
+		 AND (EXISTS(SELECT 1 FROM project_memberships m WHERE m.project_id=$1 AND m.user_id=u.id) OR 'project:all'=ANY(u.capabilities)))`, projectID, recipient.ID).Scan(&exists)
+		return exists, err
+	}
+	err := r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM resources WHERE project_id=$1 AND kind='agent' AND id=$2)`, projectID, recipient.ID).Scan(&exists)
+	return exists, err
+}
+
+func boundedCoordinationText(value string, limit int) string {
+	runes := []rune(value)
+	if len(runes) > limit {
+		return string(runes[:limit])
+	}
+	return value
+}
+
+func summarizeCoordination(documents map[domain.ResourceType][]json.RawMessage, actor app.Actor, now time.Time) (app.CoordinationSummary, error) {
+	result := app.CoordinationSummary{Items: []app.CoordinationItem{}, Complete: true}
+	add := func(item app.CoordinationItem) {
+		item.Title = boundedCoordinationText(item.Title, 256)
+		item.Detail = boundedCoordinationText(item.Detail, 2048)
+		result.Items = append(result.Items, item)
+	}
+	for _, kind := range []domain.ResourceType{domain.ResourceRun, domain.ResourceAgent, domain.ResourceTask, domain.ResourceCoordinationRequest, domain.ResourceClaim, domain.ResourceApproval, domain.ResourceAttention} {
+		readable := actor.Can("resource:read") || actor.Can(string(kind)+":read") || (kind == domain.ResourceCoordinationRequest && actor.Can("coordination:read"))
+		if !readable {
+			result.Complete = false
+			continue
+		}
+		if kind == domain.ResourceCoordinationRequest && !actor.Can("resource:read") {
+			result.Complete = false
+		}
+		for _, raw := range documents[kind] {
+			item := app.CoordinationItem{ResourceType: kind}
+			var base domain.Base
+			if err := json.Unmarshal(raw, &base); err != nil {
+				return result, err
+			}
+			item.ID, item.UpdatedAt = base.ID, base.UpdatedAt
+			switch kind {
+			case domain.ResourceRun:
+				var run domain.Run
+				if err := json.Unmarshal(raw, &run); err != nil {
+					return result, err
+				}
+				if run.Status != "running" {
+					continue
+				}
+				result.Counts.RunningWork++
+				item.Kind, item.Title, item.Status, item.OwnerID, item.TaskID, item.SourceSystem = "run", run.Summary, run.Status, run.AgentID, run.TaskID, run.Source.System
+				if item.Title == "" {
+					item.Title = "Recorded running work"
+				}
+			case domain.ResourceAgent:
+				var agent domain.Agent
+				if err := json.Unmarshal(raw, &agent); err != nil {
+					return result, err
+				}
+				if agent.PresenceExpiresAt == nil || !agent.PresenceExpiresAt.After(now) || (agent.Status != "active" && agent.Status != "idle" && agent.Status != "blocked") {
+					continue
+				}
+				result.Counts.AgentPresence++
+				item.Kind, item.Title, item.Status, item.OwnerID, item.SourceSystem = "agent", agent.DisplayName, agent.Status, agent.ID, agent.Source.System
+			case domain.ResourceTask:
+				var task domain.Task
+				if err := json.Unmarshal(raw, &task); err != nil {
+					return result, err
+				}
+				canonicalBlocked, sourceBlocked := task.Status == "blocked", strings.EqualFold(strings.TrimSpace(task.SourceStatus), "blocked")
+				if task.Source.System == "sentry" {
+					switch strings.ToLower(strings.TrimSpace(task.SourceStatus)) {
+					case "upcoming", "working", "blocked":
+						result.Counts.SourceUnfinishedTasks++
+					}
+				}
+				unfinished := task.Status != "completed" && task.Status != "archived" && task.Status != "cancelled"
+				// An unclaimed imported inbox card is source context, not an active worker.
+				if task.Status == "inbox" && task.OwnerID == "" && task.Source.System != "" {
+					unfinished = false
+				}
+				if unfinished {
+					result.Counts.UnfinishedTasks++
+				}
+				if canonicalBlocked {
+					result.Counts.CanonicalBlockedTasks++
+				}
+				if sourceBlocked {
+					result.Counts.SourceBlockedTasks++
+				}
+				if canonicalBlocked || sourceBlocked {
+					result.Counts.BlockedTasks++
+				}
+				item.Kind = "task"
+				if canonicalBlocked || sourceBlocked {
+					item.Kind = "blocker"
+					item.Detail = task.BlockedReason
+					if sourceBlocked && !canonicalBlocked && task.SourceObservation != nil {
+						item.Detail = task.SourceObservation.Description
+					}
+				} else if task.Status == "review" {
+					item.Kind = "review"
+					result.Counts.Reviews++
+				} else if !unfinished {
+					continue
+				}
+				item.Title, item.Status, item.OwnerID, item.TaskID, item.SourceSystem = task.Title, task.Status, task.OwnerID, task.ID, task.Source.System
+				if sourceBlocked && !canonicalBlocked {
+					item.Title = "Source reports blocked: " + task.Title
+					item.Status = "source_blocked"
+				}
+			case domain.ResourceCoordinationRequest:
+				if !app.CoordinationVisible(actor, raw) {
+					continue
+				}
+				var request domain.CoordinationRequest
+				if err := json.Unmarshal(raw, &request); err != nil {
+					return result, err
+				}
+				if request.Status != "open" && request.Status != "responded" {
+					continue
+				}
+				result.Counts.Requests++
+				if request.Kind == "review" {
+					result.Counts.Reviews++
+				}
+				item.Kind, item.Title, item.Status, item.OwnerID, item.TaskID, item.EvidenceIDs = "request", request.Title, request.Status, request.OwnerID, request.TaskID, request.EvidenceIDs
+				item.Recipient = &request.Recipient
+				item.RequestKind = request.Kind
+				item.Detail = request.Body
+				if request.EscalationReason != "" {
+					item.Detail = request.EscalationReason
+				}
+				item.HumanEscalation = request.Recipient.Type == "human" && request.Status == "open"
+				if item.HumanEscalation {
+					result.Counts.HumanEscalations++
+				}
+			case domain.ResourceClaim:
+				var claim domain.Claim
+				if err := json.Unmarshal(raw, &claim); err != nil {
+					return result, err
+				}
+				if claim.Status != "pending" {
+					continue
+				}
+				result.Counts.Reviews++
+				item.Kind, item.Title, item.Status, item.OwnerID, item.TaskID = "review", "Completion claim awaits review", claim.Status, claim.AgentID, claim.TaskID
+			case domain.ResourceAttention:
+				var attention domain.Attention
+				if err := json.Unmarshal(raw, &attention); err != nil {
+					return result, err
+				}
+				if attention.Status != "open" && attention.Status != "acknowledged" {
+					continue
+				}
+				result.Counts.OpenAttention++
+				duplicate := false
+				if attention.Kind == "source.task.blocked" || attention.Kind == "task.blocked" {
+					for _, prior := range result.Items {
+						if prior.Kind == "blocker" && string(prior.ResourceType) == attention.ResourceType && prior.ID == attention.ResourceID {
+							duplicate = true
+							break
+						}
+					}
+				}
+				if duplicate {
+					continue
+				}
+				item.Kind, item.Title, item.Detail, item.Status, item.OwnerID = "attention", attention.Title, attention.Detail, attention.Status, attention.OwnerID
+				item.TargetType, item.TargetID = attention.ResourceType, attention.ResourceID
+				if attention.ResourceType == "task" {
+					item.TaskID = attention.ResourceID
+				}
+			case domain.ResourceApproval:
+				var approval domain.Approval
+				if err := json.Unmarshal(raw, &approval); err != nil {
+					return result, err
+				}
+				if approval.Status != "pending" || approval.ExpiresAt.IsZero() || !approval.ExpiresAt.After(now) {
+					continue
+				}
+				result.Counts.HumanApprovals++
+				item.Kind, item.Title, item.Status, item.OwnerID, item.HumanEscalation = "human_approval", approval.Reason, approval.Status, approval.RequestedBy, true
+			}
+			add(item)
+		}
+	}
+	priority := func(item app.CoordinationItem) int {
+		if item.HumanEscalation {
+			return 0
+		}
+		switch item.Kind {
+		case "blocker", "attention":
+			return 1
+		case "request", "review":
+			return 2
+		case "run":
+			return 3
+		case "agent":
+			return 4
+		default:
+			return 5
+		}
+	}
+	sort.Slice(result.Items, func(i, j int) bool {
+		a, b := result.Items[i], result.Items[j]
+		if priority(a) != priority(b) {
+			return priority(a) < priority(b)
+		}
+		if !a.UpdatedAt.Equal(b.UpdatedAt) {
+			return a.UpdatedAt.After(b.UpdatedAt)
+		}
+		if a.ResourceType != b.ResourceType {
+			return a.ResourceType < b.ResourceType
+		}
+		return a.ID < b.ID
+	})
+	if len(result.Items) > 24 {
+		result.Truncated = true
+		result.Items = result.Items[:24]
+	}
+	return result, nil
 }
 
 func commandFingerprint(cmd domain.Command) [32]byte {

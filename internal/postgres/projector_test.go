@@ -2,6 +2,9 @@ package postgres
 
 import (
 	"encoding/json"
+	"fmt"
+	"github.com/msitarzewski/agent-room/internal/app"
+	"strings"
 	"testing"
 	"time"
 
@@ -191,5 +194,122 @@ func TestProjectObservationKeepsCanonicalFieldsAndSuccessfulScan(t *testing.T) {
 	prior, _ = json.Marshal(project)
 	if _, err := reduceProjectObservation(prior, 2, event, "Canonical"); err == nil {
 		t.Fatal("source claimed another project identity")
+	}
+}
+
+func TestCoordinationSummaryUsesActionableFactsAndScopedRequests(t *testing.T) {
+	at := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	future := at.Add(time.Minute)
+	past := at.Add(-time.Minute)
+	documents := map[domain.ResourceType][]json.RawMessage{}
+	put := func(kind domain.ResourceType, value any) {
+		raw, _ := json.Marshal(value)
+		documents[kind] = append(documents[kind], raw)
+	}
+	put(domain.ResourceRun, domain.Run{Base: domain.NewBase("run", "p", at), Status: "running", AgentID: "worker", Summary: "Real explicit running work"})
+	put(domain.ResourceRun, domain.Run{Base: domain.NewBase("old-run", "p", at), Status: "completed"})
+	put(domain.ResourceAgent, domain.Agent{Base: domain.NewBase("worker", "p", at), DisplayName: "Worker", Status: "idle", PresenceExpiresAt: &future})
+	put(domain.ResourceAgent, domain.Agent{Base: domain.NewBase("stale", "p", at), Status: "active", PresenceExpiresAt: &past})
+	put(domain.ResourceAgent, domain.Agent{Base: domain.NewBase("legacy", "p", at), Status: "active"})
+	put(domain.ResourceTask, domain.Task{Base: domain.NewBase("blocked", "p", at), Title: "Blocked owned work", Status: "blocked", OwnerID: "worker", BlockedReason: "Actual canonical reason", Source: domain.Source{System: "sentry"}, SourceStatus: " Blocked "})
+	put(domain.ResourceTask, domain.Task{Base: domain.NewBase("source-only", "p", at), Title: "Source blocked", Status: "inbox", Source: domain.Source{System: "sentry"}, SourceStatus: "Blocked", SourceObservation: &domain.TaskObservation{Description: "Recorded source detail"}})
+	put(domain.ResourceTask, domain.Task{Base: domain.NewBase("done-source", "p", at), Status: "inbox", Source: domain.Source{System: "sentry"}, SourceStatus: "Done"})
+	put(domain.ResourceTask, domain.Task{Base: domain.NewBase("unknown-source", "p", at), Status: "inbox", Source: domain.Source{System: "sentry"}, SourceStatus: "Unrecognized"})
+	put(domain.ResourceTask, domain.Task{Base: domain.NewBase("review-task", "p", at), Title: "Review", Status: "review", OwnerID: "worker"})
+	put(domain.ResourceCoordinationRequest, domain.CoordinationRequest{Base: domain.NewBase("request", "p", at), Kind: "help", Title: "Need context", Body: "Actual ask", Status: "open", OwnerID: "worker", OwnerType: "agent", Recipient: domain.CoordinationRecipient{Type: "human", ID: "operator"}})
+	put(domain.ResourceCoordinationRequest, domain.CoordinationRequest{Base: domain.NewBase("done-request", "p", at), Kind: "review", Status: "resolved"})
+	put(domain.ResourceClaim, domain.Claim{Base: domain.NewBase("claim", "p", at), Status: "pending", AgentID: "worker"})
+	put(domain.ResourceApproval, domain.Approval{Base: domain.NewBase("approval", "p", at), Status: "pending", ExpiresAt: future, Reason: "Explicit approval"})
+	put(domain.ResourceApproval, domain.Approval{Base: domain.NewBase("expired", "p", at), Status: "pending", ExpiresAt: past})
+	put(domain.ResourceApproval, domain.Approval{Base: domain.NewBase("approved", "p", at), Status: "approved", ExpiresAt: future})
+	all := app.Actor{Capabilities: map[string]struct{}{"resource:read": {}}}
+	summary, err := summarizeCoordination(documents, all, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := app.CoordinationCounts{RunningWork: 1, AgentPresence: 1, UnfinishedTasks: 2, SourceUnfinishedTasks: 2, BlockedTasks: 2, CanonicalBlockedTasks: 1, SourceBlockedTasks: 2, Requests: 1, Reviews: 2, HumanEscalations: 1, HumanApprovals: 1}
+	if summary.Counts != want || !summary.Complete || summary.Truncated {
+		t.Fatalf("summary=%+v", summary)
+	}
+	for _, item := range summary.Items {
+		if item.ID == "blocked" && item.Detail != "Actual canonical reason" {
+			t.Fatalf("blocker reason=%+v", item)
+		}
+		if item.ID == "source-only" && (item.Status != "source_blocked" || item.Detail != "Recorded source detail") {
+			t.Fatalf("source blocker=%+v", item)
+		}
+	}
+	narrow := app.Actor{ID: "unrelated", Capabilities: map[string]struct{}{"coordination:read": {}}}
+	scoped, err := summarizeCoordination(documents, narrow, at)
+	if err != nil || scoped.Complete || len(scoped.Items) != 0 || scoped.Counts.Requests != 0 {
+		t.Fatalf("scoped summary=%+v err=%v", scoped, err)
+	}
+	narrow.ID = "worker"
+	scoped, err = summarizeCoordination(documents, narrow, at)
+	if err != nil || scoped.Counts.Requests != 1 || len(scoped.Items) != 1 {
+		t.Fatalf("owned summary=%+v err=%v", scoped, err)
+	}
+	for i := 0; i < 30; i++ {
+		put(domain.ResourceCoordinationRequest, domain.CoordinationRequest{Base: domain.NewBase(fmt.Sprintf("extra-%02d", i), "p", at), Kind: "context", Title: strings.Repeat("x", 400), Body: strings.Repeat("y", 3000), Status: "open", OwnerID: "worker", OwnerType: "agent", Recipient: domain.CoordinationRecipient{Type: "agent", ID: "other"}})
+	}
+	bounded, err := summarizeCoordination(documents, all, at)
+	if err != nil || !bounded.Truncated || len(bounded.Items) != 24 || bounded.Counts.Requests != 31 {
+		t.Fatalf("bounded summary=%+v err=%v", bounded, err)
+	}
+	for _, item := range bounded.Items {
+		if len([]rune(item.Title)) > 256 || len([]rune(item.Detail)) > 2048 {
+			t.Fatal("unbounded summary content")
+		}
+	}
+}
+
+func TestRuntimeObservationsPreserveControlsAndExpirePresence(t *testing.T) {
+	at := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	event := domain.Event{ProjectID: "project", SubjectType: domain.ResourceAgent, SubjectID: "agent:worker", SourceSystem: "codex", Type: "agent.observed", OccurredAt: at, Payload: json.RawMessage(`{"agent_id":"agent:worker","instance_id":"instance","display_name":"Worker","status":"idle","observed_at":"2026-10-15T12:00:00Z"}`)}
+	raw, err := reduceRuntimeObservation(nil, 0, event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var agent domain.Agent
+	if err := json.Unmarshal(raw, &agent); err != nil {
+		t.Fatal(err)
+	}
+	if agent.PresenceExpiresAt == nil || !agent.PresenceExpiresAt.Equal(at.Add(5*time.Minute)) || agent.Status != "idle" || agent.ID != "agent:worker" {
+		t.Fatalf("lease=%+v", agent)
+	}
+	current := domain.Run{Base: domain.NewBase("run", "project", at), AgentID: "agent:worker", ControlStatus: "pending", ControlAction: "cancel", Capabilities: []string{"run:cancel"}, Status: "running"}
+	raw, _ = json.Marshal(current)
+	event.SubjectType = domain.ResourceRun
+	event.SubjectID = "run"
+	event.Type = "run.observed"
+	event.Payload = json.RawMessage(`{"agent_id":"agent:worker","run_id":"explicit","session_id":"native-thread","status":"completed","observed_at":"2026-10-15T12:00:00Z"}`)
+	next, err := reduceRuntimeObservation(raw, 1, event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var run domain.Run
+	if err := json.Unmarshal(next, &run); err != nil {
+		t.Fatal(err)
+	}
+	if run.ControlStatus != current.ControlStatus || run.ControlAction != current.ControlAction || len(run.Capabilities) != 1 || run.Version != 2 || run.Status != "completed" || run.SessionID != domain.ObservedRuntimeID("project", "codex", "agent:worker", "session", "native-thread") {
+		t.Fatalf("control overwrite=%+v", run)
+	}
+}
+
+func TestCoordinationSummaryFailureAttentionWithoutBlockedTask(t *testing.T) {
+	at := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	failure := domain.Attention{Base: domain.NewBase("failure", "project", at), Kind: "run.failed", Title: "Worker failed", Detail: "Actual failure detail", Status: "open", ResourceType: "run", ResourceID: "failed-run"}
+	raw, _ := json.Marshal(failure)
+	summary, err := summarizeCoordination(map[domain.ResourceType][]json.RawMessage{domain.ResourceAttention: {raw}}, app.Actor{Capabilities: map[string]struct{}{"resource:read": {}}}, at)
+	if err != nil || summary.Counts.OpenAttention != 1 || summary.Counts.BlockedTasks != 0 || len(summary.Items) != 1 || summary.Items[0].Kind != "attention" || summary.Items[0].TargetID != "failed-run" || summary.Items[0].Detail != failure.Detail {
+		t.Fatalf("failure urgency omitted=%+v err=%v", summary, err)
+	}
+	blocked := domain.Task{Base: domain.NewBase("blocked", "project", at), Status: "blocked", Title: "Blocked task"}
+	taskRaw, _ := json.Marshal(blocked)
+	failure.Kind, failure.ResourceType, failure.ResourceID = "task.blocked", "task", "blocked"
+	raw, _ = json.Marshal(failure)
+	summary, err = summarizeCoordination(map[domain.ResourceType][]json.RawMessage{domain.ResourceAttention: {raw}, domain.ResourceTask: {taskRaw}}, app.Actor{Capabilities: map[string]struct{}{"resource:read": {}}}, at)
+	if err != nil || summary.Counts.OpenAttention != 1 || summary.Counts.BlockedTasks != 1 || len(summary.Items) != 1 || summary.Items[0].Kind != "blocker" {
+		t.Fatalf("duplicate blocker preview=%+v err=%v", summary, err)
 	}
 }

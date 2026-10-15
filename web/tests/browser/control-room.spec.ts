@@ -228,6 +228,76 @@ test("keyboard users can bypass navigation", async ({ page }) => {
   await expect(page.locator("#main-content")).toBeFocused();
 });
 
+test("keeps 99 project contexts calm, exposes the actual source blocker and restores grouped focus", async ({ page }, testInfo) => {
+  await boot(page);
+  const now = new Date().toISOString();
+  const projects = Array.from({ length: 99 }, (_, index) => ({ id: index === 0 ? "project_alpha" : `project_${String(index).padStart(3, "0")}`, name: `Project ${String(index).padStart(3, "0")}`, version: 1, updated_at: now, capabilities: ["*"] }));
+  await page.route("**/api/v1/projects", (route) => route.fulfill({ json: { items: projects, next_cursor: null } }));
+  await page.route("**/api/v1/overview?*", (route) => {
+    const id = new URL(route.request().url()).searchParams.get("project_id");
+    const blocked = id === "project_alpha";
+    const working = id === "project_001";
+    const partial = id === "project_002";
+    return route.fulfill({ json: { project_id: id, event_cursor: 42, generated_at: now, counts: { task: blocked ? 1 : 0 }, sources: [{ system: "sentry", last_seen: now, last_collected_at: now, last_successful_collection_at: now, scan_status: partial ? "partial" : "complete" }], coordination: {
+      complete: true, truncated: false, counts: { running_work: working ? 1 : 0, agent_presence: working ? 1 : 0, unfinished_tasks: 0, blocked_tasks: blocked ? 1 : 0, canonical_blocked_tasks: 0, source_blocked_tasks: blocked ? 1 : 0, requests: 0, reviews: 0, human_escalations: 0, human_approvals: 0 },
+      items: blocked ? [{ kind: "blocker", resource_type: "task", id: "task_1", task_id: "task_1", title: "Recorded source dependency wait", status: "source:Blocked", detail: "Waiting for the provider's upstream evidence.", source_system: "sentry", updated_at: now, human_escalation: false }] : working ? [{ kind: "run", resource_type: "run", id: "actual_run", title: "Validate provider evidence", owner_id: "agent_builder", owner_name: "Builder", status: "running", updated_at: now, human_escalation: false, source_system: "codex" }] : [],
+    } } });
+  });
+  await page.route("**/api/v1/workspace?*", (route) => {
+    const id = new URL(route.request().url()).searchParams.get("project_id");
+    return route.fulfill({ json: { project_id: id, cursor: 42, generated_at: now, resources: { tasks: [], agents: [], runs: [], attention: [], evidence: [], artifacts: [], claims: [], approvals: [], requests: [] }, sources: [] } });
+  });
+  await page.goto("/workspace");
+  await expect(page.getByRole("button", { name: /Quiet.*96 projects/ })).toBeVisible();
+  const coordination = page.getByRole("region", { name: "Coordination 2" });
+  await expect(coordination.getByText("Builder", { exact: true })).toBeVisible();
+  await expect(coordination.getByText("Validate provider evidence", { exact: true })).toBeVisible();
+  await expect(coordination.getByText("Waiting for the provider's upstream evidence.")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Human escalations 0" })).toContainText("No explicit human escalation");
+  const directory = page.getByRole("region", { name: "Your project directory" });
+  await expect(directory.getByRole("listitem")).toHaveCount(0);
+  await expect(page.locator(".workspace-scene")).toHaveAttribute("data-renderer", /^(WebGPU|WebGL 2|Accessible workspace)$/, { timeout: 15_000 });
+  await page.locator(".observatory-world").screenshot({ path: testInfo.outputPath("coordination-grouped.png") });
+  await page.getByRole("button", { name: /Quiet.*96 projects/ }).click();
+  await expect(directory.getByRole("listitem")).toHaveCount(12);
+  await page.getByRole("button", { name: "Next projects" }).click();
+  await expect(page.getByText("Page 2 of 8")).toBeVisible();
+  await directory.getByRole("button", { name: /Project 015/ }).click();
+  await expect(page).toHaveURL(/project=project_015/);
+  await page.getByRole("button", { name: "Portfolio", exact: true }).click();
+  await expect(page.getByText("Page 2 of 8")).toBeVisible();
+  await expect(directory.getByRole("listitem")).toHaveCount(12);
+  await page.locator(".observatory-world").screenshot({ path: testInfo.outputPath("coordination-unfolded.png") });
+  expect((await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze()).violations).toEqual([]);
+});
+
+test("inspects a real coordination request and confirms a versioned idempotent response", async ({ page }) => {
+  await boot(page);
+  let responded = false;
+  const request = { ...base, id: "request_context", version: 3, kind: "context", title: "Need provider context", body: "Please review the redacted provider evidence.", owner_id: "agent_builder", owner_type: "agent", recipient: { type: "human", id: "human_operator" }, escalation_reason: "Only the owner can supply this context.", evidence_ids: [], status: "open" };
+  await page.route("**/api/v1/workspace?*", (route) => route.fulfill({ json: { project_id: "project_alpha", cursor: 42, generated_at: new Date().toISOString(), resources: { tasks: [], agents: data["/api/v1/agents"], runs: [], attention: [], evidence: [], artifacts: [], claims: [], approvals: [], requests: [{ ...request, status: responded ? "responded" : "open", version: responded ? 4 : 3 }] }, sources: [] } }));
+  await page.route("**/api/v1/requests/request_context/respond?*", async (route) => {
+    expect(route.request().headers()["if-match"]).toBe("3");
+    expect(route.request().headers()["idempotency-key"]).toBeTruthy();
+    expect(route.request().headers()["x-csrf-token"]).toBe("browser-csrf");
+    expect(route.request().postDataJSON()).toEqual({ body: "Reviewed; the provider context is verified." });
+    responded = true;
+    return route.fulfill({ json: { ...request, status: "responded", version: 4 } });
+  });
+  await page.goto("/workspace?project=project_alpha");
+  await page.getByRole("button", { name: /Need provider context · context · open/ }).click();
+  await expect(page.getByRole("article", { name: "Request details" })).toContainText("Builder (agent)");
+  await expect(page.getByText("Escalation reason: Only the owner can supply this context.")).toBeVisible();
+  await page.getByRole("textbox", { name: "Response or closure note" }).fill("Reviewed; the provider context is verified.");
+  await page.getByRole("button", { name: "Review response" }).click();
+  expect(responded).toBe(false);
+  await expect(page.getByRole("alertdialog")).toContainText("version 3");
+  await page.getByRole("button", { name: "Confirm coordination decision" }).click();
+  await expect(page.getByText("Coordination decision recorded.")).toBeVisible();
+  expect(responded).toBe(true);
+  await expect(page.getByRole("button", { name: /Need provider context · context · responded/ })).toBeVisible();
+});
+
 test("unfolds the observatory into task evidence and a real dependency", async ({ page }, testInfo) => {
   await boot(page);
   await page.getByRole("link", { name: "Observatory" }).click();

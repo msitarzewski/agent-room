@@ -1,6 +1,6 @@
 # Technical Context
 
-**Last updated:** 2026-10-14
+**Last updated:** 2026-10-15
 
 **Implementation status:** Founding release applied; local spatial release candidate verified and ready for review
 
@@ -17,6 +17,17 @@
 Do not record private addresses, credentials, domain names, or secret material in the Memory Bank.
 
 ## Confirmed Integration Surfaces
+
+### Explicit Runtime Observations
+
+The local coordination release verifies `agentroomctl report` using the actual
+Codex coding participants' native thread IDs and metadata-only private delivery.
+Typed agent/session/run observations are actor-bound; ordinary runtime tokens
+cannot use generic lifecycle events to mutate canonical task/approval/foreign
+run state. Reports have durable retry and expiring presence, with no database
+credentials or conversation reads. Existing Codex/Claude/Hermes codecs retain
+sanitized foundation coverage; automatic hooks and complete current-provider
+stream compatibility remain unverified. No runtime dependency was added.
 
 ### Hermes Agent
 

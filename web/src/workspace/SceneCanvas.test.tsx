@@ -5,11 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { _roots, advance } from "@react-three/fiber";
 import type { RootState } from "@react-three/fiber";
 import type * as FiberModule from "@react-three/fiber";
-import { Vector3 } from "three";
+import { Mesh, MeshBasicMaterial, Vector3 } from "three";
 import type { Object3D } from "three";
 import type * as ThreeModule from "three";
-import type { Project } from "../api/types";
-import { artifact, attention, evidence, run, task } from "../test/fixtures";
+import type { CoordinationRequest, Project } from "../api/types";
+import type { PortfolioSignal } from "./data";
+import { agent, artifact, attention, evidence, run, task } from "../test/fixtures";
 import { SceneCanvas } from "./SceneCanvas";
 import type { SceneCanvasProps } from "./SceneCanvas";
 
@@ -192,6 +193,76 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe("spatial workspace lifecycle with a CPU scene renderer", () => {
+  it("renders four semantic region hubs and routes expand, collapse and page picks through shared controls", async () => {
+    const choose = vi.fn();
+    const paginate = vi.fn();
+    const { rerender } = render(<SceneCanvas {...props} activeProjectId={null} portfolio={{}} region={null} onRegionSelect={choose} onRegionPageChange={paginate} />);
+    const state = await ready();
+    expect(objects(state).filter((object) => object.userData.kind === "portfolio-region")).toHaveLength(4);
+    const floor = objects(state).find((object) => object instanceof Mesh && object.material instanceof MeshBasicMaterial && object.material.opacity === 0.045) as Mesh;
+    expect((floor.material as MeshBasicMaterial).depthWrite).toBe(false);
+    expect(objects(state).some((object) => object.userData.label === "? Coverage unknown")).toBe(true);
+    act(() => { dispatch(objects(state).find((object) => object.userData.region === "coordination"), "onClick"); });
+    expect(choose).toHaveBeenCalledWith("coordination");
+    const many = Array.from({ length: 30 }, (_, index) => ({ ...project, id: `project${index}` }));
+    rerender(<SceneCanvas {...props} projects={many} activeProjectId={null} portfolio={{}} region="unknown" page={1} onRegionSelect={choose} onRegionPageChange={paginate} />);
+    await waitFor(() => expect(objects(state).some((object) => object.userData.label === "Previous projects")).toBe(true));
+    act(() => { dispatch(objects(state).find((object) => object.userData.label === "Previous projects"), "onClick"); });
+    expect(paginate).toHaveBeenCalledWith(0);
+    act(() => { dispatch(objects(state).find((object) => object.userData.label === "Next projects"), "onClick"); });
+    expect(paginate).toHaveBeenCalledWith(2);
+    act(() => { dispatch(objects(state).find((object) => object.userData.label === "? Coverage unknown"), "onClick"); });
+    expect(choose).toHaveBeenCalledWith(null);
+  });
+
+  it("renders named actual agents separately from context crystals and follows their recorded signal", async () => {
+    const signal: PortfolioSignal = { project_id: project.id, project_name: project.name, kind: "agent", resource_type: "agent", id: agent.id, title: "Builder available", owner_name: agent.display_name, status: "idle", updated_at: agent.updated_at, human_escalation: false };
+    const inspect = vi.fn();
+    render(<SceneCanvas {...props} agents={[{ ...agent, status: "idle" }]} signals={[signal]} onSignalSelect={inspect} />);
+    const state = await ready();
+    expect(objects(state).some((object) => object.userData.label === "Agent · Builder")).toBe(true);
+    act(() => { dispatch(objects(state).find((object) => object.userData.kind === "agent-participant"), "onClick"); });
+    expect(inspect).toHaveBeenCalledWith(signal);
+  });
+
+  it("shows separate in-world Coordination and Human Escalations with actual attribution and full request pages", async () => {
+    const session = new EventTarget() as EventTarget & XRSession;
+    session.end = () => { session.dispatchEvent(new Event("end")); return Promise.resolve(); };
+    Object.defineProperty(navigator, "xr", { value: { isSessionSupported: vi.fn().mockResolvedValue(true), requestSession: vi.fn().mockResolvedValue(session) }, configurable: true });
+    vi.stubGlobal("isSecureContext", true);
+    const request: CoordinationRequest = { ...task, id: "request1", kind: "handoff", title: "Review provider handoff", body: `Read the entire recorded handoff. ${"The actual evidence is attached for verification. ".repeat(5)}End of handoff.`, owner_id: agent.id, owner_type: "agent", recipient: { type: "human", id: "human_operator" }, status: "responded", evidence_ids: [evidence.id], escalation_reason: "Human approval is explicitly required.", response: { actor_id: "human_operator", body: "Reviewed against the provider record.", evidence_ids: [], responded_at: task.updated_at } };
+    const blocker: PortfolioSignal = { project_id: project.id, project_name: project.name, kind: "blocker", resource_type: "task", id: task.id, title: "Recorded dependency wait", detail: "Awaiting the upstream provider trace.", status: "source:Blocked", owner_name: "Builder", owner_id: agent.id, updated_at: task.updated_at, human_escalation: false, source_system: "sentry" };
+    const human: PortfolioSignal = { ...blocker, kind: "request", resource_type: "coordination_request", id: request.id, title: request.title, detail: request.escalation_reason, recipient: request.recipient, recipient_name: "Michael", human_escalation: true };
+    const inspect = vi.fn();
+    const view = render(<SceneCanvas {...props} selectedTaskId={null} requests={[request]} signals={[blocker, human]} onSignalSelect={inspect} />);
+    await ready();
+    fireEvent.click(await screen.findByRole("button", { name: "Enter immersive" }));
+    await waitFor(() => expect(currentStates()[1]?.scene.children.length).toBeGreaterThan(0));
+    const state = currentStates()[1]!;
+    expect(objects(state).some((object) => object.userData.kind === "coordination-surface")).toBe(true);
+    expect(objects(state).some((object) => object.userData.kind === "human-escalations")).toBe(true);
+    const body = objects(state).find((object) => String(object.userData.label).startsWith("Builder → Michael"));
+    act(() => { dispatch(body, "onClick"); });
+    expect(inspect).toHaveBeenCalledWith(human);
+    const turn = objects(state).find((object) => object.userData.label === "Next coordination page");
+    act(() => { dispatch(turn, "onClick"); });
+    view.rerender(<SceneCanvas {...props} selectedTaskId={null} selectedRequestId={request.id} requests={[request]} signals={[blocker, human]} onSignalSelect={inspect} />);
+    await waitFor(() => expect(objects(state).some((object) => object.userData.kind === "request-inspector")).toBe(true));
+    const countLabel = () => objects(state).find((object) => object.userData.label === "Coordination request");
+    const count = Number(String(countLabel()?.userData.detail).split("/").at(-1));
+    const pages: string[] = [];
+    for (let index = 0; index < count; index += 1) {
+      pages.push(String(objects(state).find((object) => object.userData.detail === "Respond in the project inspector")?.userData.label));
+      act(() => { dispatch(objects(state).find((object) => object.userData.label === "Next request page"), "onClick"); });
+    }
+    const all = pages.join("").replace(/\s+/g, "");
+    expect(all).toContain(request.body.replace(/\s+/g, ""));
+    expect(all).toContain("Humanapprovalisexplicitlyrequired.");
+    expect(all).toContain("Reviewedagainsttheproviderrecord.");
+    expect(all).toContain(`Evidencereference:${evidence.id}`);
+    Reflect.deleteProperty(navigator, "xr");
+  });
+
   it("retains an accessible fallback without a graphics API", async () => {
     vi.stubGlobal("WebGL2RenderingContext", undefined);
     render(<SceneCanvas {...props} />);

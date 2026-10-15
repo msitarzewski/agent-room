@@ -3,16 +3,17 @@ import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
 import { beforeEach, vi } from "vitest";
 import { api } from "../api/client";
-import type { Project, WorkspaceSnapshot } from "../api/types";
+import type { CoordinationRequest, CoordinationSummary, Project, SessionEnvelope, WorkspaceSnapshot } from "../api/types";
 import { WorkspacePage } from "../pages/WorkspacePage";
 import type { SceneCanvasProps } from "../workspace/SceneCanvas";
 import { loadPortfolio } from "../workspace/data";
+import type * as DataModule from "../workspace/data";
 import type { PortfolioEntry } from "../workspace/data";
 import { useWorkspace } from "../workspace/useWorkspace";
-import { agent, artifact, attention, claim, evidence, run, task } from "./fixtures";
+import { agent, artifact, attention, authenticatedSession, claim, evidence, run, task } from "./fixtures";
 
 interface Harness {
-  auth: { projects: Project[]; projectId: string | null; setProjectId: ReturnType<typeof vi.fn> };
+  auth: { projects: Project[]; projectId: string | null; session?: SessionEnvelope; setProjectId: ReturnType<typeof vi.fn> };
   workspace: ReturnType<typeof useWorkspace>;
   stream: { status: string };
   sceneFails: boolean;
@@ -26,7 +27,7 @@ const harness = vi.hoisted((): Harness => ({
 vi.mock("../auth/AuthContext", () => ({ useAuth: () => harness.auth }));
 vi.mock("../stream/StreamContext", () => ({ useStream: () => harness.stream }));
 vi.mock("../workspace/useWorkspace", () => ({ useWorkspace: vi.fn(() => harness.workspace) }));
-vi.mock("../workspace/data", () => ({ loadPortfolio: vi.fn() }));
+vi.mock("../workspace/data", async (original) => ({ ...await original<typeof DataModule>(), loadPortfolio: vi.fn() }));
 vi.mock("../workspace/SceneCanvas", () => ({
   SceneCanvas: (props: SceneCanvasProps) => {
     if (harness.sceneFails) throw new Error("GPU initialization failed.");
@@ -66,6 +67,11 @@ function portfolioEntry(project: Project): PortfolioEntry {
   return { project, state: "ready", overview: { project_id: project.id, counts: { task: 123, attention: 4 }, event_cursor: 42, generated_at: "2026-10-13T18:00:00Z" }, error: null };
 }
 
+function summary(counts: Partial<CoordinationSummary["counts"]> = {}, items: CoordinationSummary["items"] = []): CoordinationSummary {
+  return { counts: { running_work: 0, agent_presence: 0, unfinished_tasks: 0, blocked_tasks: 0, canonical_blocked_tasks: 0, source_blocked_tasks: 0, requests: 0, reviews: 0, human_escalations: 0, human_approvals: 0, ...counts }, items, complete: true, truncated: false };
+}
+const request: CoordinationRequest = { ...task, id: "request_context", kind: "context", title: "Need the provider trace", body: "Please attach the redacted provider trace before the handoff.", owner_type: "agent", owner_id: agent.id, recipient: { type: "agent", id: "agent_reviewer" }, task_id: task.id, evidence_ids: [evidence.id], status: "open" };
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: unknown) => void;
@@ -85,6 +91,7 @@ const directory = () => within(screen.getByRole("region", { name: /Your project 
 
 beforeEach(() => {
   harness.auth.projects = projects;
+  harness.auth.session = authenticatedSession;
   harness.auth.projectId = "project_alpha";
   harness.auth.setProjectId.mockReset().mockImplementation((id: string) => { harness.auth.projectId = id; });
   harness.workspace = { snapshot: populatedSnapshot(), state: "ready", error: null, refresh: vi.fn().mockResolvedValue(undefined), refreshing: false, stale: false };
@@ -97,6 +104,54 @@ beforeEach(() => {
 });
 
 describe("observatory navigation and evidence", () => {
+  it("collapses 99 projects into named regions, unfolds 12 at a time and preserves return continuity", async () => {
+    const user = userEvent.setup();
+    const many = Array.from({ length: 99 }, (_, index) => ({ ...projects[0]!, id: `project_${String(index).padStart(3, "0")}`, name: `Project ${String(index).padStart(3, "0")}` }));
+    const entries: Record<string, PortfolioEntry> = Object.fromEntries(many.map((project) => [project.id, { ...portfolioEntry(project), overview: { ...portfolioEntry(project).overview!, coordination: summary(), sources: [{ system: "sentry", last_seen: new Date().toISOString(), last_successful_collection_at: new Date(Date.now() - 1000).toISOString(), scan_status: "complete" as const }] } }]));
+    entries[many[0]!.id]!.overview!.coordination = summary({ blocked_tasks: 1, source_blocked_tasks: 1 }, [{ kind: "blocker", resource_type: "task", id: "source_blocker", title: "Source dependency blocked", status: "source:Blocked", updated_at: task.updated_at, human_escalation: false, detail: "Waiting for the recorded upstream dependency.", source_system: "sentry" }]);
+    entries[many[1]!.id]!.overview!.sources![0]!.scan_status = "partial";
+    harness.auth.projects = many;
+    vi.mocked(loadPortfolio).mockResolvedValue(entries);
+    await openPage();
+    const regionControls = within(screen.getByRole("navigation", { name: "Portfolio regions" }));
+    expect(await regionControls.findByRole("button", { name: /Quiet.*97 projects/ })).toBeInTheDocument();
+    expect(directory().queryByRole("listitem")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Coordination 1" })).toHaveTextContent("Waiting for the recorded upstream dependency.");
+    expect(screen.getByRole("region", { name: "Human escalations 0" })).toHaveTextContent("No explicit human escalation");
+    await user.click(regionControls.getByRole("button", { name: /Quiet.*97 projects/ }));
+    expect(directory().getAllByRole("listitem")).toHaveLength(12);
+    expect(harness.sceneProps).toMatchObject({ region: "quiet", page: 0 });
+    await user.click(screen.getByRole("button", { name: "Next projects" }));
+    expect(screen.getByText("Page 2 of 9")).toBeInTheDocument();
+    await user.click(directory().getByRole("button", { name: /Project 014/ }));
+    expect(harness.sceneProps?.activeProjectId).toBe("project_014");
+    await user.click(screen.getByRole("button", { name: /^Portfolio$/ }));
+    expect(harness.sceneProps).toMatchObject({ activeProjectId: null, region: "quiet", page: 1 });
+    expect(screen.getByText("Page 2 of 9")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Previous projects" }));
+    await user.click(within(screen.getByRole("navigation", { name: "Portfolio regions" })).getByRole("button", { name: "All regions" }));
+    expect(directory().queryByRole("listitem")).not.toBeInTheDocument();
+    await user.type(screen.getByRole("searchbox", { name: "Search projects" }), "Project 098");
+    expect(directory().getAllByRole("listitem")).toHaveLength(1);
+    expect(harness.sceneProps?.portfolio).toEqual(entries);
+  });
+
+  it("shows attributed agent work and explicitly human requests in separate surfaces", async () => {
+    const work = { kind: "run" as const, resource_type: "run", id: run.id, task_id: task.id, title: "Review provider evidence", status: "running", owner_id: agent.id, owner_name: "Builder", updated_at: run.updated_at, human_escalation: false, source_system: "codex", detail: "Validating the actual provider trace." };
+    const human = { kind: "request" as const, resource_type: "coordination_request", id: request.id, title: request.title, status: "open", owner_id: agent.id, owner_name: "Builder", recipient: { type: "human" as const, id: "human_operator" }, recipient_name: "Michael", request_kind: "context" as const, updated_at: task.updated_at, human_escalation: true, detail: "Only the project owner has this context." };
+    vi.mocked(loadPortfolio).mockResolvedValue({ project_alpha: { ...portfolioEntry(projects[0]!), overview: { ...portfolioEntry(projects[0]!).overview!, coordination: summary({ running_work: 1, human_escalations: 1 }, [work, human]) } } });
+    harness.workspace.snapshot!.resources.requests = [{ ...request, recipient: human.recipient, escalation_reason: human.detail }];
+    await openPage();
+    const coordination = within(await screen.findByRole("region", { name: "Coordination 1" }));
+    expect(coordination.getByText("Builder")).toBeInTheDocument();
+    expect(coordination.getByText(work.title)).toBeInTheDocument();
+    const humans = within(screen.getByRole("region", { name: "Human escalations 1" }));
+    expect(humans.getByText("Builder → Michael")).toBeInTheDocument();
+    expect(coordination.queryByText(request.title)).not.toBeInTheDocument();
+    await userEvent.setup().click(humans.getByRole("button"));
+    expect(screen.getByRole("article", { name: "Request details" })).toHaveTextContent(request.body);
+    expect(harness.sceneProps?.selectedRequestId).toBe(request.id);
+  });
   it("shows successful source collection for a zero-task project separately from recent delivery", async () => {
     const collectedAt = "2026-10-13T16:00:00Z";
     const receivedAt = "2026-10-14T12:00:00Z";
@@ -234,6 +289,85 @@ describe("observatory navigation and evidence", () => {
 });
 
 describe("supervisory actions", () => {
+  it("reviews an operator response before submitting the exact request version and body", async () => {
+    const user = userEvent.setup();
+    harness.workspace.snapshot!.resources.requests = [request];
+    const respond = vi.spyOn(api, "respondToRequest").mockResolvedValue({ ...request, version: 2, status: "responded" });
+    const { rerender } = await openPage("/workspace?project=project_alpha");
+    await user.click(screen.getByRole("button", { name: /Need the provider trace · context · open/ }));
+    expect(screen.getByRole("article", { name: "Request details" })).toHaveTextContent("Authentication test report");
+    expect(screen.getByRole("button", { name: "Review response" })).toBeDisabled();
+    await user.type(screen.getByRole("textbox", { name: "Response or closure note" }), "  The verified trace is attached.  ");
+    await user.click(screen.getByRole("button", { name: "Review response" }));
+    expect(respond).not.toHaveBeenCalled();
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("version 1");
+    harness.workspace.snapshot!.resources.requests = [{ ...request, version: 2, body: "An independently updated request." }];
+    rerender(<WorkspacePage />);
+    await user.click(screen.getByRole("button", { name: "Confirm coordination decision" }));
+    expect(respond).toHaveBeenCalledWith(request, "The verified trace is attached.");
+    expect(await screen.findByText("Coordination decision recorded.")).toBeInTheDocument();
+    expect(harness.workspace.refresh).toHaveBeenCalledOnce();
+  });
+
+  it("allows only the named human recipient to answer with narrow permissions and honors stale state", async () => {
+    const user = userEvent.setup();
+    harness.auth.projects = [{ ...projects[0]!, capabilities: ["resource:read", "coordination:respond"] }];
+    harness.workspace.snapshot!.resources.requests = [{ ...request, recipient: { type: "human", id: authenticatedSession.user.id }, escalation_reason: "Owner context required." }];
+    const { rerender } = await openPage("/workspace?project=project_alpha");
+    await user.click(screen.getByRole("button", { name: /Need the provider trace · context · open/ }));
+    expect(screen.getByText("Escalation reason: Owner context required.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resolve request" })).not.toBeInTheDocument();
+    await user.type(screen.getByRole("textbox", { name: "Response or closure note" }), "Recorded context.");
+    await user.click(screen.getByRole("button", { name: "Review response" }));
+    harness.workspace.stale = true;
+    rerender(<WorkspacePage />);
+    expect(screen.getByRole("button", { name: "Confirm coordination decision" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Keep reviewing request" }));
+    harness.workspace.stale = false;
+    harness.auth.session = { ...authenticatedSession, user: { ...authenticatedSession.user, id: "another_human" } };
+    rerender(<WorkspacePage />);
+    expect(screen.queryByRole("button", { name: "Review response" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Response or closure note" })).not.toBeInTheDocument();
+  });
+
+  it("records owner closure only after confirmation and keeps failures visible", async () => {
+    const user = userEvent.setup();
+    const owned = { ...request, owner_type: "human" as const, owner_id: authenticatedSession.user.id, evidence_ids: ["unavailable_evidence"], task_id: undefined };
+    harness.auth.projects = [{ ...projects[0]!, capabilities: ["resource:read", "coordination:resolve", "coordination:cancel"] }];
+    harness.workspace.snapshot!.resources.requests = [owned];
+    const close = vi.spyOn(api, "closeRequest").mockRejectedValueOnce(new Error("Request version changed.")).mockResolvedValue({ ...owned, status: "cancelled", version: 2 });
+    await openPage("/workspace?project=project_alpha");
+    await user.click(screen.getByRole("button", { name: /Need the provider trace · context · open/ }));
+    expect(screen.getByText(/Evidence: unavailable_evidence · details unavailable/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Review response" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Resolve request" }));
+    await user.click(screen.getByRole("button", { name: "Keep reviewing request" }));
+    expect(close).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Resolve request" }));
+    await user.click(screen.getByRole("button", { name: "Confirm coordination decision" }));
+    expect(await screen.findByText("Request version changed.")).toBeInTheDocument();
+    expect(harness.workspace.refresh).not.toHaveBeenCalled();
+    await user.type(screen.getByRole("textbox", { name: "Response or closure note" }), "Superseded by the evidence handoff.");
+    await user.click(screen.getByRole("button", { name: "Cancel request" }));
+    await user.click(screen.getByRole("button", { name: "Confirm coordination decision" }));
+    expect(close).toHaveBeenLastCalledWith(owned, "cancel", "Superseded by the evidence handoff.");
+    expect(await screen.findByText("Coordination decision recorded.")).toBeInTheDocument();
+  });
+
+  it("shows immutable response and resolution evidence and follows the actual linked task", async () => {
+    harness.workspace.snapshot!.resources.requests = [{ ...request, status: "resolved", response: { actor_id: "agent_reviewer", body: "Verified against provider evidence.", evidence_ids: [evidence.id], responded_at: task.updated_at }, resolution: { actor_id: agent.id, note: "Handoff accepted.", closed_at: task.updated_at } }];
+    const { container } = await openPage("/workspace?project=project_alpha");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /Need the provider trace · context · resolved/ }));
+    expect(screen.getByText("Verified against provider evidence.")).toBeInTheDocument();
+    expect(screen.getByText("Closed by agent_builder: Handoff accepted.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Review response" })).not.toBeInTheDocument();
+    expect((await axe(container)).violations).toEqual([]);
+    await user.click(screen.getByRole("button", { name: "Inspect linked task" }));
+    expect(harness.sceneProps?.selectedTaskId).toBe(task.id);
+    expect(screen.queryByRole("article", { name: "Request details" })).not.toBeInTheDocument();
+  });
+
   it("pauses only a capability-authorized active run and refreshes authoritative state", async () => {
     const pause = vi.spyOn(api, "runAction").mockResolvedValue({ ...run, status: "paused" });
     const { rerender } = await openPage("/workspace?project=project_alpha&task=task_1");
@@ -340,6 +474,28 @@ describe("supervisory actions", () => {
 });
 
 describe("availability, accessibility, and motion", () => {
+  it("ages Quiet into unknown while idle and releases the classification clock on unmount", async () => {
+    const initial = Date.parse("2026-10-15T12:00:00Z");
+    const clock = vi.spyOn(Date, "now").mockReturnValue(initial);
+    const callbacks: (() => void)[] = [];
+    vi.spyOn(window, "setInterval").mockImplementation((callback: TimerHandler, delay?: number) => {
+      if (delay === 60_000 && typeof callback === "function") callbacks.push(callback as () => void);
+      return 100 + callbacks.length;
+    });
+    const clear = vi.spyOn(window, "clearInterval");
+    const fresh = { ...portfolioEntry(projects[0]!), overview: { ...portfolioEntry(projects[0]!).overview!, coordination: summary(), sources: [{ system: "sentry", last_seen: new Date(initial).toISOString(), last_successful_collection_at: new Date(initial - 14.5 * 60_000).toISOString(), scan_status: "complete" as const }] } };
+    vi.mocked(loadPortfolio).mockResolvedValue({ project_alpha: fresh });
+    const { unmount } = await openPage();
+    const controls = within(screen.getByRole("navigation", { name: "Portfolio regions" }));
+    expect(await controls.findByRole("button", { name: /Quiet.*1 projects/ })).toBeInTheDocument();
+    clock.mockReturnValue(initial + 60_000);
+    act(() => callbacks[0]?.());
+    expect(controls.getByRole("button", { name: /Quiet.*0 projects/ })).toBeInTheDocument();
+    expect(harness.sceneProps?.now).toBe(initial + 60_000);
+    unmount();
+    expect(clear).toHaveBeenCalledWith(101);
+  });
+
   it("keeps the page usable through loading, denied, failed, empty, and unknown project states", async () => {
     harness.workspace = { ...harness.workspace, snapshot: null, state: "loading" };
     const { rerender } = await openPage("/workspace?project=project_alpha");

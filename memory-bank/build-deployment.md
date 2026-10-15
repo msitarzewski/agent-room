@@ -2,7 +2,7 @@
 
 **Status:** Local tailnet deployment running; signed Linux production promotion separate
 
-**Last updated:** 2026-10-14
+**Last updated:** 2026-10-15
 
 ## Local Tailnet Deployment
 
@@ -53,9 +53,15 @@ The readiness success response is HTTP 204. For a browser document check, send
 API read must return 401. Login preserves the selected project/task deep link.
 Diagnostic logs and browser/restart evidence are in `data/local/logs/`.
 
-For updates, rerun the repository checks, rebuild `web/dist`, and rebuild native
-binaries with the pinned Go toolchain. The daemon reads the web distribution
-from disk; native daemon changes require `launchctl kickstart` after building.
+For updates, rerun the repository checks and build candidate assets separately
+with `npm --prefix web run build -- --outDir /private/tmp/agentroom-candidate-web`.
+The running daemon reads `web/dist` directly: a default build would change the
+live frontend before verification. Build candidate native binaries separately
+with the pinned Go toolchain, and preserve the existing binaries/assets/config.
+After QA, atomically install the binaries and restart only `local.agentroom`;
+confirm readiness before publishing the new assets and index. Keep old hashed
+assets available for already open tabs. Native daemon changes require
+`launchctl kickstart` after installation.
 Use the existing CLI with `--config data/local/agentroom.conf` for migrations,
 doctor, and scoped administration. Keep private snapshots of both `agentroom`
 and `agentroom_identity` databases before changes; the initial restart snapshots
@@ -102,9 +108,11 @@ installed separately from the daemon/web release archive.
 Private configuration is `data/local/sentry/connector.toml`, durable SQLite state
 is `data/local/sentry/state/`, and publisher credentials are under
 `data/local/sentry/secrets/`. Directories are owner-only, files mode 0600.
-The active configuration maps the existing `agent-rooms` project only. Additional
-discovered projects are reported as needing provisioning, not silently imported.
-Full portfolio setup requires the operator's separate scope decision.
+The active configuration maps all 99 projects discovered and explicitly approved
+on 2026-10-15. Existing project IDs and the durable queue are preserved. The
+operator has the established full project permissions, while the publisher has
+only `event:ingest,source:sentry` across those exact project IDs. Newly discovered
+unmapped projects are reported as needing provisioning, not silently imported.
 
 ```sh
 /path/to/sentry/.venv/bin/python -B adapters/sentry/agentroom_sentry.py \
@@ -136,6 +144,25 @@ delivery, then revoke the previous token using the CLI. No collector restart is
 needed to reload the token. Do not print or copy tokens into Memory Bank files.
 Stop only this publisher with `launchctl bootout` for its own label. Agent Room
 and Sentry remain independently supervised.
+
+## Local Participant Reporting
+
+The approved agent coordination iteration adds an explicit metadata-only
+`agentroomctl report` command. It requires a separately provisioned, exact-project
+runtime token with `event:ingest,source:<runtime>`. Coordination capabilities are
+separate and can be narrowed to requester or recipient actions. Sentry's
+publisher credential remains source-only and must not acquire these permissions.
+
+Reports run as the actual participant with its own native session identity.
+They do not require database configuration, read conversation files, launch
+workers, or install another service. Keep private state in a distinct mode-0700
+directory per actor/project/runtime/instance/endpoint binding, and bearer files
+mode 0600. Retry using `--retry` with the same binding; never delete the state to
+work around an uncertain delivery. Only HTTP 202 clears queued observations.
+Presence expires after five minutes. Report idle/closed at the end of actual
+work, and revoke temporary acceptance credentials when testing is complete.
+See `README.md#agent-coordination` for the command and
+`releases/agent-coordination-workspace.md` for acceptance evidence.
 
 ## Production Topology
 

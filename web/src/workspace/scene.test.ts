@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { Project, Task } from "../api/types";
-import { attention, run, task } from "../test/fixtures";
+import type { CoordinationSummary, Project, Task } from "../api/types";
+import { agent, attention, run, task } from "../test/fixtures";
+import type { PortfolioEntry } from "./data";
 import { buildWorkspaceScene, identityHash, projectPosition, shortLabel, textPages, visibleLabels, wrapLabel } from "./scene";
 
 const project: Project = { id: task.project_id, name: "Observatory", version: 1, updated_at: task.updated_at, capabilities: [] };
@@ -8,6 +9,50 @@ const second: Project = { ...project, id: "project_beta", name: "Another project
 const makeTask = (id: string, dependencies: string[] = []): Task => ({ ...task, id, dependencies });
 
 describe("workspace projection", () => {
+  it("keeps 99 contexts collapsed into four named hubs and unfolds stable nonoverlapping pages", () => {
+    const now = Date.now();
+    const many = Array.from({ length: 99 }, (_, index) => ({ ...project, id: `project_${String(index).padStart(3, "0")}`, name: `Project ${index}` }));
+    const coordination: CoordinationSummary = { counts: { running_work: 0, agent_presence: 0, unfinished_tasks: 0, blocked_tasks: 0, canonical_blocked_tasks: 0, source_blocked_tasks: 0, requests: 0, reviews: 0, human_escalations: 0, human_approvals: 0 }, items: [], complete: true, truncated: false };
+    const portfolio: Record<string, PortfolioEntry> = Object.fromEntries(many.map((item) => [item.id, { project: item, state: "ready", error: null, overview: { project_id: item.id, counts: {}, event_cursor: 0, generated_at: new Date(now).toISOString(), coordination, sources: [{ system: "sentry", last_seen: new Date(now).toISOString(), last_successful_collection_at: new Date(now).toISOString(), scan_status: "complete" }] } }]));
+    portfolio[many[0]!.id]!.overview!.coordination = { ...coordination, counts: { ...coordination.counts, blocked_tasks: 1 } };
+    portfolio[many[1]!.id]!.overview!.coordination = { ...coordination, counts: { ...coordination.counts, running_work: 1 } };
+    portfolio[many[2]!.id]!.overview!.sources = [];
+    const options = { portfolio, now };
+    const collapsed = buildWorkspaceScene(many, null, [], [], [], options);
+    expect(collapsed.nodes).toHaveLength(4);
+    expect(collapsed.nodes.every((item) => item.kind === "region" && !item.active)).toBe(true);
+    expect(collapsed.regionCounts).toEqual({ coordination: 1, work: 1, quiet: 96, unknown: 1 });
+    expect(collapsed.nodes[0]).toMatchObject({ title: "◇ Coordination", subtitle: "1 projects · 1 blockers · unfold" });
+    const first = buildWorkspaceScene(many.reverse(), null, [], [], [], { ...options, region: "quiet", page: 0 });
+    const firstProjects = first.nodes.filter((item) => item.kind === "project");
+    expect(firstProjects).toHaveLength(12);
+    expect(first.pageCount).toBe(8);
+    expect(firstProjects.map((item) => item.id)).toEqual(Array.from({ length: 12 }, (_, index) => `project_${String(index + 3).padStart(3, "0")}`));
+    expect(new Set(firstProjects.map((item) => JSON.stringify(item.position))).size).toBe(12);
+    expect(first.nodes.find((item) => item.action === "next")).toBeDefined();
+    expect(first.nodes.find((item) => item.action === "previous")).toBeUndefined();
+    const last = buildWorkspaceScene(many, null, [], [], [], { ...options, region: "quiet", page: 1000 });
+    expect(last.page).toBe(7);
+    expect(last.nodes.find((item) => item.action === "next")).toBeUndefined();
+    expect(last.nodes.find((item) => item.action === "previous")).toBeDefined();
+    const unknown = buildWorkspaceScene(many, null, [], [], [], { ...options, region: "unknown" });
+    expect(unknown.nodes.find((item) => item.kind === "project")?.subtitle).toBe("Coverage unknown");
+    const work = buildWorkspaceScene(many, null, [], [], [], { ...options, region: "work" });
+    expect(work.nodes.find((item) => item.kind === "project")?.active).toBe(true);
+    expect(buildWorkspaceScene(many, null, [], [], [], { portfolio: {} }).regionCounts?.unknown).toBe(99);
+  });
+
+  it("gives actual agents distinct nodes and ownership links without inventing presence or idle animation", () => {
+    const idle = { ...agent, status: "idle" as const };
+    const scene = buildWorkspaceScene([project], project.id, [task], [], [], { agents: [idle, { ...agent, id: "outside", project_id: "other" }] });
+    expect(scene.nodes.find((node) => node.id === idle.id)).toMatchObject({ kind: "agent", title: "Builder", active: false, subtitle: "Reported idle · codex" });
+    expect(scene.nodes.some((node) => node.id === "outside")).toBe(false);
+    expect(scene.edges).toEqual([{ id: `owner:${agent.id}:${task.id}`, from: agent.id, to: task.id, blocked: false, relationship: "ownership" }]);
+    const running = buildWorkspaceScene([project], project.id, [task], [run], [], { agents: [agent] });
+    expect(running.nodes.find((node) => node.id === agent.id)?.active).toBe(true);
+    expect(visibleLabels([...scene.nodes, ...Array.from({ length: 20 }, (_, index) => ({ ...scene.nodes[0]!, id: `context${index}` }))], null, null).map((node) => node.id)).toContain(agent.id);
+  });
+
   it("keeps project geography stable across insertion and input ordering", () => {
     const before = buildWorkspaceScene([project], null, [], [], []);
     const after = buildWorkspaceScene([second, project], null, [], [], []);

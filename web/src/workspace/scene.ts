@@ -1,4 +1,6 @@
-import type { AttentionItem, Project, Run, Task, TaskStatus } from "../api/types";
+import type { Agent, AttentionItem, Project, Run, Task, TaskStatus } from "../api/types";
+import { PORTFOLIO_PAGE_SIZE, portfolioRegions, projectRegion, sourceCoverageCurrent } from "./data";
+import type { PortfolioEntry, PortfolioRegion } from "./data";
 
 export type Point3 = [number, number, number];
 
@@ -10,13 +12,15 @@ export const stateColors: Record<TaskStatus, string> = {
 
 export interface SceneNode {
   id: string;
-  kind: "project" | "task";
+  kind: "project" | "task" | "region" | "agent";
   title: string;
   subtitle: string;
   position: Point3;
   color: string;
   active: boolean;
   attention: number;
+  region?: PortfolioRegion;
+  action?: "expand" | "collapse" | "next" | "previous";
 }
 
 export interface SceneEdge {
@@ -24,6 +28,7 @@ export interface SceneEdge {
   from: string;
   to: string;
   blocked: boolean;
+  relationship?: "ownership";
 }
 
 export interface WorkspaceScene {
@@ -32,6 +37,48 @@ export interface WorkspaceScene {
   cycleAffectedTaskIds: string[];
   unresolvedDependencies: number;
   radius: number;
+  regionCounts?: Record<PortfolioRegion, number>;
+  pageCount?: number;
+  page?: number;
+}
+
+export interface SceneOptions { portfolio?: Record<string, PortfolioEntry>; region?: PortfolioRegion | null; page?: number; now?: number; agents?: Agent[] }
+
+function portfolioScene(projects: Project[], options: SceneOptions): WorkspaceScene {
+  const entries = options.portfolio ?? {};
+  const groups: Record<PortfolioRegion, Project[]> = { coordination: [], work: [], quiet: [], unknown: [] };
+  for (const project of [...projects].sort((a, b) => a.id.localeCompare(b.id))) groups[projectRegion(entries[project.id]?.overview, options.now ?? Date.now())].push(project);
+  const regionCounts = { coordination: groups.coordination.length, work: groups.work.length, quiet: groups.quiet.length, unknown: groups.unknown.length };
+  const nodes: SceneNode[] = [];
+  let pageCount = 1;
+  let page = 0;
+  if (!options.region) {
+    portfolioRegions.forEach((region, index) => {
+      const count = regionCounts[region.id];
+      const blockers = groups[region.id].reduce((sum, project) => sum + (entries[project.id]?.overview?.coordination?.counts.blocked_tasks ?? 0), 0);
+      nodes.push({ id: `region:${region.id}`, kind: "region", title: `${region.badge} ${region.title}`, subtitle: `${count} projects${blockers ? ` · ${blockers} blockers` : ""} · unfold`,
+        position: [index % 2 === 0 ? -3.2 : 3.2, index < 2 ? 1.7 : -1.7, 0], color: region.color, active: false, attention: blockers, region: region.id, action: "expand" });
+    });
+  } else {
+    const region = portfolioRegions.find((item) => item.id === options.region)!;
+    const members = groups[region.id];
+    pageCount = Math.max(1, Math.ceil(members.length / PORTFOLIO_PAGE_SIZE));
+    page = Math.min(Math.max(0, options.page ?? 0), pageCount - 1);
+    nodes.push({ id: `region:${region.id}`, kind: "region", title: `${region.badge} ${region.title}`, subtitle: `${members.length} projects · page ${page + 1}/${pageCount} · all regions`, position: [0, 2.8, 0], color: region.color, active: false, attention: 0, action: "collapse" });
+    members.slice(page * PORTFOLIO_PAGE_SIZE, (page + 1) * PORTFOLIO_PAGE_SIZE).forEach((project, index) => {
+      const counts = entries[project.id]?.overview?.coordination?.counts;
+      const blockers = counts?.blocked_tasks ?? 0;
+      const requests = counts?.requests ?? 0;
+      const covered = sourceCoverageCurrent(entries[project.id]?.overview?.sources, options.now ?? Date.now());
+      nodes.push({ id: project.id, kind: "project", title: project.name,
+        subtitle: (blockers ? `${blockers} blockers` : requests ? `${requests} requests` : region.id === "unknown" ? "Coverage unknown" : counts?.unfinished_tasks ? `${counts.unfinished_tasks} unfinished` : counts?.source_unfinished_tasks ? `${counts.source_unfinished_tasks} source plans` : "Inspect project") + (!covered && region.id !== "unknown" ? " · coverage unknown" : ""),
+        position: [(index % 3 - 1) * 3.1, 1.6 - Math.floor(index / 3) * 1.6, 0], color: region.color,
+        active: (counts?.running_work ?? 0) > 0, attention: blockers + requests, region: region.id });
+    });
+    if (page > 0) nodes.push({ id: "region:previous", kind: "region", title: "Previous projects", subtitle: `Page ${page}/${pageCount}`, position: [-2.5, -5.2, 0], color: region.color, active: false, attention: 0, action: "previous" });
+    if (page + 1 < pageCount) nodes.push({ id: "region:next", kind: "region", title: "Next projects", subtitle: `Page ${page + 2}/${pageCount}`, position: [2.5, -5.2, 0], color: region.color, active: false, attention: 0, action: "next" });
+  }
+  return { nodes, edges: [], cycleAffectedTaskIds: [], unresolvedDependencies: 0, radius: 8, regionCounts, pageCount, page };
 }
 
 /** Identity determines geography. Reordering or adding projects never moves an existing project. */
@@ -104,10 +151,12 @@ function taskLayers(tasks: Task[]): { layers: Task[][]; cycleAffectedTaskIds: st
 /** Only canonical entities and declared dependencies enter the visual projection. */
 export function buildWorkspaceScene(
   projects: Project[], activeProjectId: string | null, tasks: Task[], runs: Run[], attention: AttentionItem[],
+  options?: SceneOptions,
 ): WorkspaceScene {
   const openAttention = attention.filter((item) => item.status === "open");
   const project = projects.find((candidate) => candidate.id === activeProjectId);
   if (!project) {
+    if (options?.portfolio) return portfolioScene(projects, options);
     return {
       nodes: [...projects].sort((a, b) => a.id.localeCompare(b.id)).map((item) => {
         const count = openAttention.filter((entry) => entry.project_id === item.id).length;
@@ -155,6 +204,14 @@ export function buildWorkspaceScene(
     });
   });
   const edges: SceneEdge[] = [];
+  const participants = (options?.agents ?? []).filter((agent) => agent.project_id === project.id);
+  participants.forEach((agent, index) => {
+    nodes.push({ id: agent.id, kind: "agent", title: agent.display_name, subtitle: `Reported ${agent.status} · ${agent.source.system}`,
+      position: [firstColumnX - 3.05, (index + 1) * 1.4, 0], color: "#94e0e8", active: runs.some((run) => run.project_id === project.id && run.agent_id === agent.id && isWorking(run)), attention: 0 });
+  });
+  for (const task of projectTasks) {
+    if (task.owner_id && participants.some((agent) => agent.id === task.owner_id)) edges.push({ id: `owner:${task.owner_id}:${task.id}`, from: task.owner_id, to: task.id, blocked: false, relationship: "ownership" });
+  }
   let unresolvedDependencies = 0;
   for (const task of projectTasks) {
     for (const dependency of new Set(task.dependencies)) {
@@ -174,8 +231,8 @@ export function shortLabel(value: string, max = 35): string {
 /** Bound text density at portfolio scale while preserving selection and the strongest signals. */
 export function visibleLabels(nodes: SceneNode[], selected: string | null, hovered: string | null, limit = 8): SceneNode[] {
   if (nodes.length <= 16) return nodes;
-  const score = (node: SceneNode) => (node.id === selected ? 1_000_000 : 0) + (node.id === hovered ? 100_000 : 0) + Math.min(node.attention, 9999);
-  return nodes.filter((node) => node.id === selected || node.id === hovered || node.attention > 0)
+  const score = (node: SceneNode) => (node.id === selected ? 1_000_000 : 0) + (node.id === hovered ? 100_000 : 0) + (node.kind === "agent" ? 50_000 : 0) + Math.min(node.attention, 9999);
+  return nodes.filter((node) => node.id === selected || node.id === hovered || node.attention > 0 || node.kind === "agent")
     .sort((a, b) => score(b) - score(a) || a.id.localeCompare(b.id)).slice(0, limit);
 }
 

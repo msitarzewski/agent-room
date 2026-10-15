@@ -116,6 +116,9 @@ func reduceResource(current json.RawMessage, currentVersion int64, event domain.
 		}
 		return resource, nil
 	}
+	if (event.SourceSystem == "codex" || event.SourceSystem == "claude" || event.SourceSystem == "hermes") && (event.Type == "agent.observed" || event.Type == "session.observed" || event.Type == "run.observed") {
+		return reduceRuntimeObservation(current, currentVersion, event)
+	}
 	if event.SubjectType == domain.ResourceBudget && event.Type == "budget.usage_observed" {
 		return reduceBudgetUsage(current, event)
 	}
@@ -153,6 +156,108 @@ func reduceResource(current json.RawMessage, currentVersion int64, event domain.
 		document["status"] = "observed"
 	}
 	return json.Marshal(document)
+}
+
+func reduceRuntimeObservation(current json.RawMessage, version int64, event domain.Event) (json.RawMessage, error) {
+	base := domain.NewBase(event.SubjectID, event.ProjectID, event.OccurredAt)
+	if len(current) > 0 {
+		var owned struct {
+			Source domain.Source `json:"source"`
+		}
+		if json.Unmarshal(current, &owned) != nil {
+			return nil, errors.New("invalid runtime projection")
+		}
+		if owned.Source.System != "" && owned.Source.System != event.SourceSystem {
+			return nil, app.ErrDenied
+		}
+	}
+	if len(current) > 0 {
+		if err := json.Unmarshal(current, &base); err != nil {
+			return nil, err
+		}
+		base.Version = version + 1
+		base.UpdatedAt = event.OccurredAt
+	}
+	switch event.Type {
+	case "agent.observed":
+		var input domain.AgentObservation
+		if err := json.Unmarshal(event.Payload, &input); err != nil {
+			return nil, err
+		}
+		var agent domain.Agent
+		if len(current) > 0 {
+			if err := json.Unmarshal(current, &agent); err != nil {
+				return nil, err
+			}
+		}
+		if input.AgentID != event.SubjectID {
+			return nil, app.ErrDenied
+		}
+		agent.Base = base
+		agent.DisplayName = input.DisplayName
+		agent.Kind = event.SourceSystem
+		agent.Status = input.Status
+		if agent.Capabilities == nil {
+			agent.Capabilities = []string{}
+		}
+		agent.Source = domain.Source{System: event.SourceSystem, ExternalID: input.InstanceID}
+		at := input.ObservedAt.UTC()
+		expires := at.Add(5 * time.Minute)
+		if input.Status == "disconnected" {
+			expires = at
+		}
+		agent.ObservedAt = &at
+		agent.PresenceExpiresAt = &expires
+		return json.Marshal(agent)
+	case "session.observed":
+		var input domain.SessionObservation
+		if err := json.Unmarshal(event.Payload, &input); err != nil {
+			return nil, err
+		}
+		var session domain.Session
+		if len(current) > 0 {
+			if err := json.Unmarshal(current, &session); err != nil {
+				return nil, err
+			}
+			if session.AgentID != "" && session.AgentID != input.AgentID {
+				return nil, app.ErrDenied
+			}
+		}
+		session.Base = base
+		session.AgentID = input.AgentID
+		session.Status = input.Status
+		session.Source = domain.Source{System: event.SourceSystem, ExternalID: input.SessionID}
+		at := input.ObservedAt.UTC()
+		session.LastReconciledAt = &at
+		return json.Marshal(session)
+	default:
+		var input domain.RunObservation
+		if err := json.Unmarshal(event.Payload, &input); err != nil {
+			return nil, err
+		}
+		var run domain.Run
+		if len(current) > 0 {
+			if err := json.Unmarshal(current, &run); err != nil {
+				return nil, err
+			}
+			if run.AgentID != "" && run.AgentID != input.AgentID {
+				return nil, app.ErrDenied
+			}
+		}
+		run.Base = base
+		run.AgentID = input.AgentID
+		run.Status = input.Status
+		run.Summary = input.Summary
+		run.TaskID = input.TaskID
+		if input.SessionID != "" {
+			run.SessionID = domain.ObservedRuntimeID(event.ProjectID, event.SourceSystem, input.AgentID, "session", input.SessionID)
+		}
+		if run.Capabilities == nil {
+			run.Capabilities = []string{}
+		}
+		run.Source = domain.Source{System: event.SourceSystem, ExternalID: input.RunID}
+		return json.Marshal(run)
+	}
 }
 
 func reduceProjectObservation(current json.RawMessage, currentVersion int64, event domain.Event, canonicalName string) (json.RawMessage, error) {

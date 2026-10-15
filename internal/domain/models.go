@@ -13,28 +13,29 @@ import (
 type ResourceType string
 
 const (
-	ResourceAgent          ResourceType = "agent"
-	ResourceRun            ResourceType = "run"
-	ResourceSession        ResourceType = "session"
-	ResourceTask           ResourceType = "task"
-	ResourceAttention      ResourceType = "attention"
-	ResourceEvidence       ResourceType = "evidence"
-	ResourceArtifact       ResourceType = "artifact"
-	ResourceApproval       ResourceType = "approval"
-	ResourceIntervention   ResourceType = "intervention"
-	ResourceChatMessage    ResourceType = "chat_message"
-	ResourceBudget         ResourceType = "budget"
-	ResourceClaim          ResourceType = "claim"
-	ResourceAudit          ResourceType = "audit"
-	ResourceOrganization   ResourceType = "organization"
-	ResourceHuman          ResourceType = "human"
-	ResourceProject        ResourceType = "project"
-	ResourceHost           ResourceType = "host"
-	ResourceAgentInstance  ResourceType = "agent_instance"
-	ResourceTaskTransition ResourceType = "task_transition"
-	ResourceSituation      ResourceType = "situation"
-	ResourcePolicy         ResourceType = "policy"
-	ResourceDeployment     ResourceType = "deployment"
+	ResourceAgent               ResourceType = "agent"
+	ResourceRun                 ResourceType = "run"
+	ResourceSession             ResourceType = "session"
+	ResourceTask                ResourceType = "task"
+	ResourceAttention           ResourceType = "attention"
+	ResourceCoordinationRequest ResourceType = "coordination_request"
+	ResourceEvidence            ResourceType = "evidence"
+	ResourceArtifact            ResourceType = "artifact"
+	ResourceApproval            ResourceType = "approval"
+	ResourceIntervention        ResourceType = "intervention"
+	ResourceChatMessage         ResourceType = "chat_message"
+	ResourceBudget              ResourceType = "budget"
+	ResourceClaim               ResourceType = "claim"
+	ResourceAudit               ResourceType = "audit"
+	ResourceOrganization        ResourceType = "organization"
+	ResourceHuman               ResourceType = "human"
+	ResourceProject             ResourceType = "project"
+	ResourceHost                ResourceType = "host"
+	ResourceAgentInstance       ResourceType = "agent_instance"
+	ResourceTaskTransition      ResourceType = "task_transition"
+	ResourceSituation           ResourceType = "situation"
+	ResourcePolicy              ResourceType = "policy"
+	ResourceDeployment          ResourceType = "deployment"
 )
 
 type Base struct {
@@ -60,11 +61,43 @@ func (b Base) Validate() error {
 
 type Agent struct {
 	Base
-	DisplayName  string   `json:"display_name"`
-	Kind         string   `json:"kind"`
-	Status       string   `json:"status"`
-	Capabilities []string `json:"capabilities"`
-	Source       Source   `json:"source"`
+	DisplayName       string     `json:"display_name"`
+	Kind              string     `json:"kind"`
+	Status            string     `json:"status"`
+	Capabilities      []string   `json:"capabilities"`
+	Source            Source     `json:"source"`
+	ObservedAt        *time.Time `json:"observed_at,omitempty"`
+	PresenceExpiresAt *time.Time `json:"presence_expires_at,omitempty"`
+}
+
+type AgentObservation struct {
+	AgentID     string    `json:"agent_id"`
+	InstanceID  string    `json:"instance_id"`
+	DisplayName string    `json:"display_name"`
+	Status      string    `json:"status"`
+	ObservedAt  time.Time `json:"observed_at"`
+}
+
+type SessionObservation struct {
+	AgentID    string    `json:"agent_id"`
+	SessionID  string    `json:"session_id"`
+	Status     string    `json:"status"`
+	ObservedAt time.Time `json:"observed_at"`
+}
+
+type RunObservation struct {
+	AgentID    string    `json:"agent_id"`
+	RunID      string    `json:"run_id"`
+	SessionID  string    `json:"session_id,omitempty"`
+	TaskID     string    `json:"task_id,omitempty"`
+	Status     string    `json:"status"`
+	Summary    string    `json:"summary,omitempty"`
+	ObservedAt time.Time `json:"observed_at"`
+}
+
+func ObservedRuntimeID(projectID, system, actorID, kind, nativeID string) string {
+	digest := sha256.Sum256([]byte(strings.Join([]string{projectID, system, actorID, kind, nativeID}, "\x00")))
+	return "observed_" + kind + "_" + hex.EncodeToString(digest[:16])
 }
 
 type Organization struct {
@@ -217,6 +250,42 @@ type Attention struct {
 	OwnerID        string     `json:"owner_id,omitempty"`
 	AcknowledgedAt *time.Time `json:"acknowledged_at,omitempty"`
 	ResolvedAt     *time.Time `json:"resolved_at,omitempty"`
+}
+
+// CoordinationRequest records an explicit request between participants. Responding
+// does not transfer task ownership, accept evidence, approve actions, or run work.
+type CoordinationRecipient struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}
+
+type CoordinationResponse struct {
+	ActorID     string    `json:"actor_id"`
+	Body        string    `json:"body"`
+	EvidenceIDs []string  `json:"evidence_ids"`
+	RespondedAt time.Time `json:"responded_at"`
+}
+
+type CoordinationResolution struct {
+	ActorID  string    `json:"actor_id"`
+	Note     string    `json:"note,omitempty"`
+	ClosedAt time.Time `json:"closed_at"`
+}
+
+type CoordinationRequest struct {
+	Base
+	Kind             string                  `json:"kind"`
+	Title            string                  `json:"title"`
+	Body             string                  `json:"body"`
+	OwnerID          string                  `json:"owner_id"`
+	OwnerType        string                  `json:"owner_type"`
+	Recipient        CoordinationRecipient   `json:"recipient"`
+	TaskID           string                  `json:"task_id,omitempty"`
+	EvidenceIDs      []string                `json:"evidence_ids"`
+	Status           string                  `json:"status"`
+	EscalationReason string                  `json:"escalation_reason,omitempty"`
+	Response         *CoordinationResponse   `json:"response,omitempty"`
+	Resolution       *CoordinationResolution `json:"resolution,omitempty"`
 }
 
 type Situation struct {
@@ -399,6 +468,8 @@ func DecodeResource(kind ResourceType, raw json.RawMessage) (any, error) {
 		target = &Task{}
 	case ResourceAttention:
 		target = &Attention{}
+	case ResourceCoordinationRequest:
+		target = &CoordinationRequest{}
 	case ResourceEvidence:
 		target = &Evidence{}
 	case ResourceArtifact:

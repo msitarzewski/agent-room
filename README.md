@@ -1,9 +1,10 @@
 # Agent Room
 
-Agent Room is a human control plane for supervising AI workers. It normalizes
-worker state across runtimes, directs human attention to consequential changes,
-ties completion claims to inspectable evidence, and makes interventions
-explicit, authorized, versioned, and auditable.
+Agent Room is a shared coordination workspace for agents. It brings work,
+ownership, requests, handoffs, and evidence into one attributable record across
+runtimes. Humans can observe, participate, steer, and decide exceptions; routine
+coordination should reach the responsible agents. Commands remain explicitly
+authorized, versioned, idempotent, and auditable.
 
 This repository is an implemented product foundation, not a finished autonomous
 worker platform. It includes the control-plane daemon and CLI, PostgreSQL
@@ -64,8 +65,14 @@ events use [`api/arp/event-envelope.schema.json`](api/arp/event-envelope.schema.
 
 ## Spatial observatory
 
-Open **Observatory** in the sidebar, or visit `/workspace`. Select a project to
-unfold its tasks and recorded dependencies, then select a task to inspect runs,
+Open **Observatory** in the sidebar, or visit `/workspace`. The portfolio groups
+projects into **Coordination**, **Work recorded**, **Quiet**, and **Coverage
+unknown**. Expand a region to reveal named projects in pages of twelve. Actual
+requests, blockers, reviews, ownership, and agent presence supply the signals;
+repository activity never implies a running worker. Quiet requires a complete,
+recent source collection and authorized coordination coverage.
+
+Select a project to unfold its tasks and recorded dependencies, then select a task to inspect runs,
 evidence, artifacts, review state, and source observations. Project and task
 selections are shareable through the URL. The searchable directory supports
 keyboard navigation and remains available when graphics cannot render.
@@ -84,8 +91,62 @@ immersive** or the headset's system control to return. Real Vision Pro comfort,
 input, and frame pacing still require acceptance on the exact visionOS build.
 The development emulator and sample environments are omitted from production.
 
-The [spatial release checklist](memory-bank/releases/spatial-workspace.md)
-records implementation, verification, and device acceptance requirements.
+The [spatial release checklist](memory-bank/releases/spatial-workspace.md) and
+[coordination release](memory-bank/releases/agent-coordination-workspace.md)
+record implementation, verification, and device acceptance requirements.
+
+## Agent coordination
+
+Agents use the private, project-scoped MCP surface to
+`list_coordination_requests`, `create_coordination_request`, and
+`act_coordination_request`. Requests have kind `help`, `context`, `handoff`, or
+`review`, an authenticated owner, a named agent or human recipient, and optional
+same-project task/evidence references. A human recipient requires an explicit
+escalation reason. The named recipient responds; the requester resolves or
+cancels. An authorized operator can intervene with its own attribution.
+
+Each mutation needs an idempotency key; actions also need the current resource
+version. Narrow machine capabilities are `coordination:read`,
+`coordination:create`, `coordination:respond`, `coordination:resolve`, and
+`coordination:cancel`. Request bodies are recipient-scoped in resource reads,
+summaries, event replay, and live streams. Full project readers can observe all
+requests. A response does not transfer ownership, accept completion, or execute
+work. The browser uses the equivalent typed HTTP contract with its normal
+session, CSRF protection, and project permissions.
+
+`agentroomctl report` explicitly reports real agent/session metadata without
+loading daemon configuration or requiring database credentials:
+
+```sh
+agentroomctl report \
+  --project-id <authorized-project> --runtime codex \
+  --agent-id <token-actor-id> --instance-id <stable-instance-id> \
+  --display-name '<participant-name>' \
+  --state-dir /absolute/private/reporter-state \
+  --token-file /absolute/private/reporter-token \
+  --adapter-url http://127.0.0.1:54491
+```
+
+Use a separate project-scoped token with `event:ingest` and `source:codex`
+(or `source:claude` / `source:hermes`). Codex uses its actual `CODEX_THREAD_ID`;
+other callers supply `--session-id`. The reporter never reads conversations or
+starts workers. Provide `--run-id` and `--run-status` only for an actual bounded
+native run. Agent presence expires after five minutes; repeat reports during
+real work and report `--status idle --session-status idle` when it ends.
+
+Ordinary runtime source credentials accept only typed `agent.observed`,
+`session.observed`, and `run.observed` events, bound to the authenticated actor.
+Legacy codec lifecycle exports must be mapped to this typed contract before
+connecting a provider-hook service. They cannot update human tasks, approvals,
+or another participant's runs through generic event names.
+
+State directories require mode 0700; token/state files require mode 0600 and
+current-user ownership. Observations persist before transmission; `--retry`
+drains the original queued bodies without creating activity. Only HTTP 202
+acknowledges delivery. Permanent invalid or expired observations stay
+quarantined for review. Preserve the directory across restarts, and never
+commit runtime state or bearer credentials. This explicit reporter is not an
+installed provider-hook service or autonomous worker executor.
 
 ## Prerequisites
 
@@ -164,7 +225,8 @@ app is served over Tailscale HTTPS port 4445, with its identity provider on port
 4446, using a supervised native daemon and persistent local containers. See the
 [local deployment runbook](memory-bank/build-deployment.md#local-tailnet-deployment)
 for status, restart, update, and stop procedures. This is also the WebXR entry
-point for Vision Pro Safari; physical headset acceptance is still pending.
+point for Vision Pro Safari. Michael has confirmed immersive operation; detailed
+interaction, comfort, recovery, and measured frame pacing remain device checks.
 
 The supported workstation shape is a native Go daemon and frontend build, with
 PostgreSQL and Dex in loopback-published containers. Do not use the production

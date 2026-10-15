@@ -1,14 +1,102 @@
 # Active Context
 
-**Last updated:** 2026-10-14
+**Last updated:** 2026-10-15
 
 **State:** DOCS
 
-**Substate:** IDLE
+**Substate:** RUNNING
 
-**Task status:** CONTINUOUS SENTRY OBSERVATIONS — LOCAL RELEASE COMPLETE
+**Task status:** AGENT-FIRST COORDINATION WORKSPACE — LOCAL ACCEPTANCE PASSED
 
 ## Current Task
+
+The approved iteration is implemented and verified locally. Four semantic
+regions replace the anonymous 99-project field, with twelve-project pages,
+attributed requests/work, and smaller human escalations across desktop/XR.
+Typed REST/MCP requests and metadata-only native-session reporting were
+exercised by the actual coding participants: ownership, evidence, peer response,
+and resolution. The peer is disconnected/closed; the owned release task is in
+review, with completion acceptance separate from source checklist completion.
+
+Final gates pass: 137 frontend tests, 28 native browser checks plus four final
+layout checks, backend coverage 84.7% with every critical package above 90%,
+and security/license/advisory/completeness checks. Actual authenticated HTTPS
+Chromium (WebGL 2) and WebKit (WebGPU) verify all 99 summaries, semantic groups,
+paging/return, real request inspection, narrow layout, CSP, and live sockets.
+Runtime source-only and audit privacy findings are fixed. Existing 16 other
+human task records are unchanged. Sentry remains independently supervised with
+99 exact source-only project scopes and no delivery backlog/quarantine.
+
+Remaining operational steps: commit the reviewed implementation/docs, rebuild
+from the clean revision, verify native/web provenance and readiness, close root
+presence, revoke temporary acceptance credentials, and record final recovery
+state privately. Physical Vision Pro interaction/comfort/frame pacing and pipx
+promotion remain separate. No provider-hook service or autonomous executor was
+installed. Keep private runtime/evidence ignored; read the release record below.
+
+2026-10-15: Michael approved proceeding with the agent-first plan. Implementation
+is authorized on the current feature branch: typed machine requests, narrowly
+authorized peer coordination, global actionable summaries, grouped semantic
+desktop/XR views, explicit human escalation, and honest runtime integration.
+Read [Agent coordination workspace](releases/agent-coordination-workspace.md)
+for the stable checklist, ownership, authority, and acceptance record. Preserve
+the prior Memory Bank edits, 99-project deployment, and ignored private runtime.
+
+2026-10-15 product clarification: Michael says this project is really for
+agents and he is mostly a passenger. Treat agents as the primary participants;
+center work, ownership, requests, dependencies, reviews, and handoffs. Revise the
+human-centered Needs You proposal into a coordination view with a smaller human
+escalation surface. APIs/shared records are the agents' workspace; desktop/XR
+are the human's window and occasional participation surface. Core project brief,
+product context, rules, and decisions now preserve this clarification. Sentry
+supplies real repository/task context, while live participation still requires
+real runtime observations and request/handoff contracts through existing
+agent/run/session/task/adapters. This is product direction, not a blanket grant
+of execution authority or a claim that autonomous coordination is implemented.
+
+2026-10-15: Michael tested the full immersive portfolio and reported that 99
+similar icons do not communicate useful grouping, urgency, or asks. He asked
+for thoughts about meaningful color/grouping. The original question was design feedback; Michael subsequently approved
+implementation as recorded above.
+Read-only inspection found one open attention item and one source-blocked task,
+with no recorded running runs, pending approvals, or pending completion claims.
+The current scene gets only the selected project's attention/resources; global
+portfolio summaries are used by the HTML directory but are not passed into XR.
+Project glyphs share the same default color and identity-based positions; labels
+above 16 nodes are hidden unless selected, hovered, or carrying attention.
+Propose a shared authorized coordination signal summary, named regions,
+progressive cluster expansion, semantic color with labels/badges, and in-world
+agent requests/handoffs with a separate human-escalation surface. Preserve stable geography and
+do not infer live workers or human approvals from Sentry/Git activity. Extend
+existing overview, scene, labels, and tests; no replacement renderer or new
+background process. See the updated zoomable control room plan's portfolio
+feedback section. Full portfolio setup below remains complete.
+
+2026-10-15: Michael explicitly approved provisioning all discovered Sentry
+projects, full project permissions for his operator account, and source-ingestion
+access only for the publisher. This resolved the earlier automatic-review scope
+rejection. Fresh discovery found 99 projects; 98 were added, and all 99 operator
+memberships now have the established full project capability set. The existing
+publisher covers those exact IDs with only `event:ingest,source:sentry`; its
+previous credential is revoked and removed. No additional process was installed.
+Both databases and the queue were backed up privately. All 99 source reports
+were delivered with no backlog, quarantine, unmapped project, or delivery error.
+Chromium/WebKit authenticated portfolio and project selection checks pass.
+The 13 pre-change tasks retain their human-owned fields; a new real source task
+was added during collection. Secrets, host values, and detailed evidence remain
+ignored under owner-only `data/local/`. No runtime file is tracked. Full portfolio
+operation is complete; headset workflow/comfort, brief polish, and pipx promotion
+remain the next work.
+
+2026-10-15: Michael reports, "Immersive works!" User-reported immersive operation
+is confirmed. Detailed selection/inspection, exact device/software build,
+comfort, recovery, and measured frame pacing remain to be recorded in
+`releases/spatial-workspace.md#remaining-device-and-promotion-acceptance`.
+Next recommendation: expand the observatory's real project portfolio with
+view-only operator access, improve the brief's routine-scan wording/counting,
+finish the headset workflow checks, then prepare the verified pipx deployment.
+These were recommendations at the time of the headset confirmation. The explicit
+approval and completed full-permission portfolio setup are recorded above.
 
 2026-10-14 follow-up: Michael authorized Memory Bank updates, a commit, and the
 next build. Spatial checkpoint `95f166b` is committed. Continuous Sentry delivery
@@ -40,12 +128,11 @@ for the stable checklist and source/delivery contracts.
 6. Verify initial collection, incremental updates, duplicate/restart recovery,
    unavailable delivery, source isolation, and real authenticated live refresh.
 
-The independent publisher now collects the existing Agent Room project every
-300 seconds, with durable retry and no membership changes. Initial delivery
-contains 13 real task records with no backlog or quarantine. Automatic approval
-review rejected adding all 97 source projects and broad operator access; that
-action made no changes. The other 96 discoveries remain explicit provisioning
-needs pending Michael's scope decision. Actual authenticated Chromium/WebKit
+The independent publisher now collects all 99 approved source projects every
+300 seconds with durable retry. Its initial single-project deployment contained
+13 real task records. Automatic approval review originally rejected a 97-project
+permission expansion; Michael subsequently approved the exact scope and the
+fresh 99-project setup is complete. Actual authenticated Chromium/WebKit
 acceptance passes: one healthy socket, heartbeat, typed project frames, advancing
 collection times, unchanged human fields, and no reload or CSP violations. The
 release checklist is complete. Mac staging continues; pipx remains the eventual

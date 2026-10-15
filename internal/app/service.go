@@ -80,7 +80,34 @@ func (s *Service) Get(ctx context.Context, actor Actor, projectID string, kind d
 	if !canRead(actor, kind) {
 		return nil, ErrDenied
 	}
-	return s.repo.Get(ctx, projectID, kind, id)
+	raw, err := s.repo.Get(ctx, projectID, kind, id)
+	if err == nil && kind == domain.ResourceCoordinationRequest && !CoordinationVisible(actor, raw) {
+		return nil, ErrNotFound
+	}
+	if err == nil && kind == domain.ResourceAudit {
+		return redactCoordinationAudit(raw)
+	}
+	return raw, err
+}
+
+// Existing audit rows remain immutable. Request content is available only through
+// its recipient-authorized resource, never through the general audit surface.
+func redactCoordinationAudit(raw json.RawMessage) (json.RawMessage, error) {
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return nil, err
+	}
+	var kind string
+	if value, ok := document["resource_type"]; ok {
+		if err := json.Unmarshal(value, &kind); err != nil {
+			return nil, err
+		}
+	}
+	if kind != string(domain.ResourceCoordinationRequest) {
+		return raw, nil
+	}
+	delete(document, "details")
+	return json.Marshal(document)
 }
 
 func (s *Service) NewID() string { return s.ids.New() }
@@ -110,7 +137,28 @@ func (s *Service) List(ctx context.Context, actor Actor, projectID string, kind 
 	if limit > 200 {
 		limit = 200
 	}
-	page, err := s.repo.List(ctx, projectID, kind, cursor, limit)
+	var page Page
+	var err error
+	if kind == domain.ResourceCoordinationRequest && !actor.Can("resource:read") {
+		provider, ok := s.repo.(interface {
+			ListCoordination(context.Context, string, Actor, string, int) (Page, error)
+		})
+		if !ok {
+			return Page{}, ErrUnsupported
+		}
+		page, err = provider.ListCoordination(ctx, projectID, actor, cursor, limit)
+	} else {
+		page, err = s.repo.List(ctx, projectID, kind, cursor, limit)
+	}
+	if err == nil && kind == domain.ResourceAudit {
+		for i, raw := range page.Items {
+			safe, redactErr := redactCoordinationAudit(raw)
+			if redactErr != nil {
+				return Page{}, redactErr
+			}
+			page.Items[i] = safe
+		}
+	}
 	if page.Items == nil {
 		page.Items = make([]json.RawMessage, 0)
 	}
@@ -128,6 +176,15 @@ func (s *Service) Events(ctx context.Context, actor Actor, projectID string, aft
 		limit = 1000
 	}
 	page, err := s.repo.Events(ctx, projectID, after, limit)
+	if page.Items != nil {
+		visible := make([]domain.Event, 0, len(page.Items))
+		for _, event := range page.Items {
+			if CoordinationEventVisible(actor, event) {
+				visible = append(visible, event)
+			}
+		}
+		page.Items = visible
+	}
 	if page.Items == nil {
 		page.Items = make([]domain.Event, 0)
 	}
@@ -142,7 +199,7 @@ func (s *Service) Workspace(ctx context.Context, actor Actor, projectID string) 
 	}
 	for _, kind := range []domain.ResourceType{
 		domain.ResourceTask, domain.ResourceAgent, domain.ResourceRun, domain.ResourceAttention,
-		domain.ResourceEvidence, domain.ResourceArtifact, domain.ResourceClaim, domain.ResourceApproval,
+		domain.ResourceEvidence, domain.ResourceArtifact, domain.ResourceClaim, domain.ResourceApproval, domain.ResourceCoordinationRequest,
 	} {
 		if !canRead(actor, kind) {
 			return WorkspaceSnapshot{}, ErrDenied
@@ -152,12 +209,27 @@ func (s *Service) Workspace(ctx context.Context, actor Actor, projectID string) 
 	if !ok {
 		return WorkspaceSnapshot{}, ErrUnsupported
 	}
-	return provider.Workspace(ctx, projectID)
+	snapshot, err := provider.Workspace(ctx, projectID)
+	if err == nil && !actor.Can("resource:read") {
+		visible := make([]json.RawMessage, 0)
+		for _, raw := range snapshot.Resources.Requests {
+			if CoordinationVisible(actor, raw) {
+				visible = append(visible, raw)
+			}
+		}
+		snapshot.Resources.Requests = visible
+	}
+	return snapshot, err
 }
 
 func (s *Service) Overview(ctx context.Context, actor Actor, projectID string) (map[string]any, error) {
 	if !actor.Can("overview:read") && !actor.Can("resource:read") {
 		return nil, ErrDenied
+	}
+	if provider, ok := s.repo.(interface {
+		OverviewForActor(context.Context, string, Actor) (map[string]any, error)
+	}); ok {
+		return provider.OverviewForActor(ctx, projectID, actor)
 	}
 	return s.repo.Overview(ctx, projectID)
 }
@@ -253,6 +325,9 @@ func filterDocuments(documents []json.RawMessage, keep func(map[string]any) bool
 }
 
 func (s *Service) Create(ctx context.Context, actor Actor, kind domain.ResourceType, projectID, idempotencyKey string, value any, remoteAddr string) (CommandResult, error) {
+	if kind == domain.ResourceCoordinationRequest {
+		return CommandResult{}, Invalid("coordination requests require typed create/respond/resolve/cancel commands")
+	}
 	if !actor.Can("resource:write") && !actor.Can(string(kind)+":write") &&
 		!(kind == domain.ResourceApproval && actor.Can("approval:request")) {
 		return CommandResult{}, s.recordRejection(ctx, actor, projectID, "create."+string(kind), string(kind), "", idempotencyKey, ErrDenied)
@@ -408,6 +483,9 @@ func (s *Service) RequestTaskReview(ctx context.Context, actor Actor, projectID,
 		if err := json.Unmarshal(current, &task); err != nil {
 			return nil, "", err
 		}
+		if task.OwnerID != actor.ID && !actor.Can("resource:write") {
+			return nil, "", ErrDenied
+		}
 		if err := domain.ValidateTaskTransition(task.Status, "review"); err != nil {
 			return nil, "", Invalid(err.Error())
 		}
@@ -417,6 +495,282 @@ func (s *Service) RequestTaskReview(ctx context.Context, actor Actor, projectID,
 		task.UpdatedAt = s.clock.Now()
 		next, _ := json.Marshal(task)
 		return next, "task.review_requested", nil
+	})
+}
+
+func (s *Service) validateRuntimeObservation(ctx context.Context, actor Actor, event *domain.Event, batch []domain.Event) error {
+	if event.SourceSequence <= 0 {
+		return Invalid("runtime observations require a positive source_sequence")
+	}
+	var agentID, nativeID, status string
+	var observedAt time.Time
+	decoder := json.NewDecoder(bytes.NewReader(event.Payload))
+	decoder.DisallowUnknownFields()
+	switch event.Type {
+	case "agent.observed":
+		var input domain.AgentObservation
+		if event.SubjectType != domain.ResourceAgent || decoder.Decode(&input) != nil {
+			return Invalid("invalid typed agent observation")
+		}
+		agentID, nativeID, status, observedAt = input.AgentID, input.InstanceID, input.Status, input.ObservedAt
+		if strings.TrimSpace(input.DisplayName) == "" || len(input.DisplayName) > 256 || (status != "active" && status != "idle" && status != "blocked" && status != "disconnected") {
+			return Invalid("invalid agent display_name or status")
+		}
+		event.SubjectID = actor.ID
+	case "session.observed":
+		var input domain.SessionObservation
+		if event.SubjectType != domain.ResourceSession || decoder.Decode(&input) != nil {
+			return Invalid("invalid typed session observation")
+		}
+		agentID, nativeID, status, observedAt = input.AgentID, input.SessionID, input.Status, input.ObservedAt
+		if status != "active" && status != "idle" && status != "closed" {
+			return Invalid("invalid session status")
+		}
+		event.SubjectID = domain.ObservedRuntimeID(event.ProjectID, event.SourceSystem, actor.ID, "session", nativeID)
+	case "run.observed":
+		var input domain.RunObservation
+		if event.SubjectType != domain.ResourceRun || decoder.Decode(&input) != nil {
+			return Invalid("invalid typed run observation")
+		}
+		agentID, nativeID, status, observedAt = input.AgentID, input.RunID, input.Status, input.ObservedAt
+		if status != "running" && status != "idle" && status != "blocked" && status != "completed" && status != "failed" && status != "cancelled" {
+			return Invalid("invalid run status")
+		}
+		if len(input.Summary) > 4096 || len(input.SessionID) > 512 || len(input.TaskID) > 512 {
+			return Invalid("run references and summary must be bounded")
+		}
+		if input.TaskID != "" {
+			if _, err := s.repo.Get(ctx, event.ProjectID, domain.ResourceTask, input.TaskID); err != nil {
+				return Invalid("run task must be in the same project")
+			}
+		}
+		if input.SessionID != "" {
+			id := domain.ObservedRuntimeID(event.ProjectID, event.SourceSystem, actor.ID, "session", input.SessionID)
+			found := false
+			if raw, err := s.repo.Get(ctx, event.ProjectID, domain.ResourceSession, id); err == nil {
+				var session domain.Session
+				if json.Unmarshal(raw, &session) == nil && session.AgentID == actor.ID {
+					found = true
+				}
+			}
+			for _, prior := range batch {
+				if prior.Type == "session.observed" && prior.SubjectID == id && prior.ProjectID == event.ProjectID && prior.SourceSystem == event.SourceSystem {
+					found = true
+				}
+			}
+			if !found {
+				return Invalid("run session must be this actor's same-project session")
+			}
+		}
+		event.SubjectID = domain.ObservedRuntimeID(event.ProjectID, event.SourceSystem, actor.ID, "run", nativeID)
+	}
+	if agentID != actor.ID {
+		return ErrDenied
+	}
+	if event.Type != "agent.observed" {
+		found := false
+		if raw, err := s.repo.Get(ctx, event.ProjectID, domain.ResourceAgent, actor.ID); err == nil {
+			var agent domain.Agent
+			if json.Unmarshal(raw, &agent) == nil && agent.Source.System == event.SourceSystem {
+				found = true
+			}
+		}
+		for _, prior := range batch {
+			if prior.Type == "agent.observed" && prior.ProjectID == event.ProjectID && prior.SubjectID == actor.ID && prior.SourceSystem == event.SourceSystem {
+				found = true
+			}
+		}
+		if !found {
+			return Invalid("runtime session/run requires this actor's same-project registered agent")
+		}
+	}
+	if strings.TrimSpace(nativeID) == "" || len(nativeID) > 512 || observedAt.IsZero() {
+		return Invalid("runtime native identity and observed_at are required")
+	}
+	if !event.OccurredAt.IsZero() && !event.OccurredAt.Equal(observedAt) {
+		return Invalid("occurred_at must equal observed_at")
+	}
+	event.OccurredAt = observedAt
+	return nil
+}
+
+func actorType(actor Actor) string {
+	if actor.Human {
+		return "human"
+	}
+	return "agent"
+}
+
+// CoordinationVisible applies recipient isolation to snapshots, lists and event payloads.
+func CoordinationVisible(actor Actor, raw json.RawMessage) bool {
+	if actor.Can("resource:read") {
+		return true
+	}
+	if !actor.Can("coordination:read") {
+		return false
+	}
+	var request domain.CoordinationRequest
+	if json.Unmarshal(raw, &request) != nil {
+		return false
+	}
+	return (request.OwnerID == actor.ID && request.OwnerType == actorType(actor)) || (request.Recipient.ID == actor.ID && request.Recipient.Type == actorType(actor))
+}
+
+func CoordinationEventVisible(actor Actor, event domain.Event) bool {
+	if event.SubjectType != domain.ResourceCoordinationRequest {
+		return true
+	}
+	var payload struct {
+		Resource json.RawMessage `json:"resource"`
+	}
+	if json.Unmarshal(event.Payload, &payload) != nil {
+		return false
+	}
+	return CoordinationVisible(actor, payload.Resource)
+}
+
+func (s *Service) coordinationLinks(ctx context.Context, projectID, taskID string, evidenceIDs []string) error {
+	if len(evidenceIDs) > 100 {
+		return Invalid("at most 100 evidence references are allowed")
+	}
+	if taskID != "" {
+		if _, err := s.repo.Get(ctx, projectID, domain.ResourceTask, taskID); err != nil {
+			return Invalid("task_id must reference the same project")
+		}
+	}
+	seen := map[string]bool{}
+	for _, id := range evidenceIDs {
+		if id == "" || len(id) > 512 || seen[id] {
+			return Invalid("evidence_ids must be distinct bounded identifiers")
+		}
+		seen[id] = true
+		if _, err := s.repo.Get(ctx, projectID, domain.ResourceEvidence, id); err != nil {
+			return Invalid("evidence_ids must reference the same project")
+		}
+	}
+	return nil
+}
+
+func (s *Service) CreateCoordination(ctx context.Context, actor Actor, projectID, idem string, input CreateCoordinationInput, remoteAddr string) (CommandResult, error) {
+	if !actor.Can("coordination:create") && !actor.Can("resource:write") {
+		return CommandResult{}, s.recordRejection(ctx, actor, projectID, "create.coordination_request", "coordination_request", input.ID, idem, ErrDenied)
+	}
+	if strings.TrimSpace(input.ID) == "" || len(input.ID) > 512 || strings.TrimSpace(input.Title) == "" || len(input.Title) > 4096 || strings.TrimSpace(input.Body) == "" || len(input.Body) > 32768 || len(input.EscalationReason) > 4096 {
+		return CommandResult{}, Invalid("request requires bounded id, title and body")
+	}
+	if input.Kind != "help" && input.Kind != "context" && input.Kind != "handoff" && input.Kind != "review" {
+		return CommandResult{}, Invalid("request kind must be help, context, handoff or review")
+	}
+	if (input.Recipient.Type != "agent" && input.Recipient.Type != "human") || input.Recipient.ID == "" || len(input.Recipient.ID) > 512 {
+		return CommandResult{}, Invalid("named agent or human recipient is required")
+	}
+	if input.Recipient.Type == "human" && strings.TrimSpace(input.EscalationReason) == "" {
+		return CommandResult{}, Invalid("human recipient requires an explicit escalation_reason")
+	}
+	if input.EscalationReason != "" && input.Recipient.Type != "human" {
+		return CommandResult{}, Invalid("human escalation requires a human recipient")
+	}
+	if input.Recipient.ID == actor.ID && input.Recipient.Type == actorType(actor) {
+		return CommandResult{}, Invalid("request recipient must be another participant")
+	}
+	if err := s.coordinationLinks(ctx, projectID, input.TaskID, input.EvidenceIDs); err != nil {
+		return CommandResult{}, err
+	}
+	provider, ok := s.repo.(interface {
+		CoordinationRecipientExists(context.Context, string, domain.CoordinationRecipient) (bool, error)
+	})
+	if !ok {
+		return CommandResult{}, ErrUnsupported
+	}
+	exists, err := provider.CoordinationRecipientExists(ctx, projectID, input.Recipient)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	if !exists {
+		return CommandResult{}, Invalid("recipient must be registered in this project")
+	}
+	request := domain.CoordinationRequest{Base: domain.Base{ID: input.ID}, Kind: input.Kind, Title: input.Title, Body: input.Body, OwnerID: actor.ID, OwnerType: actorType(actor), Recipient: input.Recipient, TaskID: input.TaskID, EvidenceIDs: input.EvidenceIDs, Status: "open", EscalationReason: input.EscalationReason}
+	if request.EvidenceIDs == nil {
+		request.EvidenceIDs = []string{}
+	}
+	raw, _ := json.Marshal(request)
+	cmd := domain.Command{ID: s.ids.New(), ProjectID: projectID, Type: "create.coordination_request", SubjectType: domain.ResourceCoordinationRequest, SubjectID: input.ID, ActorID: actor.ID, IdempotencyKey: idem, RequestedAt: s.clock.Now(), RemoteAddr: remoteAddr, Payload: raw}
+	return s.execute(ctx, cmd, func(current json.RawMessage) (json.RawMessage, string, error) {
+		if len(current) != 0 {
+			return nil, "", ErrVersionConflict
+		}
+		return normalizeBase(raw, input.ID, projectID, 1, s.clock.Now()), "coordination_request.created", nil
+	})
+}
+
+func (s *Service) ActCoordination(ctx context.Context, actor Actor, projectID, id, action, idem string, expected int64, input CoordinationActionInput, remoteAddr string) (CommandResult, error) {
+	if action != "respond" && action != "resolve" && action != "cancel" {
+		return CommandResult{}, Invalid("unsupported coordination action")
+	}
+	if !actor.Can("coordination:"+action) && !actor.Can("resource:write") {
+		return CommandResult{}, s.recordRejection(ctx, actor, projectID, action+".coordination_request", "coordination_request", id, idem, ErrDenied)
+	}
+	if expected < 1 {
+		return CommandResult{}, Invalid("positive expected version is required")
+	}
+	if len(input.Body) > 32768 || len(input.Note) > 4096 || (action == "respond" && (strings.TrimSpace(input.Body) == "" || input.Note != "")) || (action != "respond" && (input.Body != "" || len(input.EvidenceIDs) != 0)) {
+		return CommandResult{}, Invalid("invalid coordination action payload")
+	}
+	if err := s.coordinationLinks(ctx, projectID, "", input.EvidenceIDs); err != nil {
+		return CommandResult{}, err
+	}
+	// Actor identity is part of the new command fingerprint, including retries.
+	payload, _ := json.Marshal(struct {
+		ActorID   string                  `json:"actor_id"`
+		ActorType string                  `json:"actor_type"`
+		Input     CoordinationActionInput `json:"input"`
+	}{actor.ID, actorType(actor), input})
+	cmd := domain.Command{ID: s.ids.New(), ProjectID: projectID, Type: action + ".coordination_request", SubjectType: domain.ResourceCoordinationRequest, SubjectID: id, ActorID: actor.ID, ExpectedVersion: expected, IdempotencyKey: idem, RequestedAt: s.clock.Now(), RemoteAddr: remoteAddr, Payload: payload}
+	return s.execute(ctx, cmd, func(current json.RawMessage) (json.RawMessage, string, error) {
+		if len(current) == 0 {
+			return nil, "", ErrNotFound
+		}
+		var request domain.CoordinationRequest
+		if err := json.Unmarshal(current, &request); err != nil {
+			return nil, "", err
+		}
+		operator := actor.Can("resource:write")
+		if action == "respond" {
+			if request.Recipient.Type == "human" && !actor.Human {
+				return nil, "", ErrDenied
+			}
+			if !operator && (request.Recipient.ID != actor.ID || request.Recipient.Type != actorType(actor)) {
+				return nil, "", ErrDenied
+			}
+		} else if !operator && (request.OwnerID != actor.ID || request.OwnerType != actorType(actor)) {
+			return nil, "", ErrDenied
+		}
+		if request.Status != "open" && request.Status != "responded" {
+			return nil, "", Invalid("request is already closed")
+		}
+		if action == "respond" && request.Status != "open" {
+			return nil, "", Invalid("request already has a response")
+		}
+		now := s.clock.Now()
+		if action == "respond" {
+			evidence := input.EvidenceIDs
+			if evidence == nil {
+				evidence = []string{}
+			}
+			request.Status = "responded"
+			request.Response = &domain.CoordinationResponse{ActorID: actor.ID, Body: input.Body, EvidenceIDs: evidence, RespondedAt: now}
+		} else {
+			if action == "resolve" {
+				request.Status = "resolved"
+			} else {
+				request.Status = "cancelled"
+			}
+			request.Resolution = &domain.CoordinationResolution{ActorID: actor.ID, Note: input.Note, ClosedAt: now}
+		}
+		request.Version++
+		request.UpdatedAt = now
+		raw, _ := json.Marshal(request)
+		return raw, "coordination_request." + request.Status, nil
 	})
 }
 
@@ -617,6 +971,9 @@ func (s *Service) Ingest(ctx context.Context, actor Actor, events []domain.Event
 		if !validIngestName(event.SourceSystem, 64) || !validIngestName(event.Type, 128) {
 			return Invalid("source_system and event type must use bounded canonical names")
 		}
+		if event.SubjectType == domain.ResourceCoordinationRequest {
+			return Invalid("source ingestion cannot create or change coordination requests")
+		}
 		if event.SubjectID == "" || !knownResourceType(event.SubjectType) {
 			return Invalid("ingested event requires a known subject_type and nonempty subject_id")
 		}
@@ -635,6 +992,19 @@ func (s *Service) Ingest(ctx context.Context, actor Actor, events []domain.Event
 		}
 		if event.SourceEventID == "" || len(event.SourceEventID) > 512 || event.SourceSequence < 0 {
 			return Invalid("ingestion requires a bounded source_event_id and nonnegative source_sequence")
+		}
+		if event.SourceSystem == "codex" || event.SourceSystem == "claude" || event.SourceSystem == "hermes" {
+			typed := event.Type == "agent.observed" || event.Type == "session.observed" || event.Type == "run.observed"
+			// Native lifecycle codecs are compatibility foundations, not authority
+			// for narrow reporters to mutate arbitrary coordination resources.
+			if !typed && !actor.Can("source:admin") {
+				return ErrDenied
+			}
+			if typed {
+				if err := s.validateRuntimeObservation(ctx, actor, event, events[:i]); err != nil {
+					return err
+				}
+			}
 		}
 		if event.SourceSystem == "sentry" {
 			if event.SourceSequence <= 0 {
@@ -730,7 +1100,7 @@ func knownResourceType(kind domain.ResourceType) bool {
 		domain.ResourceIntervention, domain.ResourceChatMessage, domain.ResourceBudget, domain.ResourceClaim,
 		domain.ResourceAudit, domain.ResourceOrganization, domain.ResourceHuman, domain.ResourceProject,
 		domain.ResourceHost, domain.ResourceAgentInstance, domain.ResourceTaskTransition,
-		domain.ResourceSituation, domain.ResourcePolicy, domain.ResourceDeployment:
+		domain.ResourceSituation, domain.ResourcePolicy, domain.ResourceDeployment, domain.ResourceCoordinationRequest:
 		return true
 	default:
 		return false
@@ -753,6 +1123,9 @@ func (s *Service) executeWithControl(ctx context.Context, cmd domain.Command, co
 		eventPayload, _ := json.Marshal(map[string]any{"resource": json.RawMessage(resource), "command_type": cmd.Type})
 		event := domain.Event{ID: s.ids.New(), ProjectID: cmd.ProjectID, Type: eventType, SubjectType: cmd.SubjectType, SubjectID: cmd.SubjectID, ActorID: cmd.ActorID, CommandID: cmd.ID, CorrelationID: cmd.CorrelationID, OccurredAt: s.clock.Now(), SchemaVersion: 1, Payload: eventPayload}
 		audit := domain.AuditRecord{Base: domain.NewBase(s.ids.New(), cmd.ProjectID, s.clock.Now()), ActorID: cmd.ActorID, Action: cmd.Type, ResourceType: string(cmd.SubjectType), ResourceID: cmd.SubjectID, CommandID: cmd.ID, Outcome: "accepted", RemoteAddr: cmd.RemoteAddr, Details: cmd.Payload}
+		if cmd.SubjectType == domain.ResourceCoordinationRequest {
+			audit.Details = nil
+		}
 		return Mutation{Resource: resource, Event: event, Audit: audit, Control: control}, nil
 	})
 	if err != nil {
@@ -833,5 +1206,5 @@ func normalizeBase(raw json.RawMessage, id, projectID string, version int64, now
 }
 
 func canRead(actor Actor, kind domain.ResourceType) bool {
-	return actor.Can("resource:read") || actor.Can(string(kind)+":read")
+	return actor.Can("resource:read") || (kind == domain.ResourceCoordinationRequest && actor.Can("coordination:read")) || actor.Can(string(kind)+":read")
 }

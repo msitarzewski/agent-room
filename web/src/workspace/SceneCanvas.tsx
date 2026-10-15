@@ -8,7 +8,8 @@ import {
   PerspectiveCamera, Quaternion, SRGBColorSpace, Vector3, WebGLRenderer,
 } from "three";
 import type { Group, InstancedMesh, Mesh, Texture, WebXRManager } from "three";
-import type { Artifact, AttentionItem, Evidence, Project, Run, Task } from "../api/types";
+import type { Agent, Artifact, AttentionItem, CoordinationRequest, Evidence, Project, Run, Task } from "../api/types";
+import type { PortfolioEntry, PortfolioRegion, PortfolioSignal } from "./data";
 import { buildWorkspaceScene, shortLabel, textPages, visibleLabels, wrapLabel } from "./scene";
 import type { Point3, SceneNode, WorkspaceScene } from "./scene";
 import { gripGain, gripTranslation, requestImmersiveSession, sessionError } from "./xrInput";
@@ -20,11 +21,22 @@ export interface SceneCanvasProps {
   runs: Run[];
   attention: AttentionItem[];
   selectedTaskId: string | null;
+  selectedRequestId?: string | null;
   onProjectSelect: (id: string) => void;
   onTaskSelect: (id: string) => void;
   onBack?: () => void;
   evidence?: Evidence[];
   artifacts?: Artifact[];
+  agents?: Agent[];
+  requests?: CoordinationRequest[];
+  portfolio?: Record<string, PortfolioEntry>;
+  region?: PortfolioRegion | null;
+  page?: number;
+  now?: number;
+  signals?: PortfolioSignal[];
+  onRegionSelect?: (region: PortfolioRegion | null) => void;
+  onRegionPageChange?: (page: number) => void;
+  onSignalSelect?: (signal: PortfolioSignal) => void;
   reducedMotion: boolean;
 }
 
@@ -47,7 +59,8 @@ class GraphicsBoundary extends Component<{ children: ReactNode; onFailure: () =>
   render() { return this.state.failed ? null : this.props.children; }
 }
 
-function labelTexture(title: string, detail: string, color: string, width = 768): CanvasTexture {
+function labelTexture(title: string, detail: string, color: string, prominent: boolean): CanvasTexture {
+  const width = 768;
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = 256;
@@ -62,20 +75,20 @@ function labelTexture(title: string, detail: string, color: string, width = 768)
   context.stroke();
   context.fillStyle = color;
   context.fillRect(28, 34, 5, 175);
-  context.font = "500 58px system-ui, sans-serif";
+  context.font = `500 ${prominent ? 72 : 58}px system-ui, sans-serif`;
   context.fillStyle = "#edf2ff";
-  const lines = wrapLabel(title, 22, 3);
+  const lines = wrapLabel(title, prominent ? 18 : 22, 3);
   lines.forEach((line, index) => context.fillText(line, 52, 66 + index * 54));
   context.fillStyle = color;
-  context.font = "400 32px system-ui, sans-serif";
-  context.fillText(shortLabel(detail, 36), 52, 224);
+  context.font = `400 ${prominent ? 40 : 32}px system-ui, sans-serif`;
+  context.fillText(shortLabel(detail, prominent ? 32 : 36), 52, 224);
   const texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;
   return texture;
 }
 
-function useTextTexture(title: string, detail: string, color: string): Texture {
-  const texture = useMemo(() => labelTexture(title, detail, color), [title, detail, color]);
+function useTextTexture(title: string, detail: string, color: string, prominent: boolean): Texture {
+  const texture = useMemo(() => labelTexture(title, detail, color, prominent), [title, detail, color, prominent]);
   useEffect(() => () => texture.dispose(), [texture]);
   return texture;
 }
@@ -101,10 +114,10 @@ function useLightTexture(): Texture {
   return texture;
 }
 
-function Label({ title, detail, color, position, width = 1.7, onClick }: {
-  title: string; detail: string; color: string; position: Point3; width?: number; onClick?: () => void;
+function Label({ title, detail, color, position, width = 1.7, prominent = false, onClick }: {
+  title: string; detail: string; color: string; position: Point3; width?: number; prominent?: boolean; onClick?: () => void;
 }) {
-  const texture = useTextTexture(title, detail, color);
+  const texture = useTextTexture(title, detail, color, prominent);
   const mesh = useRef<Mesh>(null);
   useFrame(({ camera }) => { if (mesh.current) mesh.current.quaternion.copy(camera.quaternion); });
   return <mesh ref={mesh} position={position} userData={{ label: title, detail }} onClick={onClick ? (event) => { event.stopPropagation(); onClick(); } : undefined}>
@@ -122,15 +135,15 @@ function Observatory() {
     <pointLight position={[5, 3, 1]} intensity={18} distance={17} color="#77dbcb" />
     <mesh position={[0, 0, -4]} rotation={[0.18, 0.35, 0.28]}>
       <torusGeometry args={[9.4, 0.018, 6, 150, Math.PI * 1.65]} />
-      <meshBasicMaterial color="#8eabef" transparent opacity={0.18} />
+      <meshBasicMaterial color="#8eabef" transparent opacity={0.18} depthWrite={false} />
     </mesh>
     <mesh position={[0, 0, -4.5]} rotation={[-0.23, -0.35, -0.16]}>
       <torusGeometry args={[11.2, 0.012, 6, 150, Math.PI * 1.45]} />
-      <meshBasicMaterial color="#8cf0d1" transparent opacity={0.14} />
+      <meshBasicMaterial color="#8cf0d1" transparent opacity={0.14} depthWrite={false} />
     </mesh>
     <mesh position={[0, -5.4, -2]} rotation={[-Math.PI / 2, 0, 0]}>
       <ringGeometry args={[4, 12, 100]} />
-      <meshBasicMaterial color="#617ab7" transparent opacity={0.045} />
+      <meshBasicMaterial color="#617ab7" transparent opacity={0.045} depthWrite={false} />
     </mesh>
   </group>;
 }
@@ -219,7 +232,7 @@ function DependencyThreads({ projection, selected }: { projection: WorkspaceScen
       if (length === 0) continue;
       const midpoint = start.clone().add(end).multiplyScalar(0.5);
       result.push({ position: midpoint.toArray(), quaternion: new Quaternion().setFromUnitVectors(up, direction.normalize()),
-        length, color: edge.blocked ? "#ffb46e" : "#9ab5e8", emphasized: edge.from === selected || edge.to === selected });
+        length, color: edge.relationship === "ownership" ? "#94e0e8" : edge.blocked ? "#ffb46e" : "#9ab5e8", emphasized: edge.from === selected || edge.to === selected });
     }
     return result;
   }, [projection, selected]);
@@ -269,10 +282,10 @@ function DesktopNavigation({ nodes, resetToken, reducedMotion }: { nodes: SceneN
   const drag = useRef<{ x: number; y: number; pointer: number } | null>(null);
   useEffect(() => {
     if (!(camera instanceof PerspectiveCamera)) return;
-    const minX = Math.min(-1, ...nodes.map((node) => node.position[0] - 1.15));
-    const maxX = Math.max(1, ...nodes.map((node) => node.position[0] + 1.15));
-    const minY = Math.min(-1, ...nodes.map((node) => node.position[1] - 1.2));
-    const maxY = Math.max(1, ...nodes.map((node) => node.position[1] + 0.65));
+    const minX = Math.min(-1, ...nodes.map((node) => node.position[0] - (node.kind === "region" ? 2.1 : 1.35)));
+    const maxX = Math.max(1, ...nodes.map((node) => node.position[0] + (node.kind === "region" ? 2.1 : 1.35)));
+    const minY = Math.min(-1, ...nodes.map((node) => node.position[1] - (node.action === "expand" ? 1.8 : 1.2)));
+    const maxY = Math.max(1, ...nodes.map((node) => node.position[1] + (node.action === "collapse" ? 1.4 : 0.65)));
     const vertical = (maxY - minY) / 2;
     const horizontal = (maxX - minX) / 2 / Math.max(size.width / size.height, 0.2);
     const distance = Math.max(3.8, Math.max(vertical, horizontal) / Math.tan(camera.fov * Math.PI / 360) * 1.13);
@@ -421,26 +434,98 @@ function TaskInspector({ task, runs, evidence = [], artifacts = [] }: { task: Ta
   </group>;
 }
 
+function RegionHub({ node, onSelect }: { node: SceneNode; onSelect: (node: SceneNode) => void }) {
+  return <group position={node.position}>
+    {node.action === "expand" && <mesh userData={{ kind: "portfolio-region", region: node.region, action: node.action }} onClick={(event) => { event.stopPropagation(); onSelect(node); }} rotation={[0.2, 0.4, 0]}>
+      {node.region === "quiet" ? <torusGeometry args={[0.44, 0.04, 8, 40]} /> : node.region === "work" ? <ringGeometry args={[0.27, 0.5, 3]} /> : <octahedronGeometry args={[0.47, 0]} />}
+      <meshStandardMaterial color={node.color} metalness={0.45} roughness={0.25} wireframe={node.region === "unknown"} />
+    </mesh>}
+    <Label title={node.title} detail={node.subtitle} color={node.color} position={[0, node.action === "expand" ? -1.15 : 0, 0.2]} width={node.action === "next" || node.action === "previous" ? 2.4 : 3.9} prominent onClick={() => onSelect(node)} />
+  </group>;
+}
+
+function Participant({ node, onSelect }: { node: SceneNode; onSelect: (node: SceneNode) => void }) {
+  return <mesh position={node.position} userData={{ kind: "agent-participant", agent_id: node.id }} onClick={(event) => { event.stopPropagation(); onSelect(node); }}>
+    <capsuleGeometry args={[0.15, 0.25, 4, 12]} />
+    <meshStandardMaterial color={node.color} metalness={0.4} roughness={0.25} />
+  </mesh>;
+}
+
+/** Recorded participants and asks, readable independently of the project sculpture. */
+function CoordinationSurface({ signals, human, compact = false, onSelect }: { signals: PortfolioSignal[]; human: boolean; compact?: boolean; onSelect?: (signal: PortfolioSignal) => void }) {
+  const [page, setPage] = useState(0);
+  const entries = signals.flatMap((signal) => {
+    const attribution = `${signal.owner_name ?? signal.owner_id ?? "Owner not recorded"}${signal.recipient ? ` → ${signal.recipient_name ?? signal.recipient.id} (${signal.recipient.type})` : ""}`;
+    return textPages(`${attribution}. ${signal.title}. ${signal.detail ?? ""}`).map((body) => ({ signal, body }));
+  });
+  const index = entries.length ? page % entries.length : 0;
+  const entry = entries[index];
+  const x = human ? 1.24 : -1.24;
+  const width = human ? 0.78 : 1.02;
+  const color = human ? "#cfbaff" : "#a5e9d6";
+  return <group position={[0, compact ? 0.62 : 0, 0]} userData={{ kind: human ? "human-escalations" : "coordination-surface" }}>
+    <Label title={human ? "Human escalations" : "Coordination"} detail={`${signals.length} authorized summary records`} color={color} position={[x, 0.51, 0.2]} width={width} />
+    <Label title={entry?.body ?? (human ? "No explicit human escalation recorded" : "No agent work or request recorded")} detail={entry ? `${entry.signal.project_name} · ${entry.signal.status}` : "Coverage is shown separately"} color={color} position={[x, 0.1, 0.2]} width={width}
+      onClick={entry && onSelect ? () => onSelect(entry.signal) : undefined} />
+    {entry && !compact && <Label title={entry.signal.source_system ? `Source: ${entry.signal.source_system}` : "Recorded in Agent Room"} detail={entry.signal.updated_at} color="#b5c8de" position={[x, -0.29, 0.2]} width={width} />}
+    {entries.length > 1 && <Label title="Next coordination page" detail={`${index + 1}/${entries.length}`} color={color} position={[x, compact ? 0.85 : -0.65, 0.2]} width={0.7} onClick={() => setPage((value) => value + 1)} />}
+  </group>;
+}
+
+function RequestInspector({ request, agents = [], signals = [] }: { request: CoordinationRequest; agents?: Agent[]; signals?: PortfolioSignal[] }) {
+  const [page, setPage] = useState(0);
+  const name = (id: string) => agents.find((item) => item.id === id)?.display_name ?? signals.find((item) => item.owner_id === id)?.owner_name ?? signals.find((item) => item.recipient?.id === id)?.recipient_name ?? id;
+  const pages = [
+    `Request: ${request.title}`,
+    `From ${name(request.owner_id)} (${request.owner_type}) to ${name(request.recipient.id)} (${request.recipient.type}). ${request.kind} · ${request.status}`,
+    request.body,
+    ...(request.escalation_reason ? [`Escalation reason: ${request.escalation_reason}`] : []),
+    ...(request.response ? [`Response by ${request.response.actor_id}: ${request.response.body}`] : []),
+    ...(request.resolution ? [`Closed by ${name(request.resolution.actor_id)}: ${request.resolution.note}. ${request.resolution.closed_at}`] : []),
+    ...request.evidence_ids.map((id) => `Evidence reference: ${id}`),
+    ...(request.response?.evidence_ids ?? []).map((id) => `Response evidence reference: ${id}`),
+    `Request recorded ${request.updated_at} · version ${request.version}`,
+  ].flatMap((value) => textPages(value));
+  return <group userData={{ kind: "request-inspector", request_id: request.id }}>
+    <Label title="Coordination request" detail={`${request.status} · ${page + 1}/${pages.length}`} color="#c7b4ef" position={[1.17, 0.1, 0.15]} width={0.92} />
+    <Label title={pages[page] ?? ""} detail="Respond in the project inspector" color="#b9c9de" position={[1.17, -0.27, 0.15]} width={0.92} />
+    <Label title="Next request page" detail="Pinch to turn page" color="#9be7d2" position={[1.17, -0.61, 0.15]} width={0.65} onClick={() => setPage((value) => (value + 1) % pages.length)} />
+  </group>;
+}
+
 function SceneContent(props: SceneContentProps) {
   const { projection, immersive, animate, reducedMotion, selectedTaskId, resetToken } = props;
   const [hovered, setHovered] = useState<string | null>(null);
   const selected = selectedTaskId ?? props.activeProjectId;
-  const select = (node: SceneNode) => { if (node.kind === "project") props.onProjectSelect(node.id); else props.onTaskSelect(node.id); };
+  const select = (node: SceneNode) => {
+    if (node.kind === "region") {
+      if (node.action === "next" || node.action === "previous") props.onRegionPageChange?.((projection.page ?? 0) + (node.action === "next" ? 1 : -1));
+      else props.onRegionSelect?.(node.action === "collapse" ? null : node.region ?? null);
+    } else if (node.kind === "project") props.onProjectSelect(node.id);
+    else if (node.kind === "task") props.onTaskSelect(node.id);
+    else {
+      const signal = props.signals?.find((item) => item.id === node.id && item.project_id === props.activeProjectId);
+      if (signal) props.onSignalSelect?.(signal);
+    }
+  };
   const selectedNode = projection.nodes.find((node) => node.id === selected);
   const selectedTask = props.tasks.find((task) => task.id === selectedTaskId);
+  const selectedRequest = props.requests?.find((request) => request.id === props.selectedRequestId);
   const labels = visibleLabels(projection.nodes, selected, hovered);
   const sculpture = <group>
     <Observatory />
     <DependencyThreads projection={projection} selected={selectedTaskId} />
-    <Constellation nodes={projection.nodes} selected={selected} onSelect={select} onHover={setHovered} />
+    <Constellation nodes={projection.nodes.filter((node) => node.kind === "project" || node.kind === "task")} selected={selected} onSelect={select} onHover={setHovered} />
+    {projection.nodes.filter((node) => node.kind === "region").map((node) => <RegionHub key={node.id} node={node} onSelect={select} />)}
+    {projection.nodes.filter((node) => node.kind === "agent").map((node) => <Participant key={node.id} node={node} onSelect={select} />)}
     {projection.nodes.filter((node) => node.active).map((node) => <SignalRing key={node.id} node={node} animate={animate && !reducedMotion} />)}
     {selectedNode && <mesh position={selectedNode.position} raycast={() => undefined}>
       <torusGeometry args={[selectedNode.kind === "project" ? 0.5 : 0.34, 0.008, 6, 48]} />
       <meshBasicMaterial color="#e5edff" transparent opacity={0.8} toneMapped={false} />
     </mesh>}
-    {labels.map((node) => <Label key={node.id} title={node.title} detail={node.attention ? `${node.subtitle} · ${node.attention} attention` : node.subtitle}
+    {labels.filter((node) => node.kind !== "region").map((node) => <Label key={node.id} title={node.kind === "agent" ? `Agent · ${node.title}` : node.title} detail={node.attention ? `${node.subtitle} · ${node.attention} attention` : node.subtitle}
       color={node.color} position={[node.position[0], node.position[1] - (node.kind === "project" ? 0.85 : 0.7), node.position[2] + 0.12]}
-      width={2.15} onClick={() => { select(node); }} />)}
+      width={2.55} prominent onClick={() => { select(node); }} />)}
   </group>;
   if (!immersive) return <>
     <DesktopNavigation nodes={projection.nodes} resetToken={resetToken} reducedMotion={reducedMotion} />
@@ -452,7 +537,9 @@ function SceneContent(props: SceneContentProps) {
     {props.onBack && <Label title="All projects" detail="Return to portfolio" color="#b3d9ff" position={[-0.48, 0.9, 0.1]} width={0.65} onClick={props.onBack} />}
     {projection.unresolvedDependencies > 0 && <Label title="Dependency details unavailable" detail={`${projection.unresolvedDependencies} declared links`} color="#ffca92" position={[-0.48, 0.55, 0.1]} width={0.75} />}
     {projection.cycleAffectedTaskIds.length > 0 && <Label title="Tasks in / downstream of cycle" detail={`${projection.cycleAffectedTaskIds.length} tasks`} color="#ffca92" position={[0.48, 0.55, 0.1]} width={0.75} />}
-    {selectedTask && <TaskInspector key={selectedTask.id} task={selectedTask} runs={props.runs} evidence={props.evidence} artifacts={props.artifacts} />}
+    <CoordinationSurface signals={(props.signals ?? []).filter((item) => !item.human_escalation)} human={false} onSelect={props.onSignalSelect} />
+    <CoordinationSurface signals={(props.signals ?? []).filter((item) => item.human_escalation)} human compact={Boolean(selectedTask || selectedRequest)} onSelect={props.onSignalSelect} />
+    {selectedTask ? <TaskInspector key={selectedTask.id} task={selectedTask} runs={props.runs} evidence={props.evidence} artifacts={props.artifacts} /> : selectedRequest ? <RequestInspector key={`${selectedRequest.id}:${selectedRequest.version}`} request={selectedRequest} agents={props.agents} signals={props.signals} /> : null}
   </SpatialPlacement>;
 }
 
@@ -463,8 +550,9 @@ function ImmersiveContent(props: Omit<SceneContentProps, "immersive">) {
 
 /** Shared data/geometry with separate renderers: Fiber's XR loop currently requires WebGLManager. */
 export function SceneCanvas(props: SceneCanvasProps) {
-  const projection = useMemo(() => buildWorkspaceScene(props.projects, props.activeProjectId, props.tasks, props.runs, props.attention),
-    [props.projects, props.activeProjectId, props.tasks, props.runs, props.attention]);
+  const projection = useMemo(() => buildWorkspaceScene(props.projects, props.activeProjectId, props.tasks, props.runs, props.attention,
+    { portfolio: props.portfolio ?? {}, region: props.region, page: props.page, now: props.now, agents: props.agents }),
+    [props.projects, props.activeProjectId, props.tasks, props.runs, props.attention, props.portfolio, props.region, props.page, props.now, props.agents]);
   const [graphics, setGraphics] = useState<"checking" | "available" | "failed">("checking");
   const [renderer, setRenderer] = useState("Starting renderer");
   const [forceGL, setForceGL] = useState(false);

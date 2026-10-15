@@ -10,7 +10,7 @@
     "cursor": {"type": "integer", "minimum": 0},
     "project_id": {"type": "string", "minLength": 1},
     "type": {"type": "string", "minLength": 1},
-    "subject_type": {"type": "string", "enum": ["agent", "run", "session", "task", "attention", "evidence", "artifact", "approval", "intervention", "chat_message", "budget", "claim", "audit", "organization", "human", "project", "host", "agent_instance", "task_transition", "situation", "policy", "deployment"]},
+    "subject_type": {"type": "string", "enum": ["agent", "run", "session", "task", "attention", "evidence", "artifact", "approval", "intervention", "chat_message", "budget", "claim", "audit", "organization", "human", "project", "host", "agent_instance", "task_transition", "situation", "policy", "deployment", "coordination_request"]},
     "subject_id": {"type": "string", "minLength": 1},
     "actor_id": {"type": "string", "minLength": 1},
     "command_id": {"type": "string"},
@@ -33,8 +33,56 @@
         {"properties": {"type": {"const": "project.observed"},"subject_type": {"const": "project"},"payload": {"$ref": "#/$defs/ProjectObservation"}}}
       ]
     }
+  }, {
+    "if": {"properties": {"source_system": {"enum": ["codex","claude","hermes"]},"type": {"enum": ["agent.observed","session.observed","run.observed"]}},"required": ["source_system","type"]},
+    "then": {
+      "required": ["source_event_id","source_sequence"],
+      "properties": {"source_sequence": {"type": "integer","minimum": 1}},
+      "oneOf": [
+        {"properties": {"type": {"const": "agent.observed"},"subject_type": {"const": "agent"},"payload": {"$ref": "#/$defs/AgentObservation"}}},
+        {"properties": {"type": {"const": "session.observed"},"subject_type": {"const": "session"},"payload": {"$ref": "#/$defs/SessionObservation"}}},
+        {"properties": {"type": {"const": "run.observed"},"subject_type": {"const": "run"},"payload": {"$ref": "#/$defs/RunObservation"}}}
+      ]
+    }
   }],
   "$defs": {
+    "AgentObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent_id", "instance_id", "display_name", "status", "observed_at"],
+      "properties": {
+        "agent_id": {"type": "string","minLength": 1,"maxLength": 512},
+        "instance_id": {"type": "string","minLength": 1,"maxLength": 512},
+        "display_name": {"type": "string","minLength": 1,"maxLength": 256},
+        "status": {"type": "string","enum": ["active","idle","blocked","disconnected"]},
+        "observed_at": {"type": "string","format": "date-time"}
+      }
+    },
+    "SessionObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent_id", "session_id", "status", "observed_at"],
+      "properties": {
+        "agent_id": {"type": "string","minLength": 1,"maxLength": 512},
+        "session_id": {"type": "string","minLength": 1,"maxLength": 512},
+        "status": {"type": "string","enum": ["active","idle","closed"]},
+        "observed_at": {"type": "string","format": "date-time"}
+      }
+    },
+    "RunObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent_id", "run_id", "status", "observed_at"],
+      "properties": {
+        "agent_id": {"type": "string","minLength": 1,"maxLength": 512},
+        "run_id": {"type": "string","minLength": 1,"maxLength": 512},
+        "status": {"type": "string","enum": ["running","idle","blocked","completed","failed","cancelled"]},
+        "observed_at": {"type": "string","format": "date-time"},
+        "session_id": {"type": "string","maxLength": 512},
+        "task_id": {"type": "string","maxLength": 512},
+        "summary": {"type": "string","maxLength": 4096}
+      }
+    },
     "ProjectObservation": {
       "type": "object",
       "additionalProperties": false,

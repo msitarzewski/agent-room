@@ -30,6 +30,7 @@ export interface SessionEnvelope {
 export type Presence = "active" | "idle" | "blocked" | "disconnected" | "unknown";
 export type RunStatus =
   | "queued"
+  | "idle"
   | "running"
   | "working"
   | "paused"
@@ -56,6 +57,8 @@ export interface Agent extends Versioned {
   status: Presence;
   capabilities: string[];
   source: Source;
+  observed_at?: string;
+  presence_expires_at?: string;
 }
 
 export interface Run extends Versioned {
@@ -260,6 +263,54 @@ export interface ProjectOverview {
   event_cursor: number;
   generated_at: string;
   sources?: SourceFreshness[];
+  coordination?: CoordinationSummary;
+}
+
+export interface CoordinationRecipient { type: "agent" | "human"; id: string }
+export interface CoordinationRequest extends Versioned {
+  kind: "help" | "context" | "handoff" | "review";
+  title: string;
+  body: string;
+  owner_id: string;
+  owner_type: "agent" | "human";
+  recipient: CoordinationRecipient;
+  task_id?: string;
+  evidence_ids: string[];
+  status: "open" | "responded" | "resolved" | "cancelled";
+  escalation_reason?: string;
+  response?: { actor_id: string; body: string; evidence_ids: string[]; responded_at: string };
+  resolution?: { actor_id: string; note: string; closed_at: string };
+}
+export interface CoordinationItem {
+  kind: "run" | "agent" | "task" | "blocker" | "request" | "review" | "human_approval" | "attention";
+  resource_type: string;
+  id: string;
+  title: string;
+  status: string;
+  updated_at: string;
+  owner_id?: string;
+  owner_name?: string;
+  recipient?: CoordinationRecipient;
+  recipient_name?: string;
+  request_kind?: CoordinationRequest["kind"];
+  detail?: string;
+  task_id?: string;
+  target_type?: string;
+  target_id?: string;
+  evidence_ids?: string[];
+  source_system?: string;
+  human_escalation: boolean;
+}
+export interface CoordinationSummary {
+  counts: {
+    running_work: number; agent_presence: number; unfinished_tasks: number; source_unfinished_tasks?: number;
+    blocked_tasks: number; canonical_blocked_tasks: number; source_blocked_tasks: number;
+    requests: number; reviews: number; human_escalations: number; human_approvals: number;
+    open_attention?: number;
+  };
+  items: CoordinationItem[];
+  truncated: boolean;
+  complete: boolean;
 }
 
 export interface ProjectSourceObservation {
@@ -298,6 +349,7 @@ export interface WorkspaceSnapshot {
     artifacts: Artifact[];
     claims: Claim[];
     approvals: Approval[];
+    requests?: CoordinationRequest[];
   };
   sources: SourceFreshness[];
 }
