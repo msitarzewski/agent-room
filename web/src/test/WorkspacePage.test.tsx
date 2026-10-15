@@ -97,6 +97,35 @@ beforeEach(() => {
 });
 
 describe("observatory navigation and evidence", () => {
+  it("shows successful source collection for a zero-task project separately from recent delivery", async () => {
+    const collectedAt = "2026-10-13T16:00:00Z";
+    const receivedAt = "2026-10-14T12:00:00Z";
+    const source = { system: "sentry", last_seen: receivedAt, last_received_at: receivedAt, last_collected_at: collectedAt,
+      last_successful_collection_at: collectedAt, scan_status: "complete" as const,
+      project_observation: { external_id: "repo-empty", name: "Source-reported project name", path: "Software/empty", status: "active", collected_at: collectedAt, scan_status: "complete" as const, task_count: 0 } };
+    const empty = populatedSnapshot();
+    empty.resources.tasks = [];
+    empty.resources.attention = [];
+    empty.sources = [source];
+    harness.auth.projects = [projects[0]!];
+    harness.workspace.snapshot = empty;
+    vi.mocked(loadPortfolio).mockResolvedValue({ project_alpha: { ...portfolioEntry(projects[0]!), overview: {
+      project_id: "project_alpha", counts: { task: 0 }, event_cursor: 43, generated_at: receivedAt, sources: [source],
+    } } });
+    await openPage();
+    const card = directory().getByRole("button", { name: /Agent Room/ });
+    expect(await within(card).findByText("0 tasks · 0 attention records")).toBeInTheDocument();
+    expect(within(card).getByText("Complete collection · 0 tasks observed")).toBeInTheDocument();
+    expect(within(card).getByText(/Source collected/).querySelector("time")).toHaveAttribute("datetime", collectedAt);
+    expect(within(card).getByText(/Agent Room received/).querySelector("time")).toHaveAttribute("datetime", receivedAt);
+    await userEvent.setup().click(card);
+    expect(inspector().getByRole("heading", { name: "Agent Room" })).toBeInTheDocument();
+    expect(inspector().getByText("Source project: Source-reported project name · active")).toBeInTheDocument();
+    expect(inspector().getByText(/Source collected/).querySelector("time")).toHaveAttribute("datetime", collectedAt);
+    expect(inspector().getByText(/Agent Room received/).querySelector("time")).toHaveAttribute("datetime", receivedAt);
+    expect(screen.getByText("No tasks have been recorded for this project.")).toBeInTheDocument();
+  });
+
   it("shows the latest source report separately while preserving human task metadata", async () => {
     const humanDescription = "Human release review: 8/10 checks recorded.";
     const latestDescription = "Latest source verification: 10/10 checks passed.\nDevice acceptance remains a separate review.";

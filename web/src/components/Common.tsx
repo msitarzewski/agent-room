@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { LoadState } from "../hooks/useCollection";
+import type { SourceFreshness as SourceFreshnessRecord } from "../api/types";
 
 export function StatePanel({
   state,
@@ -113,10 +114,17 @@ export function StatusPill({ value }: { value: string }) {
 }
 
 export function RelativeTime({ value }: { value: string | null }) {
+  const [now, setNow] = useState(Date.now);
+  const time = value ? Date.parse(value) : NaN;
+  useEffect(() => {
+    if (!Number.isFinite(time)) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => { setNow(Date.now()); }, 15_000);
+    return () => { window.clearInterval(timer); };
+  }, [time]);
   if (!value) return <span className="muted">Never</span>;
-  const time = Date.parse(value);
   if (Number.isNaN(time)) return <time>{value}</time>;
-  const seconds = Math.round((time - Date.now()) / 1000);
+  const seconds = Math.round((time - now) / 1000);
   const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
   const absolute = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(time);
   let result: string;
@@ -125,6 +133,26 @@ export function RelativeTime({ value }: { value: string | null }) {
   else if (Math.abs(seconds) < 86_400) result = formatter.format(Math.round(seconds / 3600), "hour");
   else result = formatter.format(Math.round(seconds / 86_400), "day");
   return <time dateTime={value} title={absolute}>{result}</time>;
+}
+
+export function SourceFreshness({ source, compact = false }: { source: SourceFreshnessRecord; compact?: boolean }) {
+  const collectedAt = source.last_collected_at ?? source.project_observation?.collected_at ?? null;
+  const receivedAt = source.last_received_at ?? source.last_seen;
+  const observation = source.project_observation;
+  const scanStatus = source.scan_status ?? observation?.scan_status;
+  const scanLabel = scanStatus === "complete" ? "Complete collection" : scanStatus === "partial" ? "Partial collection" : scanStatus === "unreadable" ? "Collection unreadable" : "Collection completeness unknown";
+  return <span className={`source-freshness${compact ? " source-freshness--compact" : ""}`}>
+    <span>{source.system}</span>
+    <small>{collectedAt ? <>Source collected <RelativeTime value={collectedAt} /></> : "Collection time not reported"}</small>
+    <small>Agent Room received <RelativeTime value={receivedAt} /></small>
+    <small className={scanStatus === "partial" || scanStatus === "unreadable" ? "source-freshness__issue" : undefined}>{scanLabel}{scanStatus === "unreadable" ? " · task count unavailable" : observation ? ` · ${observation.task_count} tasks observed` : ""}</small>
+    {scanStatus !== "complete" && source.last_successful_collection_at ? <small>Last complete collection <RelativeTime value={source.last_successful_collection_at} /></small> : null}
+    {!compact && observation ? <>
+      <small>Source project: {observation.name} · {observation.status}</small>
+      <small>Source reference: <code>{observation.path}</code></small>
+      {observation.scan_error || observation.reason ? <small className={observation.scan_error ? "source-freshness__issue" : undefined}>Source note: {observation.scan_error ?? observation.reason}</small> : null}
+    </> : null}
+  </span>;
 }
 
 export function ActionFeedback({ message, error }: { message: string | null; error: string | null }) {

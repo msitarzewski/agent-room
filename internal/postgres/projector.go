@@ -10,11 +10,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/msitarzewski/agent-room/internal/app"
 	"github.com/msitarzewski/agent-room/internal/domain"
 )
 
 func applyEventProjection(ctx context.Context, tx pgx.Tx, event domain.Event) error {
-	if event.SubjectID == "" || (!projectable(event.SubjectType) && len(commandResource(event)) == 0) {
+	sourceProject := event.SourceSystem == "sentry" && event.Type == "project.observed" && event.SubjectType == domain.ResourceProject
+	if event.SubjectID == "" || (!projectable(event.SubjectType) && !sourceProject && len(commandResource(event)) == 0) {
 		return nil
 	}
 	// External approval requests may raise attention, but only authenticated
@@ -43,7 +45,16 @@ func applyEventProjection(ctx context.Context, tx pgx.Tx, event domain.Event) er
 	if event.SourceSequence > 0 && currentSource == event.SourceSystem && currentSequence >= event.SourceSequence {
 		return nil
 	}
-	document, err := reduceResource(currentRaw, currentVersion, event)
+	var document json.RawMessage
+	if sourceProject {
+		var canonicalName string
+		if err := tx.QueryRow(ctx, `SELECT name FROM projects WHERE id=$1`, event.ProjectID).Scan(&canonicalName); err != nil {
+			return err
+		}
+		document, err = reduceProjectObservation(currentRaw, currentVersion, event, canonicalName)
+	} else {
+		document, err = reduceResource(currentRaw, currentVersion, event)
+	}
 	if err != nil {
 		return err
 	}
@@ -142,6 +153,38 @@ func reduceResource(current json.RawMessage, currentVersion int64, event domain.
 		document["status"] = "observed"
 	}
 	return json.Marshal(document)
+}
+
+func reduceProjectObservation(current json.RawMessage, currentVersion int64, event domain.Event, canonicalName string) (json.RawMessage, error) {
+	var observation domain.ProjectObservation
+	if err := json.Unmarshal(event.Payload, &observation); err != nil {
+		return nil, err
+	}
+	if event.SubjectID != event.ProjectID || observation.ExternalID == "" {
+		return nil, app.Invalid("project observation identity mismatch")
+	}
+	var project domain.Project
+	if len(current) == 0 {
+		project = domain.Project{Base: domain.NewBase(event.ProjectID, event.ProjectID, event.OccurredAt), Name: canonicalName, Slug: event.ProjectID, Status: "observed"}
+	} else {
+		if err := json.Unmarshal(current, &project); err != nil {
+			return nil, err
+		}
+		if (project.Source.System != "" && project.Source.System != "sentry") || (project.Source.ExternalID != "" && project.Source.ExternalID != observation.ExternalID) {
+			return nil, app.Invalid("project observation cannot claim another source's identity")
+		}
+		project.Version = currentVersion + 1
+		project.UpdatedAt = event.OccurredAt
+	}
+	project.Source = domain.Source{System: "sentry", ExternalID: observation.ExternalID}
+	project.SourceStatus = observation.Status
+	observedAt := observation.CollectedAt.UTC()
+	project.SourceObservedAt = &observedAt
+	project.SourceObservation = &observation
+	if observation.ScanStatus == "complete" {
+		project.SourceLastSuccessfulCollectionAt = &observedAt
+	}
+	return json.Marshal(project)
 }
 
 func reduceTaskObservation(current json.RawMessage, currentVersion int64, event domain.Event) (json.RawMessage, error) {

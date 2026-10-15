@@ -760,6 +760,78 @@ func TestServerAndMCPIntegrationBoundaries(t *testing.T) {
 		}
 	})
 
+	t.Run("least privilege Sentry project heartbeat is visible without tasks", func(t *testing.T) {
+		const project = "sentry-empty-http"
+		if _, err := repository.EnsureProject(ctx, project, "Operator-owned project"); err != nil {
+			t.Fatal(err)
+		}
+		created, err := auth.CreateServiceTokenWithMetadata(ctx, repository.Pool(), "sentry-http-publisher", "Read-only Sentry publisher", "source:sentry", []string{project}, []string{"event:ingest", "source:sentry"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		headers := map[string]string{"Authorization": "Bearer " + created.Token, "Content-Type": "application/json"}
+		collected := time.Now().UTC().Add(-20 * time.Hour).Truncate(time.Microsecond)
+		observation := domain.ProjectObservation{ExternalID: "Software/empty-http", Name: "Source-reported project", Path: "/source/empty-http", Status: "Active", Reason: "Recent activity", CollectedAt: collected, ScanStatus: "complete", TaskCount: 0}
+		payload, _ := json.Marshal(observation)
+		event := domain.Event{ProjectID: project, Type: "project.observed", SubjectType: domain.ResourceProject, SubjectID: "source-id", SourceSystem: "sentry", SourceEventID: "empty-http-scan", SourceSequence: 1, Payload: payload}
+		body, _ := json.Marshal(map[string]any{"events": []domain.Event{event}})
+		post := func(project string, content []byte) *http.Response {
+			return rawRequest(t, http.MethodPost, adapter.URL+"/api/v1/ingest?project_id="+project, bytes.NewReader(content), headers, nil)
+		}
+		for retry := 0; retry < 2; retry++ {
+			response := post(project, body)
+			if response.StatusCode != http.StatusAccepted {
+				t.Fatalf("heartbeat status=%d body=%s", response.StatusCode, readBody(response))
+			}
+			_ = response.Body.Close()
+		}
+		response := api(http.MethodGet, "/api/v1/workspace?project_id="+project, nil, nil)
+		var snapshot app.WorkspaceSnapshot
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("workspace status=%d body=%s", response.StatusCode, readBody(response))
+		}
+		if err := json.NewDecoder(response.Body).Decode(&snapshot); err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+		if len(snapshot.Resources.Tasks) != 0 || len(snapshot.Sources) != 1 || snapshot.Sources[0].LastCollectedAt == nil || !snapshot.Sources[0].LastCollectedAt.Equal(collected) || snapshot.Sources[0].LastReceivedAt.Sub(collected) < 19*time.Hour || snapshot.Sources[0].ProjectObservation.TaskCount != 0 {
+			t.Fatalf("zero-task freshness=%+v", snapshot)
+		}
+		response = api(http.MethodGet, "/api/v1/overview?project_id="+project, nil, nil)
+		var overview struct {
+			Sources []app.WorkspaceSource `json:"sources"`
+		}
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("overview status=%d body=%s", response.StatusCode, readBody(response))
+		}
+		if err := json.NewDecoder(response.Body).Decode(&overview); err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+		if len(overview.Sources) != 1 || !overview.Sources[0].LastCollectedAt.Equal(collected) {
+			t.Fatalf("overview omitted heartbeat=%+v", overview)
+		}
+		// Scope checks precede ingestion; a publisher cannot provision a project.
+		denied := post("unprovisioned-http-project", body)
+		expectHTTPProblem(t, denied, http.StatusForbidden, "capability_denied")
+		var exists bool
+		if err := repository.Pool().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM projects WHERE id='unprovisioned-http-project')`).Scan(&exists); err != nil || exists {
+			t.Fatalf("publisher provisioned unknown project=%v err=%v", exists, err)
+		}
+		// Typed source metadata cannot smuggle canonical resource replacements.
+		event.SourceEventID, event.SourceSequence = "empty-http-authority", 2
+		var privileged map[string]any
+		_ = json.Unmarshal(payload, &privileged)
+		privileged["membership"] = []string{"project:all"}
+		event.Payload, _ = json.Marshal(privileged)
+		body, _ = json.Marshal(map[string]any{"events": []domain.Event{event}})
+		expectHTTPProblem(t, post(project, body), http.StatusBadRequest, "validation_failed")
+		var name string
+		if err := repository.Pool().QueryRow(ctx, `SELECT name FROM projects WHERE id=$1`, project).Scan(&name); err != nil || name != "Operator-owned project" {
+			t.Fatalf("canonical name=%s err=%v", name, err)
+		}
+	})
+
 	t.Run("bounded listener limits fail closed", func(t *testing.T) {
 		exhaustBucket := func(key string) {
 			t.Helper()

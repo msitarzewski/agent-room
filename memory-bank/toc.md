@@ -13,6 +13,7 @@ This index routes future sessions to the smallest useful context set. `boot.md` 
 
 ## Recent Task Records
 
+- [Continuous Sentry observations](./releases/continuous-sentry-observations.md) — automatic collection, durable delivery, scoped setup, and activity/source freshness
 - [First spatial workspace release](./releases/spatial-workspace.md) — approved scope, stable Sentry checklist, and ongoing validation evidence
 - [Zoomable control room plan](./tasks/2026-10/zoomable-control-room-plan.md) — proposed visual workspace, Sentry observations, renderer investigation, and recovery steps
 - [July 2026 tasks](./tasks/2026-07/README.md) — founding release and prior work

@@ -623,47 +623,88 @@ func (r *Repository) Workspace(ctx context.Context, projectID string) (app.Works
 	if err := rows.Err(); err != nil {
 		return app.WorkspaceSnapshot{}, err
 	}
-	rows, err = tx.Query(ctx, `SELECT e.source_system,max(o.available_at) FROM events e
-		JOIN event_outbox o ON o.event_id=e.id
-		WHERE e.project_id=$1 AND e.source_system IS NOT NULL GROUP BY e.source_system ORDER BY e.source_system`, projectID)
+	value.Sources, err = projectSources(ctx, tx, projectID)
 	if err != nil {
 		return app.WorkspaceSnapshot{}, err
 	}
-	for rows.Next() {
-		var source app.WorkspaceSource
-		if err := rows.Scan(&source.System, &source.LastSeen); err != nil {
-			rows.Close()
-			return app.WorkspaceSnapshot{}, err
-		}
-		value.Sources = append(value.Sources, source)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return app.WorkspaceSnapshot{}, err
-	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return app.WorkspaceSnapshot{}, err
 	}
 	return value, nil
 }
 
-func (r *Repository) Overview(ctx context.Context, projectID string) (map[string]any, error) {
-	rows, err := r.pool.Query(ctx, `SELECT kind,count(*) FROM resources WHERE project_id=$1 GROUP BY kind`, projectID)
+func projectSources(ctx context.Context, tx pgx.Tx, projectID string) ([]app.WorkspaceSource, error) {
+	rows, err := tx.Query(ctx, `SELECT e.source_system,max(o.available_at),max(e.occurred_at),
+		(p.document->>'source_last_successful_collection_at')::timestamptz,
+		p.document->'source_observation'
+		FROM events e JOIN event_outbox o ON o.event_id=e.id
+		LEFT JOIN resources p ON p.project_id=e.project_id AND p.kind='project' AND p.id=e.project_id AND p.source_system=e.source_system
+		WHERE e.project_id=$1 AND e.source_system IS NOT NULL
+		GROUP BY e.source_system,p.document ORDER BY e.source_system`, projectID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	sources := []app.WorkspaceSource{}
+	for rows.Next() {
+		var source app.WorkspaceSource
+		var observation json.RawMessage
+		if err := rows.Scan(&source.System, &source.LastReceivedAt, &source.LastCollectedAt, &source.LastSuccessfulCollectionAt, &observation); err != nil {
+			return nil, err
+		}
+		source.LastSeen = source.LastReceivedAt
+		if len(observation) > 0 && string(observation) != "null" {
+			var project domain.ProjectObservation
+			if err := json.Unmarshal(observation, &project); err != nil {
+				return nil, err
+			}
+			source.ProjectObservation = &project
+			source.LastCollectedAt = &project.CollectedAt
+			source.ScanStatus = &project.ScanStatus
+		}
+		sources = append(sources, source)
+	}
+	return sources, rows.Err()
+}
+
+func (r *Repository) Overview(ctx context.Context, projectID string) (map[string]any, error) {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	rows, err := tx.Query(ctx, `SELECT kind,count(*) FROM resources WHERE project_id=$1 GROUP BY kind`, projectID)
+	if err != nil {
+		return nil, err
+	}
 	counts := map[string]int64{}
 	for rows.Next() {
 		var kind string
 		var count int64
 		if err := rows.Scan(&kind, &count); err != nil {
+			rows.Close()
 			return nil, err
 		}
 		counts[kind] = count
 	}
-	cursor, _ := r.queries.LatestProjectEventCursor(ctx, projectID)
-	return map[string]any{"project_id": projectID, "counts": counts, "event_cursor": cursor, "generated_at": time.Now().UTC()}, rows.Err()
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	var cursor int64
+	var generatedAt time.Time
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(max(cursor),0),transaction_timestamp() FROM events WHERE project_id=$1`, projectID).Scan(&cursor, &generatedAt); err != nil {
+		return nil, err
+	}
+	sources, err := projectSources(ctx, tx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return map[string]any{"project_id": projectID, "counts": counts, "event_cursor": cursor, "generated_at": generatedAt, "sources": sources}, nil
 }
 
 func commandFingerprint(cmd domain.Command) [32]byte {

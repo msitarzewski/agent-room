@@ -637,32 +637,62 @@ func (s *Service) Ingest(ctx context.Context, actor Actor, events []domain.Event
 			return Invalid("ingestion requires a bounded source_event_id and nonnegative source_sequence")
 		}
 		if event.SourceSystem == "sentry" {
-			if event.Type != "task.observed" || event.SubjectType != domain.ResourceTask || event.SourceSequence <= 0 {
-				return Invalid("sentry ingestion requires task.observed and a positive source_sequence")
+			if event.SourceSequence <= 0 {
+				return Invalid("sentry ingestion requires a positive source_sequence")
 			}
-			var observation domain.TaskObservation
-			decoder := json.NewDecoder(bytes.NewReader(event.Payload))
-			decoder.DisallowUnknownFields()
-			if err := decoder.Decode(&observation); err != nil {
-				return Invalid("invalid task observation payload")
-			}
-			if strings.TrimSpace(observation.ExternalID) == "" || len(observation.ExternalID) > 1024 ||
-				strings.TrimSpace(observation.Title) == "" || len(observation.Title) > 4096 ||
-				strings.TrimSpace(observation.Status) == "" || len(observation.Status) > 128 || len(observation.Dependencies) > 1000 {
-				return Invalid("task observation requires bounded external_id, title, status, and dependencies")
-			}
-			if observation.ExternalURL != "" {
-				parsed, err := url.Parse(observation.ExternalURL)
-				if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
-					return Invalid("task observation external_url must be an HTTP or HTTPS URL without credentials")
+			switch {
+			case event.Type == "task.observed" && event.SubjectType == domain.ResourceTask:
+				var observation domain.TaskObservation
+				decoder := json.NewDecoder(bytes.NewReader(event.Payload))
+				decoder.DisallowUnknownFields()
+				if err := decoder.Decode(&observation); err != nil {
+					return Invalid("invalid task observation payload")
 				}
-			}
-			for _, dependency := range observation.Dependencies {
-				if strings.TrimSpace(dependency) == "" || len(dependency) > 1024 || dependency == observation.ExternalID {
-					return Invalid("task observation contains an invalid dependency")
+				if strings.TrimSpace(observation.ExternalID) == "" || len(observation.ExternalID) > 1024 ||
+					strings.TrimSpace(observation.Title) == "" || len(observation.Title) > 4096 ||
+					strings.TrimSpace(observation.Status) == "" || len(observation.Status) > 128 || len(observation.Dependencies) > 1000 {
+					return Invalid("task observation requires bounded external_id, title, status, and dependencies")
 				}
+				if observation.ExternalURL != "" {
+					parsed, err := url.Parse(observation.ExternalURL)
+					if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
+						return Invalid("task observation external_url must be an HTTP or HTTPS URL without credentials")
+					}
+				}
+				for _, dependency := range observation.Dependencies {
+					if strings.TrimSpace(dependency) == "" || len(dependency) > 1024 || dependency == observation.ExternalID {
+						return Invalid("task observation contains an invalid dependency")
+					}
+				}
+				event.SubjectID = domain.ObservedTaskID(event.ProjectID, observation.ExternalID)
+			case event.Type == "project.observed" && event.SubjectType == domain.ResourceProject:
+				var observation domain.ProjectObservation
+				decoder := json.NewDecoder(bytes.NewReader(event.Payload))
+				decoder.DisallowUnknownFields()
+				if err := decoder.Decode(&observation); err != nil {
+					return Invalid("invalid project observation payload")
+				}
+				if strings.TrimSpace(observation.ExternalID) == "" || len(observation.ExternalID) > 1024 ||
+					strings.TrimSpace(observation.Name) == "" || len(observation.Name) > 4096 ||
+					strings.TrimSpace(observation.Path) == "" || len(observation.Path) > 4096 ||
+					strings.TrimSpace(observation.Status) == "" || len(observation.Status) > 128 ||
+					len(observation.Reason) > 4096 || len(observation.ScanError) > 4096 || observation.TaskCount < 0 || observation.CollectedAt.IsZero() {
+					return Invalid("project observation requires bounded identity, metadata, collection time, and nonnegative task_count")
+				}
+				if raw, ok := payload["task_count"]; !ok || string(raw) == "null" {
+					return Invalid("project task_count is required")
+				}
+				if observation.ScanStatus != "complete" && observation.ScanStatus != "partial" && observation.ScanStatus != "unreadable" {
+					return Invalid("project scan_status must be complete, partial, or unreadable")
+				}
+				if !event.OccurredAt.IsZero() && !event.OccurredAt.Equal(observation.CollectedAt) {
+					return Invalid("project occurred_at must equal collected_at")
+				}
+				event.OccurredAt = observation.CollectedAt
+				event.SubjectID = event.ProjectID
+			default:
+				return Invalid("sentry ingestion requires typed task.observed or project.observed")
 			}
-			event.SubjectID = domain.ObservedTaskID(event.ProjectID, observation.ExternalID)
 		}
 		// External event identifiers and attribution are untrusted. The original
 		// native identifier belongs in source metadata; the coordination event

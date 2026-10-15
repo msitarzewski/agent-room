@@ -259,6 +259,18 @@ describe("authorized portfolio summaries", () => {
   const projects: Project[] = Array.from({ length: 7 }, (_, index) => ({ id: `project_${index}`, name: `Project ${index}`, version: 1, updated_at: "2026-10-13T18:00:00Z", capabilities: ["resource:read"] }));
   const overview = (id: string): ProjectOverview => ({ project_id: id, counts: { task: 81 }, event_cursor: 42, generated_at: "2026-10-13T18:00:00Z" });
 
+  it("preserves zero-task collection metadata without substituting receipt or response time", async () => {
+    const source = { system: "sentry", last_seen: "2026-10-14T12:00:00Z", last_received_at: "2026-10-14T12:00:00Z",
+      last_collected_at: "2026-10-13T16:00:00Z", last_successful_collection_at: "2026-10-13T16:00:00Z", scan_status: "complete" as const,
+      project_observation: { external_id: "empty-repo", name: "Source name", path: "Software/empty", status: "active", collected_at: "2026-10-13T16:00:00Z", scan_status: "complete" as const, task_count: 0 } };
+    const summary = { ...overview("project_0"), counts: { task: 0 }, sources: [source] };
+    vi.spyOn(api, "overview").mockResolvedValue(summary);
+    const result = await loadPortfolio([projects[0]!], new AbortController().signal);
+    expect(result.project_0?.overview).toEqual(summary);
+    expect(result.project_0?.project.name).toBe("Project 0");
+    expect(result.project_0?.overview?.sources?.[0]).toMatchObject({ last_collected_at: "2026-10-13T16:00:00Z", last_received_at: "2026-10-14T12:00:00Z", project_observation: { task_count: 0 } });
+  });
+
   it("limits parallel requests and reports actual counts, preserving unknown and denied projects", async () => {
     const pending = projects.map(() => deferred<ProjectOverview>());
     const load = vi.spyOn(api, "overview").mockImplementation((id) => pending[Number(id.split("_")[1])]!.promise);
@@ -304,6 +316,54 @@ interface TestSocket {
 function sockets() { return (globalThis as unknown as { __testSockets: TestSocket[] }).__testSockets; }
 
 describe("project-scoped stream lifecycle", () => {
+  it("distinguishes project occurrence, connection opening, and heartbeat receipt across reconnects", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-14T12:00:00Z"));
+    auth.session = authenticatedSession;
+    const hook = renderHook(() => useStream(), { wrapper: StreamProvider });
+    const first = sockets()[0]!;
+    act(() => { first.emitOpen(); });
+    expect(hook.result.current).toMatchObject({ connectedAt: "2026-10-14T12:00:00.000Z", lastReceivedAt: null, lastMessageAt: null });
+    act(() => { first.emitMessage({ type: "task.changed", cursor: 42, occurred_at: "2026-10-13T16:00:00Z" }); });
+    expect(hook.result.current.lastMessageAt).toBe("2026-10-13T16:00:00Z");
+    expect(hook.result.current.lastReceivedAt).toBe("2026-10-14T12:00:00.000Z");
+    act(() => { vi.advanceTimersByTime(15_000); first.emitMessage({ type: "heartbeat", cursor: 99, occurred_at: "2026-10-14T12:00:15Z" }); });
+    expect(hook.result.current.lastReceivedAt).toBe("2026-10-14T12:00:15.000Z");
+    expect(hook.result.current.lastMessageAt).toBe("2026-10-13T16:00:00Z");
+    expect(sessionStorage.getItem("agent-room:cursor:project_alpha")).toBe("42");
+    act(() => { first.emitMessage({ type: "resync_required", cursor: 0, occurred_at: "2026-10-14T12:00:15Z" }); });
+    expect(hook.result.current.lastMessageAt).toBe("2026-10-13T16:00:00Z");
+    act(() => { hook.result.current.reconnect(); });
+    expect(hook.result.current).toMatchObject({ connectedAt: null, lastReceivedAt: null, lastMessageAt: "2026-10-13T16:00:00Z" });
+    const second = sockets()[1]!;
+    act(() => { second.emitOpen(); });
+    expect(hook.result.current.connectedAt).toBe("2026-10-14T12:00:15.000Z");
+    act(() => { first.emitMessage({ type: "task.changed", cursor: 999, occurred_at: "2026-10-14T12:00:15Z" }); });
+    expect(hook.result.current.lastReceivedAt).toBeNull();
+    expect(hook.result.current.lastMessageAt).toBe("2026-10-13T16:00:00Z");
+    act(() => { second.emitMessage({ type: "task.changed", cursor: 43, occurred_at: "2026-10-13T15:00:00Z" }); });
+    expect(hook.result.current.lastMessageAt).toBe("2026-10-13T16:00:00Z");
+    act(() => { second.emitClose(); });
+    hook.unmount();
+    act(() => { vi.advanceTimersByTime(30_000); });
+    expect(sockets()).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("clears connection and project timestamps on project change or sign-out", () => {
+    auth.session = authenticatedSession;
+    const hook = renderHook(() => useStream(), { wrapper: StreamProvider });
+    act(() => { sockets()[0]!.emitOpen(); sockets()[0]!.emitMessage({ type: "task.changed", cursor: 42, occurred_at: "2026-10-14T11:00:00Z" }); });
+    auth.projectId = "project_beta";
+    hook.rerender();
+    expect(hook.result.current).toMatchObject({ connectedAt: null, lastReceivedAt: null, lastMessageAt: null });
+    act(() => { sockets()[1]!.emitOpen(); sockets()[1]!.emitMessage({ type: "heartbeat" }); });
+    expect(hook.result.current.lastReceivedAt).not.toBeNull();
+    auth.session = null;
+    hook.rerender();
+    expect(hook.result.current).toMatchObject({ status: "disconnected", connectedAt: null, lastReceivedAt: null, lastMessageAt: null });
+  });
+
   it("scopes lifecycle/events, recovers a resync cursor, and ignores an obsolete project socket", () => {
     auth.session = authenticatedSession;
     sessionStorage.setItem("agent-room:cursor:project_alpha", "40");

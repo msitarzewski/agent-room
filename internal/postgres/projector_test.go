@@ -153,3 +153,43 @@ func TestTrustedCommandReplayPreservesCompleteResource(t *testing.T) {
 		t.Fatal("mismatched replay identity accepted")
 	}
 }
+
+func TestProjectObservationKeepsCanonicalFieldsAndSuccessfulScan(t *testing.T) {
+	at := time.Date(2026, 10, 14, 13, 0, 0, 0, time.UTC)
+	observation := domain.ProjectObservation{ExternalID: "host:/source/project", Name: "Source display", Path: "/source/project", Status: "Active", CollectedAt: at, ScanStatus: "complete", TaskCount: 0}
+	payload, _ := json.Marshal(observation)
+	event := domain.Event{ProjectID: "project", SubjectType: domain.ResourceProject, SubjectID: "project", Type: "project.observed", SourceSystem: "sentry", SourceSequence: 1, OccurredAt: at, Payload: payload}
+	raw, err := reduceProjectObservation(nil, 0, event, "Canonical name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var project domain.Project
+	if err := json.Unmarshal(raw, &project); err != nil {
+		t.Fatal(err)
+	}
+	if project.Name != "Canonical name" || project.SourceStatus != "Active" || project.SourceObservation.TaskCount != 0 || project.SourceLastSuccessfulCollectionAt == nil || !project.SourceLastSuccessfulCollectionAt.Equal(at) {
+		t.Fatalf("project=%+v", project)
+	}
+	project.OrganizationID, project.Slug, project.Status = "operator-org", "operator-slug", "operator-status"
+	prior, _ := json.Marshal(project)
+	observation.Name, observation.Status, observation.ScanStatus = "Changed source name", "Quiet", "partial"
+	observation.CollectedAt = at.Add(time.Hour)
+	observation.ScanError = "One path unreadable"
+	event.OccurredAt = observation.CollectedAt
+	event.Payload, _ = json.Marshal(observation)
+	raw, err = reduceProjectObservation(prior, 1, event, "Ignored canonical argument")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &project); err != nil {
+		t.Fatal(err)
+	}
+	if project.Name != "Canonical name" || project.OrganizationID != "operator-org" || project.Slug != "operator-slug" || project.Status != "operator-status" || project.SourceStatus != "Quiet" || project.Version != 2 || !project.SourceLastSuccessfulCollectionAt.Equal(at) {
+		t.Fatalf("source changed canonical fields or successful scan: %+v", project)
+	}
+	project.Source.System = "other-source"
+	prior, _ = json.Marshal(project)
+	if _, err := reduceProjectObservation(prior, 2, event, "Canonical"); err == nil {
+		t.Fatal("source claimed another project identity")
+	}
+}

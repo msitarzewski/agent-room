@@ -56,8 +56,13 @@ type WorkspaceResources struct {
 }
 
 type WorkspaceSource struct {
-	System   string    `json:"system"`
-	LastSeen time.Time `json:"last_seen"`
+	System                     string                     `json:"system"`
+	LastSeen                   time.Time                  `json:"last_seen"`
+	LastReceivedAt             time.Time                  `json:"last_received_at"`
+	LastCollectedAt            *time.Time                 `json:"last_collected_at"`
+	LastSuccessfulCollectionAt *time.Time                 `json:"last_successful_collection_at"`
+	ScanStatus                 *string                    `json:"scan_status"`
+	ProjectObservation         *domain.ProjectObservation `json:"project_observation,omitempty"`
 }
 
 type WorkspaceRepository interface {

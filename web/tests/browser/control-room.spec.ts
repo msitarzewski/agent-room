@@ -266,6 +266,10 @@ test("keeps observatory keyboard access, reduced motion, and empty state honest"
   await page.keyboard.press("Enter");
   await expect(page.getByText("No tasks have been recorded for this project.")).toBeVisible();
   await expect(page.getByText("Nothing waiting for you in this project.")).toBeVisible();
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.getByText("Connection details", { exact: true }).click();
+  await expect(page.getByText(/Connection opened/)).toBeVisible();
+  await expect(page.getByText("Last message received Waiting for a message")).toBeVisible();
   const dimensions = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, document: document.documentElement.scrollWidth }));
   expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport);
   const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
@@ -279,6 +283,8 @@ for (const viewport of [
   test(`is accessible and does not overflow at ${viewport.label}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await boot(page);
+    await page.getByText("Connection details", { exact: true }).click();
+    await expect(page.getByText(/Connection opened/)).toBeVisible();
     const dimensions = await page.evaluate(() => ({
       viewport: document.documentElement.clientWidth,
       document: document.documentElement.scrollWidth,

@@ -4,6 +4,36 @@
 
 Only accepted decisions belong here. Open technical choices remain in `techContext.md` and `build-deployment.md`.
 
+## 2026-10-14: Independent Durable Sentry Publisher
+
+**Status:** Accepted for the authorized local continuous-feed build; portfolio
+access expansion remains a separate operator decision.
+
+**Context:** One-time imports do not keep the observatory current. Sentry already
+owns repository discovery and Markdown parsing, while its existing Vikunja
+board, watcher, Git history, and backups must continue independently.
+
+**Decision:** Reuse Sentry's scanner read-only in an Agent Room-owned Python
+stdlib collector. Persist immutable observations, fingerprints, sequences, and
+identity bindings in private SQLite before HTTP delivery. Operator commands own
+project/access setup; source publishers have exact scopes and only ingestion
+capabilities. Add typed project scan reports so zero-task scans, partial reads,
+collection time, and receipt time remain explicit. Never infer deletion from
+absence or promote source status into human supervision.
+
+**Alternatives:** Modifying Sentry's board sync would couple independent
+services. A transient script would lose observations during an outage. Reusing
+the server outbox alone cannot protect observations before server ingestion.
+
+**Consequences:** The source workstation retains a separate private queue and
+expiring token. The local release observes the existing Agent Room project;
+the other 96 discoveries require explicit provisioning approval. No Sentry
+source/configuration change or additional operator membership is applied.
+
+**References:** `releases/continuous-sentry-observations.md`;
+`systemPatterns.md#source-observations-and-supervision`;
+`build-deployment.md#local-sentry-publisher`.
+
 ## 2026-10-14: Local Tailnet Deployment Uses MiradorXR's HTTPS Pattern
 
 **Status:** Local staging step toward the operator-designated remote machine.
@@ -25,7 +55,9 @@ artifact; this decision does not authorize remote activation.
 **Consequences:** The headset can use the same web application over an HTTPS
 origin without a native visionOS package. The workstation, Docker Desktop, and
 Tailscale must remain available. Device acceptance and production promotion
-still require their own evidence. No automatic Sentry connector is installed.
+still require their own evidence. At this deployment checkpoint no automatic
+Sentry connector was installed; the later independent-publisher decision above
+records its separate implementation and current scope.
 
 **References:** `build-deployment.md#local-tailnet-deployment`;
 `releases/spatial-workspace.md`.

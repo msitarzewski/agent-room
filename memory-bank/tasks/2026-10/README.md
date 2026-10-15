@@ -62,7 +62,7 @@
   credential is revoked and removed. The local service remains running for
   physical headset acceptance; actual operator login stays private and active.
 
-### 2026-10-14: [IN-PROGRESS] Continuous Sentry observations
+### 2026-10-14: [COMPLETED] Continuous Sentry observations
 
 - Michael requested a Memory Bank update, a commit checkpoint, and the next build.
 - Checkpoint the completed spatial release first, then implement independent
@@ -70,6 +70,19 @@
   least-privilege ingestion, and explicit source freshness.
 - Clarify last project activity versus connection health and refresh idle elapsed
   labels. Preserve the existing Sentry board/watcher/history/backups.
-- State: PLAN. Architecture/reuse discovery is running while the completed
-  candidate is checkpointed. Actual headset acceptance and remote activation are
-  separate. See `activeContext.md#next-implementation-continuous-observations`.
+- State: DOCS / IDLE. Spatial checkpoint `95f166b` is committed and rebuilt
+  with verified clean provenance. Backend, collector, and frontend ownership is
+  implementing the next feed independently. Actual headset acceptance and remote
+  activation remain separate. See the [continuous delivery checklist](../../releases/continuous-sentry-observations.md).
+
+- Continuous delivery QA: backend 83.8% coverage, 121 frontend tests, 24 browser
+  checks, and 23 collector tests pass. Existing-project publisher is installed;
+  initial delivery contains 13 real task records, no backlog/quarantine. Full
+  97-project setup was rejected by automatic approval review and remains pending
+  an explicit scope decision; no new projects or memberships were applied.
+
+- Local release complete: actual authenticated Chromium/WebKit checks confirm
+  collection updates without reload, one healthy socket with heartbeat, stable
+  task IDs, preserved human state, and no CSP violations. Runbook and CI are
+  current; the authorized implementation/docs commit is rebuilt from its clean
+  revision. Checklist 8/8 complete; broader portfolio activation remains separate.

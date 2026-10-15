@@ -657,3 +657,47 @@ func TestSentryObservationIngestionRejectsControlState(t *testing.T) {
 		t.Fatal("task identity is not project scoped")
 	}
 }
+
+func TestSentryProjectObservationValidation(t *testing.T) {
+	at := time.Date(2026, 10, 14, 13, 0, 0, 0, time.UTC)
+	repo := newMemoryRepository()
+	service := NewServiceWithDependencies(repo, nil, testClock{at}, &testIDs{})
+	ingester := actor("sentry-adapter", "event:ingest", "source:sentry")
+	payload := map[string]any{"external_id": "host:/project", "name": "Source name", "path": "/project", "status": "Active", "collected_at": at.Format(time.RFC3339Nano), "scan_status": "complete", "task_count": 0}
+	raw, _ := json.Marshal(payload)
+	valid := domain.Event{ProjectID: "project", SubjectType: domain.ResourceProject, SubjectID: "untrusted", Type: "project.observed", SourceSystem: "sentry", SourceEventID: "project-scan-1", SourceSequence: 1, Payload: raw}
+	for name, change := range map[string]func(map[string]any){
+		"extra authority field":   func(p map[string]any) { p["capabilities"] = []string{"resource:write"} },
+		"negative task count":     func(p map[string]any) { p["task_count"] = -1 },
+		"missing task count":      func(p map[string]any) { delete(p, "task_count") },
+		"null task count":         func(p map[string]any) { p["task_count"] = nil },
+		"unknown scan status":     func(p map[string]any) { p["scan_status"] = "healthy" },
+		"missing collection time": func(p map[string]any) { delete(p, "collected_at") },
+		"future collection time":  func(p map[string]any) { p["collected_at"] = at.Add(6 * time.Minute).Format(time.RFC3339Nano) },
+		"missing external id":     func(p map[string]any) { delete(p, "external_id") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			copyPayload := map[string]any{}
+			for key, value := range payload {
+				copyPayload[key] = value
+			}
+			change(copyPayload)
+			event := valid
+			event.Payload, _ = json.Marshal(copyPayload)
+			if err := service.Ingest(context.Background(), ingester, []domain.Event{event}); err == nil {
+				t.Fatal("invalid project observation accepted")
+			}
+		})
+	}
+	mismatched := valid
+	mismatched.OccurredAt = at.Add(-time.Minute)
+	if err := service.Ingest(context.Background(), ingester, []domain.Event{mismatched}); err == nil {
+		t.Fatal("mismatched collection time accepted")
+	}
+	if err := service.Ingest(context.Background(), ingester, []domain.Event{valid}); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.events) != 1 || repo.events[0].SubjectID != "project" || !repo.events[0].OccurredAt.Equal(at) {
+		t.Fatalf("normalized project event=%+v", repo.events)
+	}
+}

@@ -75,7 +75,12 @@ export function AppShell({ children, pathname, navigate }: {
             <span className={`presence-dot presence-dot--${stream.status}`} aria-hidden="true" />
             <span>Live stream</span>
             <StatusPill value={stream.status} />
-            {stream.lastMessageAt ? <span className="muted">updated <RelativeTime value={stream.lastMessageAt} /></span> : null}
+            {stream.lastMessageAt ? <span className="muted">Last project activity <RelativeTime value={stream.lastMessageAt} /></span> : null}
+            <details className="stream-health"><summary>Connection details</summary><div className="stream-health__body">
+              <p>Connection opened {stream.connectedAt ? <RelativeTime value={stream.connectedAt} /> : "Not established"}</p>
+              <p>Last message received {stream.lastReceivedAt ? <RelativeTime value={stream.lastReceivedAt} /> : "Waiting for a message"}</p>
+              <small>Message receipt includes heartbeats.</small>
+            </div></details>
           </div>
           {stream.status !== "connected" ? (
             <button className="button button--compact button--secondary" type="button" onClick={stream.reconnect}>

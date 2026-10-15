@@ -99,8 +99,15 @@ func run() error {
 		capabilities := []string{"resource:read", "resource:write", "event:read", "event:ingest", "overview:read", "task:transition", "attention:manage", "approval:request", "approval:decide", "claim:review", "run:pause", "run:resume", "run:cancel", "run:message", "run:redirect"}
 		return repo.Bootstrap(ctx, command[1], command[2], command[3], command[4], capabilities)
 	case "project":
-		if len(command) != 4 || command[1] != "create" {
-			return errors.New("usage: agentroomctl project create <project-id> <project-name>")
+		if len(command) != 4 || (command[1] != "create" && command[1] != "ensure") {
+			return errors.New("usage: agentroomctl project create|ensure <project-id> <project-name>")
+		}
+		if command[1] == "ensure" {
+			created, err := repo.EnsureProject(ctx, command[2], command[3])
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(os.Stdout).Encode(map[string]any{"project_id": command[2], "created": created})
 		}
 		return repo.CreateProject(ctx, command[2], command[3])
 	case "membership":
@@ -132,13 +139,13 @@ func run() error {
 				value := time.Now().UTC().Add(time.Duration(days) * 24 * time.Hour)
 				expiry = &value
 			}
-			created, err := auth.CreateServiceTokenWithMetadata(ctx, repo.Pool(), command[2], command[3], command[4], []string{command[5]}, splitCapabilities(command[6]), expiry)
+			created, err := auth.CreateServiceTokenWithMetadata(ctx, repo.Pool(), command[2], command[3], command[4], splitCapabilities(command[5]), splitCapabilities(command[6]), expiry)
 			if err != nil {
 				return err
 			}
 			return json.NewEncoder(os.Stdout).Encode(created)
 		default:
-			return errors.New("usage: agentroomctl service-token create <id> <name> <actor-id> <project-id> <capability,...> [expiry-days] | list | revoke <id>")
+			return errors.New("usage: agentroomctl service-token create <id> <name> <actor-id> <project-id[,project-id...]> <capability,...> [expiry-days] | list | revoke <id>")
 		}
 	default:
 		return fmt.Errorf("unknown command %q", command[0])

@@ -725,6 +725,160 @@ func TestRepositoryCommandEventProjectionRoundTrip(t *testing.T) {
 		}
 	})
 
+	t.Run("operator ensures preserve canonical project and unchanged sessions", func(t *testing.T) {
+		const project = "ensure-project"
+		for _, input := range []struct{ id, name string }{{"", "Name"}, {"id", ""}} {
+			if _, err := repo.EnsureProject(ctx, input.id, input.name); err == nil {
+				t.Fatal("invalid ensure accepted")
+			}
+		}
+		created, err := repo.EnsureProject(ctx, project, "Canonical project")
+		if err != nil || !created {
+			t.Fatalf("first ensure created=%v err=%v", created, err)
+		}
+		created, err = repo.EnsureProject(ctx, project, "Source cannot rename")
+		if err != nil || created {
+			t.Fatalf("repeated ensure created=%v err=%v", created, err)
+		}
+		var name string
+		var audits int
+		if err := repo.Pool().QueryRow(ctx, `SELECT name FROM projects WHERE id=$1`, project).Scan(&name); err != nil || name != "Canonical project" {
+			t.Fatalf("name=%q err=%v", name, err)
+		}
+		if err := repo.Pool().QueryRow(ctx, `SELECT count(*) FROM audit_records WHERE project_id=$1 AND action='project.ensure'`, project).Scan(&audits); err != nil || audits != 1 {
+			t.Fatalf("ensure audits=%d err=%v", audits, err)
+		}
+		caps := []string{"resource:read", "overview:read"}
+		if err := repo.GrantMembership(ctx, project, "ensure-user", "ensure@example.test", caps); err != nil {
+			t.Fatal(err)
+		}
+		manager, err := auth.New(ctx, repo.Pool(), []byte("membership session test secret"), false, "http://127.0.0.1", "", "", "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		user := auth.User{ID: "oidc:ensure-user"}
+		createSession := func() {
+			t.Helper()
+			if _, _, err := manager.CreateSession(ctx, user, "ensure-user"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		assertSessions := func(want int) {
+			t.Helper()
+			var count int
+			if err := repo.Pool().QueryRow(ctx, `SELECT count(*) FROM web_sessions WHERE user_id=$1`, user.ID).Scan(&count); err != nil || count != want {
+				t.Fatalf("sessions=%d want=%d err=%v", count, want, err)
+			}
+		}
+		createSession()
+		if err := repo.GrantMembership(ctx, project, "ensure-user", "ensure@example.test", []string{"overview:read", "resource:read"}); err != nil {
+			t.Fatal(err)
+		}
+		assertSessions(1)
+		if err := repo.Pool().QueryRow(ctx, `SELECT count(*) FROM audit_records WHERE project_id=$1 AND action='membership.grant'`, project).Scan(&audits); err != nil || audits != 1 {
+			t.Fatalf("no-op grant audits=%d err=%v", audits, err)
+		}
+		if err := repo.GrantMembership(ctx, project, "ensure-user", "ensure@example.test", []string{"resource:read"}); err != nil {
+			t.Fatal(err)
+		}
+		assertSessions(0)
+		createSession()
+		if err := repo.GrantMembership(ctx, project, "ensure-user", "changed@example.test", []string{"resource:read"}); err != nil {
+			t.Fatal(err)
+		}
+		assertSessions(0)
+	})
+
+	t.Run("zero-task source project tracks collection receipt and accepted scan order", func(t *testing.T) {
+		const project = "observed-empty-project"
+		if _, err := repo.EnsureProject(ctx, project, "Human project name"); err != nil {
+			t.Fatal(err)
+		}
+		sentry := app.Actor{ID: "sentry-project-reader", Capabilities: map[string]struct{}{"event:ingest": {}, "source:sentry": {}}}
+		collected := time.Now().UTC().Add(-20 * time.Hour).Truncate(time.Microsecond)
+		observation := domain.ProjectObservation{ExternalID: "Software/empty-project", Name: "Source project name", Path: "/source/empty-project", Status: "Active", Reason: "Recent source activity", CollectedAt: collected, ScanStatus: "complete", TaskCount: 0}
+		publish := func(sequence int64, id string, value domain.ProjectObservation) error {
+			payload, err := json.Marshal(value)
+			if err != nil {
+				return err
+			}
+			return service.Ingest(ctx, sentry, []domain.Event{{ProjectID: project, Type: "project.observed", SubjectType: domain.ResourceProject, SubjectID: "untrusted", SourceSystem: "sentry", SourceEventID: id, SourceSequence: sequence, Payload: payload}})
+		}
+		if err := publish(10, "empty-scan-complete", observation); err != nil {
+			t.Fatal(err)
+		}
+		initial, err := repo.Workspace(ctx, project)
+		if err != nil || len(initial.Resources.Tasks) != 0 || len(initial.Sources) != 1 {
+			t.Fatalf("zero-task snapshot=%+v err=%v", initial, err)
+		}
+		source := initial.Sources[0]
+		if source.LastCollectedAt == nil || !source.LastCollectedAt.Equal(collected) || source.LastSuccessfulCollectionAt == nil || !source.LastSuccessfulCollectionAt.Equal(collected) || source.ScanStatus == nil || *source.ScanStatus != "complete" || !source.LastReceivedAt.Equal(source.LastSeen) || source.LastReceivedAt.Sub(collected) < 19*time.Hour || source.ProjectObservation.TaskCount != 0 {
+			t.Fatalf("collection freshness=%+v", source)
+		}
+		if err := publish(10, "empty-scan-complete", observation); err != nil {
+			t.Fatalf("immutable retry: %v", err)
+		}
+		retried, err := repo.Workspace(ctx, project)
+		if err != nil || retried.Cursor != initial.Cursor || !retried.Sources[0].LastReceivedAt.Equal(source.LastReceivedAt) {
+			t.Fatalf("retry changed watermark/receipt: %+v err=%v", retried, err)
+		}
+		partial := observation
+		partial.CollectedAt, partial.ScanStatus, partial.ScanError = collected.Add(time.Hour), "partial", "Older or unreadable records retained"
+		if err := publish(11, "empty-scan-partial", partial); err != nil {
+			t.Fatal(err)
+		}
+		stale := observation
+		stale.CollectedAt = collected.Add(2 * time.Hour)
+		if err := publish(9, "empty-scan-stale", stale); err != nil {
+			t.Fatal(err)
+		}
+		check := func() {
+			t.Helper()
+			snapshot, err := repo.Workspace(ctx, project)
+			if err != nil || len(snapshot.Sources) != 1 {
+				t.Fatalf("snapshot=%+v err=%v", snapshot, err)
+			}
+			source := snapshot.Sources[0]
+			if source.ScanStatus == nil || *source.ScanStatus != "partial" || source.LastCollectedAt == nil || !source.LastCollectedAt.Equal(partial.CollectedAt) || source.LastSuccessfulCollectionAt == nil || !source.LastSuccessfulCollectionAt.Equal(collected) {
+				t.Fatalf("stale observation changed accepted freshness: %+v", source)
+			}
+			overview, err := repo.Overview(ctx, project)
+			if err != nil {
+				t.Fatal(err)
+			}
+			freshness := overview["sources"].([]app.WorkspaceSource)
+			if len(freshness) != 1 || !freshness[0].LastCollectedAt.Equal(*source.LastCollectedAt) || overview["event_cursor"] != snapshot.Cursor {
+				t.Fatalf("overview inconsistent: %+v", overview)
+			}
+			raw, err := repo.Get(ctx, project, domain.ResourceProject, project)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var projected domain.Project
+			if err := json.Unmarshal(raw, &projected); err != nil {
+				t.Fatal(err)
+			}
+			if projected.Name != "Human project name" || projected.SourceObservation.Name != "Source project name" || projected.SourceStatus != "Active" || projected.Version != 2 {
+				t.Fatalf("source overwrote canonical project: %+v", projected)
+			}
+		}
+		check()
+		if err := repo.RebuildProjections(ctx); err != nil {
+			t.Fatal(err)
+		}
+		check()
+		other, err := repo.Workspace(ctx, "ensure-project")
+		if err != nil || len(other.Sources) != 0 {
+			t.Fatalf("cross-project freshness leak: %+v err=%v", other, err)
+		}
+		// A different native identity cannot take over this project's source projection.
+		conflict := observation
+		conflict.ExternalID = "another-project"
+		if err := publish(12, "identity-conflict", conflict); err == nil {
+			t.Fatal("source identity takeover accepted")
+		}
+	})
+
 }
 
 type integrationController struct {

@@ -610,7 +610,7 @@ paths:
     post:
       operationId: ingestAdapterEvents
       summary: Ingest authenticated runtime events
-      description: Available only on the private adapter listener. Payloads cannot contain resource replacements. Sentry uses task.observed with TaskObservation payload and a positive source_sequence; stable project-scoped task IDs are derived from external_id. Source completion never accepts supervised completion. Later observations preserve supervisory fields. Blocked source work derives source.task.blocked attention; a newer nonblocked observation resolves only that source-owned item. Human resolution suppresses the same blocked episode until the source unblocks and blocks again. Event identifiers and actor attribution are replaced by canonical server values.
+      description: Available only on the private adapter listener. Payloads cannot contain resource replacements. Sentry uses typed task.observed or project.observed and a positive source_sequence; project observations require operator-preprovisioned projects and preserve canonical names, memberships and tasks; collection time is separate from delivery receipt; stable project-scoped task IDs are derived from external_id. Source completion never accepts supervised completion. Later observations preserve supervisory fields. Blocked source work derives source.task.blocked attention; a newer nonblocked observation resolves only that source-owned item. Human resolution suppresses the same blocked episode until the source unblocks and blocks again. Event identifiers and actor attribution are replaced by canonical server values.
       tags: [Adapter]
       security:
         - serviceToken: []
@@ -914,19 +914,40 @@ components:
             approvals: {type: array, items: {$ref: "#/components/schemas/Approval"}}
         sources:
           type: array
-          items:
-            type: object
-            additionalProperties: false
-            required: [system, last_seen]
-            properties:
-              system: {type: string}
-              last_seen: {type: string, format: date-time, description: "Most recent source event receipt time in this project, independent of its reported occurred_at."}
+          items: {$ref: "#/components/schemas/SourceFreshness"}
+    ProjectObservation:
+      type: object
+      additionalProperties: false
+      required: [external_id, name, path, status, collected_at, scan_status, task_count]
+      properties:
+        external_id: {type: string, minLength: 1, maxLength: 1024}
+        name: {type: string, minLength: 1, maxLength: 4096, description: Source-reported name; canonical project name is preserved.}
+        path: {type: string, minLength: 1, maxLength: 4096}
+        status: {type: string, minLength: 1, maxLength: 128}
+        reason: {type: string, maxLength: 4096}
+        collected_at: {type: string, format: date-time, description: Actual collection time; must equal occurred_at when both are supplied.}
+        scan_status: {type: string, enum: [complete, partial, unreadable]}
+        task_count: {type: integer, minimum: 0, description: Positive task records observed in this scan; unreadable scans do not establish an empty project.}
+        scan_error: {type: string, maxLength: 4096}
+    SourceFreshness:
+      type: object
+      additionalProperties: false
+      required: [system, last_seen, last_received_at, last_collected_at, last_successful_collection_at, scan_status]
+      properties:
+        system: {type: string}
+        last_seen: {type: string, format: date-time, description: Backward-compatible alias of last_received_at.}
+        last_received_at: {type: string, format: date-time, description: Most recent event receipt time in this project.}
+        last_collected_at: {type: [string, "null"], format: date-time, description: Last accepted project collection; legacy task-only sources use event occurrence time.}
+        last_successful_collection_at: {type: [string, "null"], format: date-time, description: Last accepted complete project collection.}
+        scan_status: {type: [string, "null"], enum: [complete, partial, unreadable, null]}
+        project_observation: {$ref: "#/components/schemas/ProjectObservation"}
     ProjectOverview:
       type: object
-      required: [project_id, counts, event_cursor, generated_at]
+      required: [project_id, counts, event_cursor, generated_at, sources]
       properties:
         project_id: {type: string}
         counts: {type: object, additionalProperties: {type: integer, format: int64, minimum: 0}}
+        sources: {type: array, items: {$ref: "#/components/schemas/SourceFreshness"}}
         event_cursor: {type: integer, format: int64, minimum: 0}
         generated_at: {type: string, format: date-time}
     BriefAcknowledgement:
@@ -1233,7 +1254,16 @@ components:
         - {$ref: "#/components/schemas/ResourceBase"}
         - type: object
           required: [organization_id, name, slug, status]
-          properties: {organization_id: {type: string}, name: {type: string}, slug: {type: string}, status: {type: string}}
+          properties:
+            organization_id: {type: string}
+            name: {type: string}
+            slug: {type: string}
+            status: {type: string}
+            source: {$ref: "#/components/schemas/Source"}
+            source_status: {type: string}
+            source_observed_at: {type: string, format: date-time}
+            source_observation: {$ref: "#/components/schemas/ProjectObservation"}
+            source_last_successful_collection_at: {type: string, format: date-time}
     Host:
       allOf:
         - {$ref: "#/components/schemas/ResourceBase"}
@@ -1340,10 +1370,16 @@ components:
           then:
             required: [source_sequence]
             properties:
-              type: {const: task.observed}
-              subject_type: {const: task}
               source_sequence: {type: integer, minimum: 1}
-              payload: {$ref: "#/components/schemas/TaskObservation"}
+            oneOf:
+              - properties:
+                  type: {const: task.observed}
+                  subject_type: {const: task}
+                  payload: {$ref: "#/components/schemas/TaskObservation"}
+              - properties:
+                  type: {const: project.observed}
+                  subject_type: {const: project}
+                  payload: {$ref: "#/components/schemas/ProjectObservation"}
     Problem:
       type: object
       required: [type, title, status, detail, code]

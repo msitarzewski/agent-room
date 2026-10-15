@@ -23,8 +23,34 @@
     "schema_version": {"const": 1},
     "payload": {}
   },
-  "allOf": [{"if": {"properties": {"source_system": {"const": "sentry"}},"required": ["source_system"]},"then": {"required": ["source_event_id","source_sequence"],"properties": {"type": {"const": "task.observed"},"subject_type": {"const": "task"},"source_sequence": {"type": "integer","minimum": 1},"payload": {"$ref": "#/$defs/TaskObservation"}}}}],
+  "allOf": [{
+    "if": {"properties": {"source_system": {"const": "sentry"}},"required": ["source_system"]},
+    "then": {
+      "required": ["source_event_id","source_sequence"],
+      "properties": {"source_sequence": {"type": "integer","minimum": 1}},
+      "oneOf": [
+        {"properties": {"type": {"const": "task.observed"},"subject_type": {"const": "task"},"payload": {"$ref": "#/$defs/TaskObservation"}}},
+        {"properties": {"type": {"const": "project.observed"},"subject_type": {"const": "project"},"payload": {"$ref": "#/$defs/ProjectObservation"}}}
+      ]
+    }
+  }],
   "$defs": {
+    "ProjectObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["external_id", "name", "path", "status", "collected_at", "scan_status", "task_count"],
+      "properties": {
+        "external_id": {"type": "string","minLength": 1,"maxLength": 1024},
+        "name": {"type": "string","minLength": 1,"maxLength": 4096},
+        "path": {"type": "string","minLength": 1,"maxLength": 4096},
+        "status": {"type": "string","minLength": 1,"maxLength": 128},
+        "reason": {"type": "string","maxLength": 4096},
+        "collected_at": {"type": "string","format": "date-time"},
+        "scan_status": {"type": "string","enum": ["complete", "partial", "unreadable"]},
+        "task_count": {"type": "integer","minimum": 0},
+        "scan_error": {"type": "string","maxLength": 4096}
+      }
+    },
     "TaskObservation": {
       "type": "object",
       "additionalProperties": false,

@@ -259,6 +259,30 @@ export interface ProjectOverview {
   counts: Record<string, number>;
   event_cursor: number;
   generated_at: string;
+  sources?: SourceFreshness[];
+}
+
+export interface ProjectSourceObservation {
+  external_id: string;
+  name: string;
+  path: string;
+  status: string;
+  reason?: string;
+  collected_at: string;
+  scan_status: "complete" | "partial" | "unreadable";
+  task_count: number;
+  scan_error?: string;
+}
+
+export interface SourceFreshness {
+  system: string;
+  /** Compatibility alias for Agent Room receipt time; never a collection timestamp. */
+  last_seen: string;
+  last_received_at?: string;
+  last_collected_at?: string | null;
+  last_successful_collection_at?: string | null;
+  scan_status?: "complete" | "partial" | "unreadable" | null;
+  project_observation?: ProjectSourceObservation;
 }
 
 export interface WorkspaceSnapshot {
@@ -275,7 +299,7 @@ export interface WorkspaceSnapshot {
     claims: Claim[];
     approvals: Approval[];
   };
-  sources: { system: string; last_seen: string }[];
+  sources: SourceFreshness[];
 }
 
 export interface Problem {

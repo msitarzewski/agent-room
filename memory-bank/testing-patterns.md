@@ -2,7 +2,7 @@
 
 **Status:** Foundational quality contract
 
-**Last updated:** 2026-07-27
+**Last updated:** 2026-10-14
 
 ## Test Pyramid
 
@@ -57,6 +57,15 @@
 - avoid live network dependencies in deterministic suites
 
 ## Adapter Fixtures
+
+The Sentry collector's isolated stdlib gate is
+`PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests/sentry -v`.
+It does not require the live Sentry environment or network. Fault cases cover
+durable retry identity, rollback, restart, clock rollback, authorization
+isolation, unreadable/window-retained sources, bounded batches, token privacy,
+redirect refusal, and retained quarantine. CI and the local security gate both
+run it. Actual deployed acceptance uses real repository records, normal OIDC,
+and HTTPS Chromium/WebKit streams independently of these fixtures.
 
 Captured native payloads may be used as test fixtures when sanitized.
 

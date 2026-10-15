@@ -332,12 +332,17 @@ describe("Agent Room application", () => {
       occurred_at: "2026-07-27T12:01:00Z",
       data: {},
     }));
-    await screen.findByText(/updated/);
+    await screen.findByText(/Last project activity/);
+    const activity = screen.getByText(/Last project activity/);
+    expect(activity.querySelector("time")).toHaveAttribute("datetime", "2026-07-27T12:01:00Z");
+    expect(screen.getByText(/Connection opened/).querySelector("time")).toBeInTheDocument();
     act(() => socket?.emitMessage({
       cursor: 43,
       type: "heartbeat",
       occurred_at: "2026-07-27T12:01:01Z",
     }));
+    expect(screen.getByText(/Last message received/).querySelector("time")).toBeInTheDocument();
+    expect(activity.querySelector("time")).toHaveAttribute("datetime", "2026-07-27T12:01:00Z");
     act(() => socket?.emitMessage({
       cursor: 44,
       type: "resync_required",

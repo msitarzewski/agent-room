@@ -70,6 +70,8 @@ registration remains environment configuration and is not recorded here.
 - live browser transport: `coder/websocket`; commands remain REST requests
 - database: PostgreSQL 18 with `pgx/v5` and generated `sqlc` queries
 - migrations: embedded, sequential SQL migrations
+- Sentry source collector: Python 3.11+ standard library with durable SQLite
+  WAL/FULL state; reuses the existing Sentry scanner environment read-only
 - frontend: React 19, TypeScript, and Vite
 - spatial frontend: Three.js 0.186.1, React Three Fiber 9.8.1,
   react-three/xr 6.6.31; desktop WebGPU with WebGL2 fallback and dedicated

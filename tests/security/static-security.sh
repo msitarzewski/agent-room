@@ -5,7 +5,7 @@ IFS=$'\n\t'
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 cd "${repo_root}"
 
-for tool in gitleaks semgrep gosec govulncheck staticcheck go npm; do
+for tool in gitleaks semgrep gosec govulncheck staticcheck go npm python3; do
   command -v "${tool}" >/dev/null 2>&1 || {
     printf 'Required security tool unavailable: %s\n' "${tool}" >&2
     exit 1
@@ -43,6 +43,7 @@ gosec -severity medium -confidence medium \
 staticcheck -tags=integration ./cmd/... ./internal/... ./tests/security ./tests/api
 govulncheck ./...
 tests/security/backend-quality.sh
+PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests/sentry -v
 (
   cd web
   npm audit --audit-level=high

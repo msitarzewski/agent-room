@@ -191,6 +191,22 @@ Source-owned blocked attention has a separate identity, resolves only from a
 newer nonblocked observation, and honors human resolution until a new blocked
 episode. Source completion never accepts evidence or a completion claim.
 
+`project.observed` updates a separate source report and never changes the
+operator's project name or access. Collection time, receipt time, and last
+complete collection are distinct in overview/workspace responses; delayed or
+out-of-order delivery cannot claim a fresh successful scan. See
+`internal/app/service.go:668`, `internal/postgres/projector.go:158`, and
+`internal/postgres/repository.go:637`.
+
+The independent collector at `adapters/sentry/agentroom_sentry.py:272` reuses
+Sentry's read-only scanner, persists immutable event bodies and watermarks in a
+SQLite transaction before delivery, and retries with stable identity. Positive
+observations only: missing, window-expired, or unreadable source records never
+delete tasks. Project/path bindings and source instance persist with the queue.
+Operator setup uses `internal/postgres/admin.go:63`; the publisher receives only
+exact project scopes and source ingestion capabilities. Its private credentials
+and queue are independent of Sentry's board, watcher, history, and backups.
+
 ## Desktop and Immersive Resource Ownership
 
 `web/src/workspace/SceneCanvas.tsx:458` owns a desktop WebGPU renderer with WebGL2

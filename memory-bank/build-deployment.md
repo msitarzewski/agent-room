@@ -92,7 +92,52 @@ local installation is a staging step for headset testing. Its actual host
 identifier stays in `data/local/deployment.json`; verify that host's platform
 before producing the promoted artifact and activating the remote service.
 
-## Topology
+## Local Sentry Publisher
+
+The independent publisher runs from this checkout with Sentry's existing Python
+environment. It uses Sentry's scanner read-only; its current board, watcher,
+history, backups, and source configuration are unchanged. The connector is
+installed separately from the daemon/web release archive.
+
+Private configuration is `data/local/sentry/connector.toml`, durable SQLite state
+is `data/local/sentry/state/`, and publisher credentials are under
+`data/local/sentry/secrets/`. Directories are owner-only, files mode 0600.
+The active configuration maps the existing `agent-rooms` project only. Additional
+discovered projects are reported as needing provisioning, not silently imported.
+Full portfolio setup requires the operator's separate scope decision.
+
+```sh
+/path/to/sentry/.venv/bin/python -B adapters/sentry/agentroom_sentry.py \
+  --config data/local/sentry/connector.toml status
+launchctl print "gui/$(id -u)/local.agentroom-sentry"
+launchctl kickstart -k "gui/$(id -u)/local.agentroom-sentry"
+```
+
+The launch agent uses `watch`, collects every 300 seconds, and drains pending
+delivery between collections. Its private plist and logs are in
+`data/local/sentry/`. Preserve its state directory and source instance/path
+bindings through restart or host migration. Never reset the queue to repair
+transport or authorization failures: immutable queued observations are retried
+with their original event IDs, sequences, and collection times. `status` exposes
+pending delivery, quarantined records, provisioning needs, and safe error codes.
+Unmapped/unreadable/window-expired sources do not delete existing records.
+
+Provision additional projects using `agentroomctl project ensure` and the
+existing `membership grant` operator commands before changing the mapping.
+Reconciliation preserves canonical names, and unchanged grants do not rotate
+sessions. Actual access changes rotate sessions as before. Publisher tokens
+use exact project IDs and only `event:ingest,source:sentry`; no wildcard,
+administration, database access, or resource replacement is granted.
+
+The local token has a 30-day lifetime; its actual expiry and ID are in
+`data/local/sentry/publisher-metadata.json`. Before expiry, create a replacement
+with the same exact scopes, atomically replace the mode-0600 token file, verify
+delivery, then revoke the previous token using the CLI. No collector restart is
+needed to reload the token. Do not print or copy tokens into Memory Bank files.
+Stop only this publisher with `launchctl bootout` for its own label. Agent Room
+and Sentry remain independently supervised.
+
+## Production Topology
 
 ```
 Public Internet

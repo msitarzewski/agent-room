@@ -291,13 +291,38 @@ sudo deploy/rollback.sh \
 
 ## Sentry observations
 
-The private adapter endpoint accepts typed Sentry task observations. This
-release provides the ingestion contract and projection; an automatically
-scheduled production Sentry connector is not included. Sentry's own board,
-watcher, and backups continue operating independently.
+The independent [Sentry connector](adapters/sentry/agentroom_sentry.py) reuses
+Sentry's read-only scanner and publishes project and task observations through
+the private adapter endpoint. Sentry's own board, watcher, history, and backups
+continue operating independently. Install the connector from this checkout on
+the source workstation, using Sentry's existing Python environment (Python 3.11
+or newer). It is separate from the daemon/web release archive.
+
+Copy [the configuration example](deploy/config/sentry-connector.toml.example)
+to private runtime storage. Resolve each source path to an operator-provisioned
+project ID. Use `agentroomctl project ensure` and `membership grant` for setup;
+the publisher cannot provision projects or memberships. A service token can
+cover a comma-separated list of exact project IDs with only `event:ingest` and
+`source:sentry`; keep its file owner-only and rotate it before expiry. Configure
+the private adapter URL with HTTPS, or loopback HTTP on the same host.
+
+```sh
+/path/to/sentry/.venv/bin/python -B adapters/sentry/agentroom_sentry.py \
+  --config /path/to/private/connector.toml watch
+```
+
+`watch` collects every 300 seconds by default and drains queued observations
+between polls. `once` performs a bounded collection/delivery pass; exit 2 means
+pending delivery remains, and exit 1 reports errors or quarantined observations.
+`status` reports backlog, provisioning needs, and collection/delivery errors.
+Queue records are durable before transmission and retries preserve event IDs,
+sequences, payloads, and collection times. Missing or unreadable source records
+never delete existing tasks. Unmapped projects require operator provisioning;
+permanent invalid records remain quarantined for review. Preserve the state
+directory across restarts and host moves to retain identity and ordering.
 
 Give an observation publisher only `event:ingest` and `source:sentry` for its
-chosen project. Send `POST /api/v1/ingest?project_id=<project-id>` to the private
+chosen projects. Send `POST /api/v1/ingest?project_id=<project-id>` to the private
 adapter listener with its bearer service token. The body contains an `events`
 array; each event supplies `project_id`, `type: "task.observed"`,
 `subject_type: "task"`, a nonempty `subject_id`, `source_system: "sentry"`, a
@@ -321,6 +346,14 @@ blocked source task creates deduplicated attention, and a newer unblocked
 observation resolves only that source-owned item. A human resolution stays
 resolved until a new unblocked-to-blocked episode. Source `Done` never accepts a
 completion claim.
+
+`project.observed` reports the actual collection time, source name/path/status,
+scan status (`complete`, `partial`, or `unreadable`), and task count, including
+successful zero-task scans. It updates a separate source report and preserves
+the operator's project name. Workspace and overview responses distinguish
+`last_collected_at`, `last_received_at`, and `last_successful_collection_at`;
+queued delivery cannot make an old scan appear fresh. The browser labels project
+activity separately from connection opening and heartbeat receipt.
 
 `GET /api/v1/workspace?project_id=<project-id>` returns one authorized,
 transactionally consistent snapshot of the resources and source receipt times
@@ -359,6 +392,7 @@ Codex, Claude, Hermes, or other worker processes.
   boundaries
 - [`internal/adapters`](internal/adapters) — Codex, Claude, and Hermes-native
   normalization/client foundations
+- [`adapters/sentry`](adapters/sentry) — independent durable source collector
 - [`web`](web) — browser control room
 - [`api`](api) — HTTP and ARP contracts
 - [`db`](db) — embedded migrations and SQL queries

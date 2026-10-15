@@ -13,6 +13,15 @@ and verified live updates in Chromium/WebKit. Physical Vision Pro acceptance
 and remote production promotion remain separate.
 [Release progress](releases/spatial-workspace.md) is tracked by Sentry.
 
+Spatial checkpoint `95f166b` is committed. The independent continuous Sentry
+publisher is implemented and deployed for the existing Agent Room project:
+13 real task records, durable retry, complete scan reports, no backlog or
+quarantine, and live Chromium/WebKit acceptance. Source collection, delivery
+receipt, and connection health have separate labels. Full portfolio provisioning
+was rejected by automatic approval review and remains a separate scope decision;
+no additional projects or operator memberships were created. Read the
+[continuous-feed release](releases/continuous-sentry-observations.md).
+
 ## Completed Foundations
 
 - [x] Refined mission from passive awareness to trustworthy supervision
@@ -96,19 +105,17 @@ No headset frame-rate or comfort measurement has been claimed.
 
 ## Immediate Next Work
 
-1. Commit the reviewed spatial release and incorporated security repair, as
-   Michael authorized on 2026-10-14; rebuild the checkpoint on the local instance.
-2. Implement continuous independent Sentry delivery with durable retry and
-   explicit activity/connection freshness. The current import is one-time only.
-3. Accept the interface on the actual Vision Pro build, then choose a release
+1. Accept the interface on the actual Vision Pro build, then choose a release
    identifier for signed promotion.
-4. Verify the operator-designated remote machine's platform and deployment
+2. Resolve whether to provision the remaining 96 discovered Sentry projects;
+   the current publisher is deliberately scoped to the existing project.
+3. Verify the operator-designated remote machine's platform and deployment
    configuration before signed promotion; the current Mac deployment is staging
    for headset testing. The actual host identifier stays in the private runtime
    record. The July status does not prove current remote activation.
-5. Configure Pip's least-privilege Hermes hooks, Agent Room service token, and
+4. Configure Pip's least-privilege Hermes hooks, Agent Room service token, and
    MCP tools.
-6. Provision and test the encrypted off-host backup destination.
+5. Provision and test the encrypted off-host backup destination.
 
 ## Current Blockers
 

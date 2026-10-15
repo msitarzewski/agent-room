@@ -82,10 +82,29 @@ type Human struct {
 
 type Project struct {
 	Base
-	OrganizationID string `json:"organization_id"`
-	Name           string `json:"name"`
-	Slug           string `json:"slug"`
-	Status         string `json:"status"`
+	OrganizationID                   string              `json:"organization_id"`
+	Name                             string              `json:"name"`
+	Slug                             string              `json:"slug"`
+	Status                           string              `json:"status"`
+	Source                           Source              `json:"source,omitempty"`
+	SourceStatus                     string              `json:"source_status,omitempty"`
+	SourceObservedAt                 *time.Time          `json:"source_observed_at,omitempty"`
+	SourceObservation                *ProjectObservation `json:"source_observation,omitempty"`
+	SourceLastSuccessfulCollectionAt *time.Time          `json:"source_last_successful_collection_at,omitempty"`
+}
+
+// ProjectObservation reports a source collection without changing project access
+// or the canonical project name. Partial scans retain their explicit status.
+type ProjectObservation struct {
+	ExternalID  string    `json:"external_id"`
+	Name        string    `json:"name"`
+	Path        string    `json:"path"`
+	Status      string    `json:"status"`
+	Reason      string    `json:"reason,omitempty"`
+	CollectedAt time.Time `json:"collected_at"`
+	ScanStatus  string    `json:"scan_status"`
+	TaskCount   int64     `json:"task_count"`
+	ScanError   string    `json:"scan_error,omitempty"`
 }
 
 type Host struct {

@@ -6,18 +6,27 @@
 
 **Substate:** IDLE
 
-**Task status:** SPATIAL RELEASE CHECKPOINT AUTHORIZED — CONTINUOUS SENTRY FEED NEXT
+**Task status:** CONTINUOUS SENTRY OBSERVATIONS — LOCAL RELEASE COMPLETE
 
 ## Current Task
 
-2026-10-14 follow-up: Michael requested updating the Memory Bank, committing the
-completed release, and building the next step. Commit authorization now includes
-the reviewed spatial candidate and its incorporated security repair. First
-checkpoint this feature branch, then build continuous Sentry observation delivery
-and clarify activity/connection timestamps. Existing deployment and real-data
-validation remain complete; physical headset acceptance is still pending.
+2026-10-14 follow-up: Michael authorized Memory Bank updates, a commit, and the
+next build. Spatial checkpoint `95f166b` is committed. Continuous Sentry delivery
+and explicit activity/connection/source clocks are now implemented, tested, and
+running locally for the existing Agent Room project. The final implementation
+commit includes the release docs; clean native, Linux/amd64, and pinned web
+builds are recorded privately with their exact source revision. Physical Vision
+Pro acceptance, full portfolio setup, and remote activation remain separate.
 
 ## Next Implementation: Continuous Observations
+
+The reviewed spatial release is committed as `95f166b`. Native daemon/CLI,
+Linux/amd64 daemon/CLI, and pinned web builds pass from that clean revision;
+Go provenance records the exact commit with `vcs.modified=false`. The local
+launch agent was restarted on those binaries. Current implementation extends
+that checkpoint on the same feature branch. Read
+[Continuous Sentry observations](releases/continuous-sentry-observations.md)
+for the stable checklist and source/delivery contracts.
 
 1. Reuse Sentry's read-only project/task collection without contacting Vikunja.
 2. Persist observations and delivery progress locally before attempting delivery.
@@ -31,9 +40,16 @@ validation remain complete; physical headset acceptance is still pending.
 6. Verify initial collection, incremental updates, duplicate/restart recovery,
    unavailable delivery, source isolation, and real authenticated live refresh.
 
-The current five Agent Room task records came from one-time imports. Automatic
-publishing is the next engineering task, not an existing service. Mac staging
-continues; the designated remote machine remains the eventual deployment home.
+The independent publisher now collects the existing Agent Room project every
+300 seconds, with durable retry and no membership changes. Initial delivery
+contains 13 real task records with no backlog or quarantine. Automatic approval
+review rejected adding all 97 source projects and broad operator access; that
+action made no changes. The other 96 discoveries remain explicit provisioning
+needs pending Michael's scope decision. Actual authenticated Chromium/WebKit
+acceptance passes: one healthy socket, heartbeat, typed project frames, advancing
+collection times, unchanged human fields, and no reload or CSP violations. The
+release checklist is complete. Mac staging continues; pipx remains the eventual
+deployment home.
 
 ## Spatial Release Context
 
