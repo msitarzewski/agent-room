@@ -220,3 +220,41 @@ measure no physical-headset performance indirectly from browser tests.
   Temporary reporting is ended and acceptance credentials revoked/removed.
   Current local release checklist is complete; full device and remote promotion
   acceptance remain separate, with no automatic native hook/execution claim.
+
+## Information layout follow-up — 2026-10-15
+
+Michael requested ensuring necessary information does not overlap. The prior
+9/9 capability checklist remains complete; this approved UX follow-up extends
+existing components/tests without assigning a new release identifier.
+
+Current findings: desktop absolute toolbar/notice/hint positions can collide
+when controls/text wrap. The XR radius-scaled graph can extend into side panels;
+warnings collide with coordination space, compact human content can rise too
+high, and fixed-character texture wrapping can overrun measured text bounds.
+Reserve distinct layout space, retain all source/evidence/request information
+through pagination, and verify actual geometry/ink and responsive browser bounds.
+Implemented separate desktop toolbar/notice/canvas/hint rows, a normal-flow
+connection header/details, wrapping for long identities, and focused inline
+confirmation with trigger restoration. XR fits actual node/label bounds into a
+central slot and reserves separate coordination, human, inspector, navigation,
+diagnostic, and reposition spaces. Measured glyph ink stays within label areas;
+long task/request/evidence/source context remains available through pages.
+
+Verification passes: 140 frontend tests (95.24% line / 84.63% branch coverage),
+30 native Chromium/WebKit browser checks, type/lint/strict API and pinned
+production build. Eleven Semgrep rules, npm advisory checks (zero findings),
+Git-visible secret scanning and production completeness checks pass. Browser
+checks include 390px/200%-text dense task/request/evidence, expanded connection
+details, separate surfaces, focus restoration, and hit-tested reachable controls.
+CPU XR checks derive actual rendered plane/node/ring bounds, exercise head
+orientation, and read all long-context pages; they do not measure headset comfort.
+
+Actual authenticated tailnet HTTPS Chromium checks pass with the existing task
+and 99 projects at 1440px, 760px, and 390px/200% text, with no horizontal overflow,
+application/API errors or CSP violations. Private screenshots were reviewed.
+Verified frontend installed after preserving current native/web/configuration
+rollback copies; older hashed assets remain for open tabs. This frontend-only
+follow-up leaves the verified native `14b5c43` build, Sentry publisher, databases,
+identity, and permissions unchanged. Frontend revision/hashes/activation phase
+are recorded separately in ignored deployment/build metadata. Physical Vision
+Pro interaction/comfort/frame pacing and remote promotion remain separate.

@@ -62,10 +62,23 @@ export function WorkspacePage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [review, setReview] = useState<{ claim: Claim; decision: "accepted" | "rejected" } | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
+  const confirmation = useRef<HTMLDivElement>(null);
+  const confirmationTrigger = useRef<HTMLElement | null>(null);
   const initialized = useRef(false);
   const previousProject = useRef(projectId);
   const actionGeneration = useRef(0);
   const capabilities = projects.find((project) => project.id === contextId)?.capabilities ?? [];
+
+  useEffect(() => {
+    if (!review && !requestAction) return;
+    confirmation.current?.focus();
+  }, [review, requestAction]);
+
+  const dismissConfirmation = () => {
+    setReview(null);
+    setRequestAction(null);
+    if (confirmationTrigger.current?.isConnected) confirmationTrigger.current.focus();
+  };
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
@@ -175,8 +188,11 @@ export function WorkspacePage() {
   const operator = hasCapability(capabilities, "resource:write");
   const mayRespond = selectedRequest && selectedRequest.status === "open" && (operator || selectedRequest.recipient.type === "human" && selectedRequest.recipient.id === session?.user.id && hasCapability(capabilities, "coordination:respond"));
   const mayClose = (action: "resolve" | "cancel") => selectedRequest && ["open", "responded"].includes(selectedRequest.status) && (operator || selectedRequest.owner_type === "human" && selectedRequest.owner_id === session?.user.id && hasCapability(capabilities, `coordination:${action}`));
-  const reviewRequest = (action: "respond" | "resolve" | "cancel") => {
-    if (selectedRequest) setRequestAction({ action, request: selectedRequest, body: responseText.trim() });
+  const reviewRequest = (action: "respond" | "resolve" | "cancel", trigger: HTMLButtonElement) => {
+    if (selectedRequest) {
+      confirmationTrigger.current = trigger;
+      setRequestAction({ action, request: selectedRequest, body: responseText.trim() });
+    }
   };
   const chooseRegion = (next: PortfolioRegion | null) => { setRegion(next); setRegionPage(0); setQuery(""); };
   const inspectSignal = (signal: PortfolioSignal) => {
@@ -258,7 +274,7 @@ export function WorkspacePage() {
             <section><h3>Evidence <span>{evidence.length}</span></h3>{evidence.length ? evidence.map((item) => <article className="observatory-evidence" key={item.id}><strong>{item.summary}</strong><small>{item.kind} · {item.source.system}</small>{item.digest ? <code>{item.digest}</code> : null}</article>) : <p className="observatory-muted">No evidence linked to this task.</p>}</section>
             {artifacts.length ? <section><h3>Artifacts</h3>{artifacts.map((item) => <a className="observatory-artifact" key={item.id} href={`/api/v1/artifacts/${encodeURIComponent(item.id)}/content?${new URLSearchParams({ project_id: item.project_id })}`}>{item.name}<small>{item.media_type}</small></a>)}</section> : null}
             {taskRuns.length ? <section><h3>Runs</h3>{taskRuns.map((run) => <article className="observatory-evidence" key={run.id}><strong>{run.summary ?? run.id}</strong><StatusPill value={run.status} />{run.status === "running" || run.status === "working" ? hasCapability(capabilities, "run:pause") && run.capabilities.includes("run:pause") ? <button className="button button--secondary" disabled={busy || workspace.stale} onClick={() => void perform(() => api.runAction(run, "pause"), "Pause requested.")}>Pause run</button> : null : null}</article>)}</section> : null}
-            {selected.status === "review" && claim && hasCapability(capabilities, "claim:review") ? <div className="observatory-review"><button className="button button--primary" disabled={busy || workspace.stale} onClick={() => setReview({ claim, decision: "accepted" })}>Review completion</button><button className="button button--secondary" disabled={busy || workspace.stale} onClick={() => setReview({ claim, decision: "rejected" })}>Reject claim</button></div> : null}
+            {selected.status === "review" && claim && hasCapability(capabilities, "claim:review") ? <div className="observatory-review"><button className="button button--primary" disabled={busy || workspace.stale} onClick={(event) => { confirmationTrigger.current = event.currentTarget; setReview({ claim, decision: "accepted" }); }}>Review completion</button><button className="button button--secondary" disabled={busy || workspace.stale} onClick={(event) => { confirmationTrigger.current = event.currentTarget; setReview({ claim, decision: "rejected" }); }}>Reject claim</button></div> : null}
           </> : <div className="observatory-metrics"><div><strong>{focusedProject ? tasks.length : projects.length}</strong><span>{focusedProject ? "tasks" : "projects"}</span></div><div><strong>{snapshot ? attention.length : "—"}</strong><span>need attention in {projects.find((project) => project.id === contextId)?.name ?? "selected project"}</span></div></div>}
           {snapshot ? <section className="observatory-sources"><h3>Source observations</h3>{snapshot.sources.length ? snapshot.sources.map((source) => <SourceFreshness key={source.system} source={source} />) : <p className="observatory-muted">No adapter observations received.</p>}<small>Snapshot <RelativeTime value={snapshot.generated_at} /> · event {snapshot.cursor}</small></section> : null}
           {focusedProject && resources?.agents.length ? <section aria-label="Recorded participants"><h3>Recorded participants</h3>{resources.agents.map((item) => <article className="observatory-evidence" key={item.id}><strong>Agent · {item.display_name}</strong><span>Reported {item.status} · {item.source.system}</span><small>Observed <RelativeTime value={item.observed_at ?? item.updated_at} />{item.presence_expires_at ? <> · Presence lease ends <RelativeTime value={item.presence_expires_at} /></> : " · no live presence lease recorded"}</small></article>)}<small>Idle is availability. A source project marked Active is project context.</small></section> : null}
@@ -273,14 +289,14 @@ export function WorkspacePage() {
               {selectedRequest.response ? <div><strong>Recorded response · {actorName(selectedRequest.response.actor_id)}</strong><p style={{ whiteSpace: "pre-wrap" }}>{selectedRequest.response.body}</p><RelativeTime value={selectedRequest.response.responded_at} />{selectedRequest.response.evidence_ids.map((id) => <p key={id}>Response evidence: {resources?.evidence.find((item) => item.id === id)?.summary ?? `${id} · details unavailable`}</p>)}</div> : null}
               {selectedRequest.resolution ? <p>Closed by {selectedRequest.resolution.actor_id}: {selectedRequest.resolution.note}</p> : null}
               {mayRespond || mayClose("resolve") || mayClose("cancel") ? <div className="observatory-request__actions"><label>Response or closure note<textarea value={responseText} maxLength={16384} onChange={(event) => setResponseText(event.target.value)} /></label>
-                {mayRespond ? <button className="button button--primary" type="button" disabled={busy || workspace.stale || !responseText.trim()} onClick={() => reviewRequest("respond")}>Review response</button> : null}
-                {mayClose("resolve") ? <button className="button button--secondary" type="button" disabled={busy || workspace.stale} onClick={() => reviewRequest("resolve")}>Resolve request</button> : null}
-                {mayClose("cancel") ? <button className="button button--secondary" type="button" disabled={busy || workspace.stale} onClick={() => reviewRequest("cancel")}>Cancel request</button> : null}
+                {mayRespond ? <button className="button button--primary" type="button" disabled={busy || workspace.stale || !responseText.trim()} onClick={(event) => reviewRequest("respond", event.currentTarget)}>Review response</button> : null}
+                {mayClose("resolve") ? <button className="button button--secondary" type="button" disabled={busy || workspace.stale} onClick={(event) => reviewRequest("resolve", event.currentTarget)}>Resolve request</button> : null}
+                {mayClose("cancel") ? <button className="button button--secondary" type="button" disabled={busy || workspace.stale} onClick={(event) => reviewRequest("cancel", event.currentTarget)}>Cancel request</button> : null}
               </div> : <p className="observatory-muted">Only the authorized recipient, owner or project operator can respond or close this request.</p>}
-              {requestAction ? <div className="observatory-confirm" role="alertdialog" aria-labelledby="request-confirm-title"><h4 id="request-confirm-title">Confirm {requestAction.action} request?</h4><p>{requestAction.request.title} · version {requestAction.request.version}. This records a coordination decision.</p>{requestAction.body ? <p style={{ whiteSpace: "pre-wrap" }}>{requestAction.body}</p> : null}<button className="button button--primary" disabled={busy || workspace.stale} onClick={() => { const decision = requestAction; setRequestAction(null); void perform(() => decision.action === "respond" ? api.respondToRequest(decision.request, decision.body) : api.closeRequest(decision.request, decision.action, decision.body), "Coordination decision recorded."); }}>Confirm coordination decision</button><button className="button button--secondary" onClick={() => setRequestAction(null)}>Keep reviewing request</button></div> : null}
+              {requestAction ? <div ref={confirmation} tabIndex={-1} className="observatory-confirm" role="alertdialog" aria-labelledby="request-confirm-title"><h4 id="request-confirm-title">Confirm {requestAction.action} request?</h4><p>{requestAction.request.title} · version {requestAction.request.version}. This records a coordination decision.</p>{requestAction.body ? <p style={{ whiteSpace: "pre-wrap" }}>{requestAction.body}</p> : null}<button className="button button--primary" disabled={busy || workspace.stale} onClick={() => { const decision = requestAction; setRequestAction(null); void perform(() => decision.action === "respond" ? api.respondToRequest(decision.request, decision.body) : api.closeRequest(decision.request, decision.action, decision.body), "Coordination decision recorded."); }}>Confirm coordination decision</button><button className="button button--secondary" onClick={dismissConfirmation}>Keep reviewing request</button></div> : null}
             </article> : null}
           </section> : null}
-          {review && selected ? <div className="observatory-confirm" role="alertdialog" aria-labelledby="workspace-review-title"><h3 id="workspace-review-title">{review.decision === "accepted" ? "Accept completion claim?" : "Reject completion claim?"}</h3><p>{selected.title}. Inspect the linked evidence before recording your decision.</p><button className="button button--primary" disabled={busy || workspace.stale} onClick={() => { const decision = review; setReview(null); void perform(() => api.reviewClaim(decision.claim, decision.decision), "Review decision recorded."); }}>Confirm decision</button><button className="button button--secondary" onClick={() => setReview(null)}>Keep reviewing</button></div> : null}
+          {review && selected ? <div ref={confirmation} tabIndex={-1} className="observatory-confirm" role="alertdialog" aria-labelledby="workspace-review-title"><h3 id="workspace-review-title">{review.decision === "accepted" ? "Accept completion claim?" : "Reject completion claim?"}</h3><p>{selected.title}. Inspect the linked evidence before recording your decision.</p><button className="button button--primary" disabled={busy || workspace.stale} onClick={() => { const decision = review; setReview(null); void perform(() => api.reviewClaim(decision.claim, decision.decision), "Review decision recorded."); }}>Confirm decision</button><button className="button button--secondary" onClick={dismissConfirmation}>Keep reviewing</button></div> : null}
         </aside>
       </div>
 

@@ -2,6 +2,23 @@
 
 ## Planned Work
 
+### 2026-10-15: [COMPLETED] Necessary information without overlapping UX
+
+- Michael requested ensuring necessary information does not overlap. State:
+  DOCS / IDLE on the existing feature branch, extending baseline `14b5c43`.
+- Reused existing components/renderers/tests: separate desktop flow rows,
+  connection details, wrapping and confirmation focus; reserved immersive graph,
+  coordination, human, inspector, warning, navigation and handle regions.
+  Measured text fitting and pagination preserve complete recorded context.
+- Verification: 140 frontend tests; 95.24% lines / 84.63% branches; 30 native
+  Chromium/WebKit checks; type/lint/API/build, source security and completeness.
+  Actual 99-project HTTPS application passes wide/narrow/200%-text layout checks
+  with no overflow or application/API/CSP errors. Device comfort remains pending.
+- Frontend installed with private rollback copies and old assets retained.
+  Native binaries and source services remain unchanged; deployment metadata
+  records frontend provenance separately. No new release identifier.
+- See [coordination release iteration record](../../releases/agent-coordination-workspace.md#information-layout-follow-up--2026-10-15).
+
 ### 2026-10-15: [COMPLETED] Portfolio legibility and agent coordination at 99 projects
 
 - Michael's immersive screenshot shows similar unlabeled project icons without

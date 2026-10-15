@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { _roots, advance } from "@react-three/fiber";
 import type { RootState } from "@react-three/fiber";
 import type * as FiberModule from "@react-three/fiber";
-import { Mesh, MeshBasicMaterial, Vector3 } from "three";
+import { Box3, Euler, Mesh, MeshBasicMaterial, Vector3 } from "three";
 import type { Object3D } from "three";
 import type * as ThreeModule from "three";
 import type { CoordinationRequest, Project } from "../api/types";
@@ -17,6 +17,7 @@ import type { SceneCanvasProps } from "./SceneCanvas";
 const harness = vi.hoisted(() => ({
   rendererError: false, gpuError: false, gpuLoss: undefined as (() => void) | undefined,
   errors: [] as unknown[], canvases: [] as HTMLCanvasElement[],
+  textDraws: [] as { canvas: HTMLCanvasElement; text: string; left: number; top: number; right: number; bottom: number; size: number }[],
   destroyed: vi.fn(), ended: vi.fn(),
 }));
 
@@ -169,6 +170,54 @@ function dispatch(object: Object3D | undefined, name: string, event: object = {}
   handler?.({ stopPropagation: vi.fn(), ...event });
 }
 
+function descendsFrom(object: Object3D, ancestor: Object3D): boolean {
+  for (let parent = object.parent; parent; parent = parent.parent) if (parent === ancestor) return true;
+  return false;
+}
+
+function labelsInside(state: RootState, ancestor: Object3D): Object3D[] {
+  return objects(state).filter((object) => typeof object.userData.label === "string" && descendsFrom(object, ancestor));
+}
+
+function overlaps(a: Box3, b: Box3): boolean {
+  return Math.min(a.max.x, b.max.x) - Math.max(a.min.x, b.min.x) > 0.001 && Math.min(a.max.y, b.max.y) - Math.max(a.min.y, b.min.y) > 0.001;
+}
+
+function assertInformationLayout(state: RootState) {
+  state.scene.updateMatrixWorld(true);
+  const all = objects(state);
+  const group = (kind: string) => {
+    const found = all.find((object) => object.userData.kind === kind);
+    expect(found, kind).toBeDefined();
+    return found!;
+  };
+  const labelBounds = all.filter((object) => typeof object.userData.label === "string").map((object) => ({ title: String(object.userData.label), bounds: new Box3().setFromObject(object) }));
+  const handle = group("workspace-handle");
+  labelBounds.push({ title: "Reposition handle", bounds: new Box3().setFromObject(handle) });
+  for (let first = 0; first < labelBounds.length; first += 1) for (let second = first + 1; second < labelBounds.length; second += 1) {
+    const a = labelBounds[first]!;
+    const b = labelBounds[second]!;
+    expect(overlaps(a.bounds, b.bounds), `${a.title} overlaps ${b.title}`).toBe(false);
+  }
+  const boundsOf = (kind: string) => labelsInside(state, group(kind)).reduce((box, label) => box.union(new Box3().setFromObject(label)), new Box3());
+  const graph = boundsOf("workspace-sculpture");
+  for (const object of all.filter((candidate) => ["workspace-nodes", "agent-participant", "portfolio-region", "active-run-signal", "selected-node-indicator"].includes(String(candidate.userData.kind)))) graph.union(new Box3().setFromObject(object));
+  const left = boundsOf("coordination-surface");
+  const right = boundsOf("human-escalations");
+  const navigation = boundsOf("workspace-navigation");
+  const diagnostics = boundsOf("workspace-diagnostics");
+  expect(graph.min.x - left.max.x).toBeGreaterThan(0.05);
+  expect(right.min.x - graph.max.x).toBeGreaterThan(0.05);
+  expect(navigation.min.y - graph.max.y).toBeGreaterThan(0.05);
+  expect(graph.min.y - diagnostics.max.y).toBeGreaterThan(0.05);
+  const origin = group("workspace-placement").getWorldPosition(new Vector3());
+  for (const { title, bounds } of labelBounds) {
+    expect(Math.max(Math.abs(bounds.min.x - origin.x), Math.abs(bounds.max.x - origin.x)), title).toBeLessThan(1.6);
+    expect(bounds.min.y - origin.y, title).toBeGreaterThan(-1.25);
+    expect(bounds.max.y - origin.y, title).toBeLessThan(1.05);
+  }
+}
+
 async function ready() {
   await waitFor(() => { expect(screen.getByText("WebGL 2")).toBeInTheDocument(); });
   await waitFor(() => { expect(currentStates()[0]?.scene.children.length).toBeGreaterThan(0); });
@@ -182,17 +231,116 @@ beforeEach(() => {
   harness.gpuLoss = undefined;
   harness.errors.length = 0;
   harness.canvases.length = 0;
+  harness.textDraws.length = 0;
   harness.destroyed.mockClear();
   vi.stubGlobal("WebGL2RenderingContext", class {});
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-    beginPath: vi.fn(), roundRect: vi.fn(), fill: vi.fn(), stroke: vi.fn(), fillRect: vi.fn(), fillText: vi.fn(),
-    createRadialGradient: () => ({ addColorStop: vi.fn() }),
-  } as unknown as CanvasRenderingContext2D);
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (this: HTMLCanvasElement) {
+    const context = {
+      font: "16px system-ui", beginPath: vi.fn(), roundRect: vi.fn(), fill: vi.fn(), stroke: vi.fn(), fillRect: vi.fn(),
+      measureText(value: string) {
+        const size = Number(context.font.match(/(\d+)px/)?.[1] ?? 16);
+        const width = [...value].reduce((sum, character) => sum + (character === "W" ? 0.97 : character === "i" ? 0.25 : 0.53) * size, 0);
+        return { width, actualBoundingBoxLeft: 2, actualBoundingBoxRight: width + 2, actualBoundingBoxAscent: size * 0.8, actualBoundingBoxDescent: size * (/[gjpqy]/.test(value) ? 0.22 : 0.07) };
+      },
+      fillText: (value: string, x: number, y: number) => {
+        const metrics = context.measureText(value);
+        harness.textDraws.push({ canvas: this, text: value, left: x - metrics.actualBoundingBoxLeft, top: y - metrics.actualBoundingBoxAscent, right: x + metrics.actualBoundingBoxRight, bottom: y + metrics.actualBoundingBoxDescent, size: Number(context.font.match(/(\d+)px/)?.[1] ?? 16) });
+      },
+      createRadialGradient: () => ({ addColorStop: vi.fn() }),
+    };
+    return context as unknown as CanvasRenderingContext2D;
+  });
 });
 
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe("spatial workspace lifecycle with a CPU scene renderer", () => {
+  it("keeps simultaneous dense task/request information, human escalations, diagnostics and controls disjoint and fully pageable", async () => {
+    const session = new EventTarget() as EventTarget & XRSession;
+    session.end = () => { session.dispatchEvent(new Event("end")); return Promise.resolve(); };
+    Object.defineProperty(navigator, "xr", { value: { isSessionSupported: vi.fn().mockResolvedValue(true), requestSession: vi.fn().mockResolvedValue(session) }, configurable: true });
+    vi.stubGlobal("isSecureContext", true);
+    const longTitle = `Canonical title ${"W".repeat(64)} with the full independently recorded task identity.`;
+    const description = `Complete human task description. ${"Review the provider evidence carefully. ".repeat(8)}End of canonical description.`;
+    const denseTask = { ...task, title: longTitle, description, dependencies: ["cycle", "unavailable"] };
+    const tasks = [denseTask, { ...task, id: "cycle", dependencies: [task.id] }, ...Array.from({ length: 28 }, (_, index) => ({ ...task, id: `dense-${index}`, title: `Recorded work ${index}`, dependencies: [] }))];
+    const agents = Array.from({ length: 8 }, (_, index) => ({ ...agent, id: index ? `participant${index}` : agent.id, display_name: `Actual participant ${index}`, status: "idle" as const }));
+    const human: PortfolioSignal = { project_id: project.id, project_name: project.name, kind: "request", resource_type: "coordination_request", id: "human_context", title: "Human context is explicitly requested", detail: `Recorded escalation reason. ${"Only the named recipient can provide this context. ".repeat(5)}`, status: "open", owner_id: agent.id, owner_name: "Builder", recipient: { type: "human", id: "human_operator" }, recipient_name: "Michael", updated_at: task.updated_at, human_escalation: true, source_system: "codex" };
+    const work: PortfolioSignal = { ...human, id: "actual_work", kind: "run", resource_type: "run", title: "Actual provider verification", recipient: undefined, status: "running", human_escalation: false };
+    const request: CoordinationRequest = { ...task, id: "long_request", kind: "handoff", title: `Request ${"W".repeat(64)} title remains available in full`, body: `Full handoff body. ${"Review the complete provider report. ".repeat(8)}End of request.`, owner_id: agent.id, owner_type: "agent", recipient: { type: "agent", id: "reviewer" }, evidence_ids: [evidence.id], status: "resolved", response: { actor_id: "reviewer", body: "Response evidence is verified.", evidence_ids: [evidence.id], responded_at: task.updated_at }, resolution: { actor_id: agent.id, note: "Handoff accepted after inspection.", closed_at: task.updated_at } };
+    const inspect = vi.fn();
+    const common = { ...props, tasks, agents, requests: [request], signals: [work, human], onSignalSelect: inspect };
+    const view = render(<SceneCanvas {...common} />);
+    await ready();
+    fireEvent.click(await screen.findByRole("button", { name: "Enter immersive" }));
+    await waitFor(() => expect(currentStates()[1]?.scene.children.length).toBeGreaterThan(0));
+    const state = currentStates()[1]!;
+    const cameraPosition = state.camera.position.clone();
+    assertInformationLayout(state);
+    const taskGroup = objects(state).find((object) => object.userData.kind === "task-inspector")!;
+    const pageLabel = () => labelsInside(state, taskGroup).find((object) => /^review · \d+\//.test(String(object.userData.detail)))!;
+    const count = Number(String(pageLabel().userData.detail).split("/").at(-1));
+    const read: { title: string; body: string }[] = [];
+    for (let index = 0; index < count; index += 1) {
+      read.push({ title: String(pageLabel().userData.label), body: String(labelsInside(state, taskGroup).find((object) => object.userData.detail === "Recorded task and evidence")?.userData.label) });
+      act(() => dispatch(labelsInside(state, taskGroup).find((object) => object.userData.label === "Next page"), "onClick"));
+    }
+    const compact = (value: string) => value.replace(/\s+/g, "");
+    expect(compact(read.filter((page) => page.title === "Full task title").map((page) => page.body).join(""))).toBe(compact(longTitle));
+    expect(compact(read.filter((page) => page.title === longTitle).map((page) => page.body).join(""))).toBe(compact(description));
+    const humans = objects(state).find((object) => object.userData.kind === "human-escalations")!;
+    const humanHeader = () => labelsInside(state, humans).find((object) => object.userData.label === "Human escalations")!;
+    const humanCount = Number(String(humanHeader().userData.detail).match(/\d+\/(\d+)/)?.[1]);
+    const humanPages: string[] = [];
+    for (let index = 0; index < humanCount; index += 1) {
+      const body = labelsInside(state, humans).find((object) => object.userData.detail === `${project.name} · open`)!;
+      humanPages.push(String(body.userData.label));
+      if (index === 1) act(() => dispatch(body, "onClick"));
+      act(() => dispatch(humanHeader(), "onClick"));
+    }
+    expect(inspect).toHaveBeenCalledWith(human);
+    expect(compact(humanPages.join(""))).toContain(compact(human.detail!));
+    expect(compact(humanPages.join(""))).toContain(compact(human.updated_at));
+    view.rerender(<SceneCanvas {...common} selectedTaskId={null} selectedRequestId={request.id} />);
+    await waitFor(() => expect(objects(state).some((object) => object.userData.kind === "request-inspector")).toBe(true));
+    assertInformationLayout(state);
+    const requestGroup = objects(state).find((object) => object.userData.kind === "request-inspector")!;
+    const requestHeader = () => labelsInside(state, requestGroup).find((object) => object.userData.label === "Coordination request")!;
+    const requestCount = Number(String(requestHeader().userData.detail).split("/").at(-1));
+    const requestPages: string[] = [];
+    for (let index = 0; index < requestCount; index += 1) {
+      requestPages.push(String(labelsInside(state, requestGroup).find((object) => object.userData.detail === "Respond in the project inspector")?.userData.label));
+      act(() => dispatch(labelsInside(state, requestGroup).find((object) => object.userData.label === "Next request page"), "onClick"));
+    }
+    const fullRequest = compact(requestPages.join(""));
+    expect(fullRequest).toContain(compact(request.title));
+    expect(fullRequest).toContain(compact(request.body));
+    expect(fullRequest).toContain(compact(request.resolution!.note));
+    expect(fullRequest).toContain(`Responseevidencereference:${evidence.id}`);
+    act(() => {
+      state.camera.quaternion.setFromEuler(new Euler(0.12, 0.2, 0));
+      advance(2, true, state);
+      objects(state).filter((object) => object.userData.kind === "active-run-signal").forEach((object) => object.scale.setScalar(1.09));
+    });
+    assertInformationLayout(state);
+    expect(state.camera.position).toEqual(cameraPosition);
+    const canvases = new Set(harness.textDraws.map((draw) => draw.canvas));
+    for (const canvas of canvases) {
+      const ink = harness.textDraws.filter((draw) => draw.canvas === canvas);
+      for (const draw of ink) {
+        expect(draw.left, draw.text).toBeGreaterThanOrEqual(51.99);
+        expect(draw.right, draw.text).toBeLessThanOrEqual(736.01);
+        expect(draw.top, draw.text).toBeGreaterThanOrEqual(23.99);
+        expect(draw.bottom, draw.text).toBeLessThanOrEqual(242.01);
+      }
+      for (let index = 1; index < ink.length; index += 1) expect(ink[index]!.top - ink[index - 1]!.bottom, ink[index]!.text).toBeGreaterThan(0);
+    }
+    const wideReading = harness.textDraws.filter((draw) => /^W{16}$/.test(draw.text));
+    expect(wideReading.length).toBeGreaterThan(0);
+    expect(wideReading.filter((draw) => draw.size < 40).map((draw) => ({ size: draw.size, lines: harness.textDraws.filter((line) => line.canvas === draw.canvas).map((line) => line.text) }))).toEqual([]);
+    Reflect.deleteProperty(navigator, "xr");
+  });
+
   it("renders four semantic region hubs and routes expand, collapse and page picks through shared controls", async () => {
     const choose = vi.fn();
     const paginate = vi.fn();

@@ -298,6 +298,79 @@ test("inspects a real coordination request and confirms a versioned idempotent r
   await expect(page.getByRole("button", { name: /Need provider context · context · responded/ })).toBeVisible();
 });
 
+test("keeps necessary workspace information separate with long content and enlarged text", async ({ page }, testInfo) => {
+  await boot(page);
+  const longIdentity = `Participant_${"LongNativeIdentity".repeat(16)}`;
+  const longText = `${"Evidence and context remain available while coordinating this task. ".repeat(24)} End of complete evidence.`;
+  const request = { ...base, id: "request_dense", kind: "context", title: "Detailed handoff context", body: longText, owner_id: "agent_builder", owner_type: "agent", recipient: { type: "human", id: "human_operator" }, escalation_reason: "The operator holds the missing context.", task_id: "task_1", evidence_ids: ["evidence_1"], status: "open" };
+  const summaryItems = [
+    { kind: "blocker", resource_type: "task", id: "task_1", title: longIdentity, detail: longText, status: "blocked", updated_at: base.updated_at, owner_name: longIdentity, human_escalation: false },
+    { kind: "request", resource_type: "coordination_request", id: request.id, title: request.title, detail: request.escalation_reason, status: "open", updated_at: base.updated_at, owner_name: longIdentity, recipient_name: "Test Operator", recipient: request.recipient, human_escalation: true },
+  ];
+  await page.route("**/api/v1/overview?*", (route) => route.fulfill({ json: { project_id: "project_alpha", counts: { task: 1, attention: 1 }, event_cursor: 42, generated_at: new Date().toISOString(), sources: [], coordination: { complete: true, truncated: false, counts: { running_work: 0, agent_presence: 0, unfinished_tasks: 1, blocked_tasks: 1, canonical_blocked_tasks: 1, source_blocked_tasks: 0, requests: 1, reviews: 0, human_escalations: 1, human_approvals: 0 }, items: summaryItems } } }));
+  await page.route("**/api/v1/workspace?*", (route) => route.fulfill({ json: { project_id: "project_alpha", cursor: 42, generated_at: new Date().toISOString(), resources: {
+    tasks: [{ ...(data["/api/v1/tasks"]![0] as Record<string, unknown>), title: longIdentity, description: longText, dependencies: ["task_1", "unavailable_dependency"] }],
+    agents: data["/api/v1/agents"], runs: data["/api/v1/runs"], attention: data["/api/v1/attention"],
+    evidence: [{ ...(data["/api/v1/evidence"]![0] as Record<string, unknown>), summary: longText }], artifacts: [], claims: [], approvals: [], requests: [request],
+  }, sources: [] } }));
+
+  for (const viewport of [
+    { width: 1440, height: 1000, font: "100%" },
+    { width: 760, height: 640, font: "100%" },
+    { width: 390, height: 844, font: "100%" },
+    { width: 390, height: 844, font: "200%" },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/workspace?project=project_alpha&task=task_1");
+    await page.evaluate((font) => { document.documentElement.style.fontSize = font; }, viewport.font);
+    await page.getByText("Connection details", { exact: true }).click();
+    await expect(page.locator(".stream-health__body")).toBeVisible();
+    const [header, content] = await Promise.all([page.locator(".topbar").boundingBox(), page.locator("#main-content").boundingBox()]);
+    expect(header!.y + header!.height).toBeLessThanOrEqual(content!.y + 1);
+    const notice = page.locator(".workspace-scene__message");
+    await expect(notice).toContainText("Dependency details unavailable: 1");
+    await expect(notice).toContainText("dependency cycle: 1");
+    await expect(page.locator(".workspace-scene")).toHaveAttribute("data-renderer", /^(WebGPU|WebGL 2)$/, { timeout: 15_000 });
+    const boxes = await Promise.all(["toolbar", "message", "canvas", "hint"].map((name) => page.locator(`.workspace-scene__${name}`).boundingBox()));
+    for (const box of boxes) expect(box).not.toBeNull();
+    for (let index = 0; index < boxes.length - 1; index++) expect(boxes[index]!.y + boxes[index]!.height).toBeLessThanOrEqual(boxes[index + 1]!.y + 1);
+    expect(boxes[2]!.height).toBeGreaterThanOrEqual(300);
+    const recenter = page.getByRole("button", { name: "Recenter view" });
+    await recenter.scrollIntoViewIfNeeded();
+    expect(await recenter.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      return hit === element || hit !== null && element.contains(hit);
+    })).toBe(true);
+    for (const selectors of [[".observatory-coordination > section:first-child", ".observatory-escalations"], [".observatory-world", ".observatory-inspector"]]) {
+      const [a, b] = await Promise.all(selectors.map((selector) => page.locator(selector).boundingBox()));
+      expect(a && b && (a.x + a.width <= b.x + 1 || b.x + b.width <= a.x + 1 || a.y + a.height <= b.y + 1 || b.y + b.height <= a.y + 1)).toBe(true);
+    }
+    const overflow = await page.evaluate(() => ({ document: document.documentElement.scrollWidth > document.documentElement.clientWidth, cards: Array.from(document.querySelectorAll<HTMLElement>(".observatory-coordination button, .observatory-inspector")).some((element) => element.scrollWidth > element.clientWidth + 1) }));
+    expect(overflow).toEqual({ document: false, cards: false });
+    const inspector = page.getByRole("complementary", { name: "Workspace inspector" });
+    await expect(inspector).toContainText("End of complete evidence.");
+    await inspector.getByRole("button", { name: "Detailed handoff context · context · open" }).click();
+    await expect(page.getByRole("article", { name: "Request details" })).toContainText(longText);
+    await page.getByRole("textbox", { name: "Response or closure note" }).fill("The complete context is visible and ready for review.");
+    const trigger = page.getByRole("button", { name: "Review response" });
+    await trigger.click();
+    await expect(page.getByRole("alertdialog")).toBeFocused();
+    // Enlarged context can require scrolling; the decision must remain reachable and unobscured.
+    const confirm = page.getByRole("button", { name: "Confirm coordination decision" });
+    await confirm.scrollIntoViewIfNeeded();
+    await expect(confirm).toBeInViewport();
+    expect(await confirm.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      return hit === element || hit !== null && element.contains(hit);
+    })).toBe(true);
+    await page.getByRole("button", { name: "Keep reviewing request" }).click();
+    await expect(trigger).toBeFocused();
+    if (viewport.font === "200%") await page.locator(".observatory-world").screenshot({ path: testInfo.outputPath("necessary-information-enlarged.png") });
+  }
+});
+
 test("unfolds the observatory into task evidence and a real dependency", async ({ page }, testInfo) => {
   await boot(page);
   await page.getByRole("link", { name: "Observatory" }).click();

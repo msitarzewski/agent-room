@@ -6,9 +6,43 @@
 
 **Substate:** IDLE
 
-**Task status:** AGENT-FIRST COORDINATION WORKSPACE — COMPLETE LOCALLY
+**Task status:** INFORMATION LAYOUT — COMPLETE LOCALLY
 
 ## Current Task
+
+Michael's necessary-information overlap follow-up is implemented on
+`feat/spatial-workspace`, extending baseline `14b5c43`. Desktop connection
+header/details, toolbar, notices, canvas, and hint reserve separate flow space.
+Long identities wrap; narrow/200%-text inspectors and confirmation controls stay
+reachable. Confirmation receives focus and returns it to its trigger on cancel,
+including Safari's click-focus behavior.
+
+Immersive graph/node/label bounds fit a reserved central slot. Coordination,
+human escalations, task/request inspector, navigation, diagnostics, and handle
+use separate spaces. Texture text fits measured glyph ink; complete long task
+titles and request/evidence/source context remain pageable. Existing renderer,
+authorization, and versioned actions are reused; no new dependency or service.
+
+Verification passes: 140 frontend tests, 95.24% line / 84.63% branch coverage,
+30 native Chromium/WebKit browser checks, type/lint/strict API/build, eleven
+security rules, npm advisory and Git-visible secret/completeness checks. Actual
+authenticated tailnet HTTPS verifies the existing task within the 99-project
+portfolio at 1440px, 760px, and 390px/200% text: separate information, reachable
+controls, no overflow/application/API/CSP errors. Private screenshots and
+rollback copies are ignored. Physical headset comfort/frame pacing remain
+unmeasured; CPU scene geometry and browser checks do not substitute for them.
+
+Verified frontend assets are installed atomically, retaining older hashed assets
+for open tabs. Native binaries remain the verified `14b5c43` build; no daemon,
+Sentry publisher, database, identity configuration, or permissions changed.
+Frontend revision/hashes and current activation phase are recorded separately in
+`data/local/deployment.json` and
+`data/local/coordination/logs/ux-layout-build.json`; check those on recovery.
+The authorized source checkpoint and final clean frontend activation are
+recorded in that private metadata, which is authoritative for deployed artifact
+state. See [information layout follow-up](releases/agent-coordination-workspace.md#information-layout-follow-up--2026-10-15).
+
+## Previous Local Release
 
 The approved iteration is implemented and verified locally. Four semantic
 regions replace the anonymous 99-project field, with twelve-project pages,

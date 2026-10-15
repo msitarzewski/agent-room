@@ -2,13 +2,47 @@ import { describe, expect, it } from "vitest";
 import type { CoordinationSummary, Project, Task } from "../api/types";
 import { agent, attention, run, task } from "../test/fixtures";
 import type { PortfolioEntry } from "./data";
-import { buildWorkspaceScene, identityHash, projectPosition, shortLabel, textPages, visibleLabels, wrapLabel } from "./scene";
+import { buildWorkspaceScene, fitImmersiveGraph, identityHash, nodeLabelLayout, projectPosition, shortLabel, textPages, visibleLabels, wrapLabel } from "./scene";
 
 const project: Project = { id: task.project_id, name: "Observatory", version: 1, updated_at: task.updated_at, capabilities: [] };
 const second: Project = { ...project, id: "project_beta", name: "Another project" };
 const makeTask = (id: string, dependencies: string[] = []): Task => ({ ...task, id, dependencies });
 
 describe("workspace projection", () => {
+  it("fits the actual graph and label extents into the center reading slot without depending on a radius estimate", () => {
+    const dense = buildWorkspaceScene([project], project.id, Array.from({ length: 80 }, (_, index) => makeTask(`wide${index}`)), [], [], { agents: Array.from({ length: 16 }, (_, index) => ({ ...agent, id: `agent${index}` })) });
+    const fit = fitImmersiveGraph(dense.nodes);
+    expect(fit.scale).toBeGreaterThan(0);
+    expect(fit.scale).toBeLessThan(0.17);
+    for (const node of dense.nodes) {
+      const label = nodeLabelLayout(node);
+      const x = label.position[0] * fit.scale + fit.position[0];
+      const y = label.position[1] * fit.scale + fit.position[1];
+      expect(x - label.width / 2 * fit.scale).toBeGreaterThanOrEqual(-0.55 - 1e-9);
+      expect(x + label.width / 2 * fit.scale).toBeLessThanOrEqual(0.55 + 1e-9);
+      expect(y - label.width / 6 * fit.scale).toBeGreaterThanOrEqual(-0.52 - 1e-9);
+      expect(y + label.width / 6 * fit.scale).toBeLessThanOrEqual(0.48 + 1e-9);
+    }
+    const sparse = buildWorkspaceScene([project], project.id, [], [], []);
+    expect(fitImmersiveGraph(sparse.nodes).scale).toBe(0.17);
+    expect(fitImmersiveGraph([]).position.every(Number.isFinite)).toBe(true);
+  });
+
+  it("reserves region text and page control extents when fitting collapsed or unfolded portfolios", () => {
+    const collapsed = buildWorkspaceScene([project], null, [], [], [], { portfolio: {} });
+    const opened = buildWorkspaceScene(Array.from({ length: 30 }, (_, index) => ({ ...project, id: `project${index}` })), null, [], [], [], { portfolio: {}, region: "unknown", page: 1 });
+    for (const scene of [collapsed, opened]) {
+      const fit = fitImmersiveGraph(scene.nodes);
+      for (const node of scene.nodes) {
+        const label = nodeLabelLayout(node);
+        expect(Math.abs(label.position[0] * fit.scale + fit.position[0]) + label.width / 2 * fit.scale).toBeLessThanOrEqual(0.55 + 1e-9);
+        expect(label.position[1] * fit.scale + fit.position[1] - label.width / 6 * fit.scale).toBeGreaterThanOrEqual(-0.52 - 1e-9);
+        expect(label.position[1] * fit.scale + fit.position[1] + label.width / 6 * fit.scale).toBeLessThanOrEqual(0.48 + 1e-9);
+      }
+    }
+    expect(opened.nodes.filter((node) => node.action === "next" || node.action === "previous").map((node) => nodeLabelLayout(node).width)).toEqual([2.4, 2.4]);
+  });
+
   it("keeps 99 contexts collapsed into four named hubs and unfolds stable nonoverlapping pages", () => {
     const now = Date.now();
     const many = Array.from({ length: 99 }, (_, index) => ({ ...project, id: `project_${String(index).padStart(3, "0")}`, name: `Project ${index}` }));

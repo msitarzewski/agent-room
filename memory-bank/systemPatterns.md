@@ -267,7 +267,7 @@ and queue are independent of Sentry's board, watcher, history, and backups.
 
 ## Desktop and Immersive Resource Ownership
 
-`web/src/workspace/SceneCanvas.tsx:458` owns a desktop WebGPU renderer with WebGL2
+`web/src/workspace/SceneCanvas.tsx:576` owns a desktop WebGPU renderer with WebGL2
 fallback and a separate WebGL XR stage sharing domain state. The installed
 Fiber/XR versions require the WebGL XR manager interface. Request immersive
 sessions synchronously within user activation; handle cancellation and clean
@@ -278,3 +278,10 @@ Project identity determines stable geography. Actual dependency edges determine
 task layout. Instancing, bounded labels, demand rendering, visibility pause,
 and reduced motion limit scene work. The pinned production build removes the
 upstream opt-in emulator branch and fails if its reviewed shape changes.
+
+Desktop information uses normal flow: connection details and the scene toolbar,
+notice, canvas and hint reserve their own rows in `web/src/styles.css:41`.
+Immersive fitting reuses label geometry in `web/src/workspace/scene.ts:48` and
+measures text ink in `web/src/workspace/SceneCanvas.tsx:62`. Keep the central
+diagram, side information and control bands disjoint; preserve long recorded
+context through pages instead of reducing it to an inaccessible clipped label.

@@ -44,6 +44,37 @@ export interface WorkspaceScene {
 
 export interface SceneOptions { portfolio?: Record<string, PortfolioEntry>; region?: PortfolioRegion | null; page?: number; now?: number; agents?: Agent[] }
 
+/** The same label geometry feeds rendering and the immersive information fit. */
+export function nodeLabelLayout(node: SceneNode): { position: Point3; width: number } {
+  if (node.kind === "region") return {
+    position: [node.position[0], node.position[1] + (node.action === "expand" ? -1.15 : 0), node.position[2] + 0.2],
+    width: node.action === "next" || node.action === "previous" ? 2.4 : 3.9,
+  };
+  return { position: [node.position[0], node.position[1] - (node.kind === "project" ? 0.85 : 0.7), node.position[2] + 0.12], width: 2.55 };
+}
+
+/** Fit recorded information into the central slot; never change the headset camera. */
+export function fitImmersiveGraph(nodes: SceneNode[]): { position: Point3; scale: number } {
+  if (!nodes.length) return { position: [0, -0.02, 0], scale: 0.17 };
+  const bounds = nodes.map((node) => {
+    const label = nodeLabelLayout(node);
+    // Covers rotated glyphs, the 0.508 selection ring and the 0.515 maximum pulse.
+    const glyphRadius = 0.55;
+    return {
+      left: Math.min(node.position[0] - glyphRadius, label.position[0] - label.width / 2),
+      right: Math.max(node.position[0] + glyphRadius, label.position[0] + label.width / 2),
+      bottom: Math.min(node.position[1] - glyphRadius, label.position[1] - label.width / 6),
+      top: Math.max(node.position[1] + glyphRadius, label.position[1] + label.width / 6),
+    };
+  });
+  const left = Math.min(...bounds.map((item) => item.left));
+  const right = Math.max(...bounds.map((item) => item.right));
+  const bottom = Math.min(...bounds.map((item) => item.bottom));
+  const top = Math.max(...bounds.map((item) => item.top));
+  const scale = Math.min(0.17, 1.1 / (right - left), 1 / (top - bottom));
+  return { scale, position: [-(left + right) / 2 * scale, -0.02 - (bottom + top) / 2 * scale, 0] };
+}
+
 function portfolioScene(projects: Project[], options: SceneOptions): WorkspaceScene {
   const entries = options.portfolio ?? {};
   const groups: Record<PortfolioRegion, Project[]> = { coordination: [], work: [], quiet: [], unknown: [] };

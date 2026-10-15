@@ -10,7 +10,7 @@ import {
 import type { Group, InstancedMesh, Mesh, Texture, WebXRManager } from "three";
 import type { Agent, Artifact, AttentionItem, CoordinationRequest, Evidence, Project, Run, Task } from "../api/types";
 import type { PortfolioEntry, PortfolioRegion, PortfolioSignal } from "./data";
-import { buildWorkspaceScene, shortLabel, textPages, visibleLabels, wrapLabel } from "./scene";
+import { buildWorkspaceScene, fitImmersiveGraph, nodeLabelLayout, shortLabel, textPages, visibleLabels, wrapLabel } from "./scene";
 import type { Point3, SceneNode, WorkspaceScene } from "./scene";
 import { gripGain, gripTranslation, requestImmersiveSession, sessionError } from "./xrInput";
 
@@ -59,7 +59,27 @@ class GraphicsBoundary extends Component<{ children: ReactNode; onFailure: () =>
   render() { return this.state.failed ? null : this.props.children; }
 }
 
-function labelTexture(title: string, detail: string, color: string, prominent: boolean): CanvasTexture {
+function paintFittedText(context: CanvasRenderingContext2D, lines: string[], preferredSize: number, weight: number, top: number, height: number) {
+  let size = preferredSize;
+  let metrics: TextMetrics[];
+  let ascent: number;
+  let descent: number;
+  let left: number;
+  let right: number;
+  do {
+    context.font = `${weight} ${size}px system-ui, sans-serif`;
+    metrics = lines.map((line) => context.measureText(line));
+    ascent = Math.max(...metrics.map((metric) => metric.actualBoundingBoxAscent));
+    descent = Math.max(...metrics.map((metric) => metric.actualBoundingBoxDescent));
+    left = Math.max(0, ...metrics.map((metric) => metric.actualBoundingBoxLeft));
+    right = Math.max(...metrics.map((metric) => metric.actualBoundingBoxRight));
+    if (left + right <= 684 && (ascent + descent) * lines.length + (lines.length - 1) * 8 <= height) break;
+    size -= 1;
+  } while (size >= 12);
+  lines.forEach((line, index) => context.fillText(line, 52 + left, top + ascent + index * (ascent + descent + 8)));
+}
+
+function labelTexture(title: string, detail: string, color: string, prominent: boolean, reading: boolean): CanvasTexture {
   const width = 768;
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -75,20 +95,18 @@ function labelTexture(title: string, detail: string, color: string, prominent: b
   context.stroke();
   context.fillStyle = color;
   context.fillRect(28, 34, 5, 175);
-  context.font = `500 ${prominent ? 72 : 58}px system-ui, sans-serif`;
   context.fillStyle = "#edf2ff";
-  const lines = wrapLabel(title, prominent ? 18 : 22, 3);
-  lines.forEach((line, index) => context.fillText(line, 52, 66 + index * 54));
+  const lines = wrapLabel(title, prominent ? 18 : reading ? 16 : 22, 3);
+  paintFittedText(context, lines, prominent ? 72 : 58, 500, 24, 172);
   context.fillStyle = color;
-  context.font = `400 ${prominent ? 40 : 32}px system-ui, sans-serif`;
-  context.fillText(shortLabel(detail, prominent ? 32 : 36), 52, 224);
+  paintFittedText(context, [shortLabel(detail, prominent ? 32 : 36)], prominent ? 40 : 32, 400, 210, 32);
   const texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;
   return texture;
 }
 
-function useTextTexture(title: string, detail: string, color: string, prominent: boolean): Texture {
-  const texture = useMemo(() => labelTexture(title, detail, color, prominent), [title, detail, color, prominent]);
+function useTextTexture(title: string, detail: string, color: string, prominent: boolean, reading: boolean): Texture {
+  const texture = useMemo(() => labelTexture(title, detail, color, prominent, reading), [title, detail, color, prominent, reading]);
   useEffect(() => () => texture.dispose(), [texture]);
   return texture;
 }
@@ -114,10 +132,10 @@ function useLightTexture(): Texture {
   return texture;
 }
 
-function Label({ title, detail, color, position, width = 1.7, prominent = false, onClick }: {
-  title: string; detail: string; color: string; position: Point3; width?: number; prominent?: boolean; onClick?: () => void;
+function Label({ title, detail, color, position, width = 1.7, prominent = false, reading = false, onClick }: {
+  title: string; detail: string; color: string; position: Point3; width?: number; prominent?: boolean; reading?: boolean; onClick?: () => void;
 }) {
-  const texture = useTextTexture(title, detail, color, prominent);
+  const texture = useTextTexture(title, detail, color, prominent, reading);
   const mesh = useRef<Mesh>(null);
   useFrame(({ camera }) => { if (mesh.current) mesh.current.quaternion.copy(camera.quaternion); });
   return <mesh ref={mesh} position={position} userData={{ label: title, detail }} onClick={onClick ? (event) => { event.stopPropagation(); onClick(); } : undefined}>
@@ -388,23 +406,25 @@ function SpatialPlacement({ children }: { children: ReactNode }) {
     const source = recent.current && performance.now() - recent.current.time < 150 ? recent.current.source : undefined;
     held.current = { source };
   };
-  return <group ref={group} position={[0, 1.45, -2.6]}>
+  return <group ref={group} position={[0, 1.45, -2.6]} userData={{ kind: "workspace-placement" }}>
     {children}
-    <mesh userData={{ kind: "workspace-handle" }} position={[0, -0.9, 0.12]} onPointerDown={grab} onPointerUp={() => { held.current = null; }}>
+    <mesh userData={{ kind: "workspace-handle" }} position={[0, -0.9, 0.12]} rotation={[0, 0, Math.PI / 2]} onPointerDown={grab} onPointerUp={() => { held.current = null; }}>
       <capsuleGeometry args={[0.025, 0.32, 4, 8]} />
       <meshBasicMaterial color="#a4b9e6" />
     </mesh>
-    <Label title="Pinch handle to reposition" detail="Your viewpoint stays still" color="#a4b9e6" position={[0, -1.05, 0]} width={0.75} />
+    <Label title="Pinch handle to reposition" detail="Your viewpoint stays still" color="#a4b9e6" position={[0, -1.09, 0.15]} width={0.65} />
   </group>;
 }
 
 function TaskInspector({ task, runs, evidence = [], artifacts = [] }: { task: Task; runs: Run[]; evidence?: Evidence[]; artifacts?: Artifact[] }) {
   const [page, setPage] = useState(0);
+  const titleNeedsPage = wrapLabel(task.title, 22, 3).join(" ") !== task.title.trim().replace(/\s+/g, " ");
   const taskRuns = runs.filter((run) => run.project_id === task.project_id && run.task_id === task.id);
   const runIds = new Set(taskRuns.map((run) => run.id));
   const linked = (item: Evidence | Artifact) => item.project_id === task.project_id && (item.task_id === task.id || (item.run_id !== undefined && runIds.has(item.run_id)));
   const entries = [
     { title: task.title, detail: task.blocked_reason ?? task.description ?? `Source: ${task.source.system} · version ${task.version}` },
+    ...(titleNeedsPage ? [{ title: "Full task title", detail: task.title }] : []),
     ...(task.source_status ? [{ title: `Source reports ${task.source_status}`, detail: `Agent Room: ${task.status} · Review: ${task.review_state ?? "not requested"} · Approval: ${task.approval_state ?? "not required"}` }] : []),
     ...(task.source_observation ? [
       { title: "Latest source title", detail: task.source_observation.title },
@@ -423,24 +443,24 @@ function TaskInspector({ task, runs, evidence = [], artifacts = [] }: { task: Ta
       { title: "Artifact reference", detail: item.uri },
     ]),
     ...(task.source.external_url ? [{ title: "Task source reference", detail: task.source.external_url }] : []),
-  ].flatMap((entry) => textPages(entry.detail).map((detail) => ({ ...entry, detail })));
+  ].flatMap((entry) => textPages(entry.detail, 16).map((detail) => ({ ...entry, detail })));
   const index = Math.min(page, entries.length - 1);
   const entry = entries[index];
-  return <group position={[0, 0, 0]}>
-    <Label title={entry?.title ?? task.title} detail={`${task.status} · ${index + 1}/${entries.length}`} color="#b9d4ff" position={[1.17, 0.1, 0.15]} width={0.92} />
-    <Label title={entry?.detail ?? ""} detail="Recorded task and evidence" color="#a5b6d6" position={[1.17, -0.27, 0.15]} width={0.92} />
-    {entries.length > 1 && <Label title="Next page" detail="Pinch to turn page" color="#9be7d2" position={[1.17, -0.61, 0.15]} width={0.65}
+  return <group userData={{ kind: "task-inspector", task_id: task.id }}>
+    <Label title={entry?.title ?? task.title} detail={`${task.status} · ${index + 1}/${entries.length}`} color="#b9d4ff" position={[1.1, -0.08, 0.15]} width={0.9} />
+    <Label title={entry?.detail ?? ""} detail="Recorded task and evidence" color="#a5b6d6" position={[1.1, -0.44, 0.15]} width={0.9} reading />
+    {entries.length > 1 && <Label title="Next page" detail="Pinch to turn page" color="#9be7d2" position={[1.1, -0.78, 0.15]} width={0.65}
       onClick={() => { setPage((value) => (value + 1) % entries.length); }} />}
   </group>;
 }
 
 function RegionHub({ node, onSelect }: { node: SceneNode; onSelect: (node: SceneNode) => void }) {
-  return <group position={node.position}>
-    {node.action === "expand" && <mesh userData={{ kind: "portfolio-region", region: node.region, action: node.action }} onClick={(event) => { event.stopPropagation(); onSelect(node); }} rotation={[0.2, 0.4, 0]}>
+  return <group>
+    {node.action === "expand" && <mesh position={node.position} userData={{ kind: "portfolio-region", region: node.region, action: node.action }} onClick={(event) => { event.stopPropagation(); onSelect(node); }} rotation={[0.2, 0.4, 0]}>
       {node.region === "quiet" ? <torusGeometry args={[0.44, 0.04, 8, 40]} /> : node.region === "work" ? <ringGeometry args={[0.27, 0.5, 3]} /> : <octahedronGeometry args={[0.47, 0]} />}
       <meshStandardMaterial color={node.color} metalness={0.45} roughness={0.25} wireframe={node.region === "unknown"} />
     </mesh>}
-    <Label title={node.title} detail={node.subtitle} color={node.color} position={[0, node.action === "expand" ? -1.15 : 0, 0.2]} width={node.action === "next" || node.action === "previous" ? 2.4 : 3.9} prominent onClick={() => onSelect(node)} />
+    <Label title={node.title} detail={node.subtitle} color={node.color} {...nodeLabelLayout(node)} prominent onClick={() => onSelect(node)} />
   </group>;
 }
 
@@ -456,19 +476,20 @@ function CoordinationSurface({ signals, human, compact = false, onSelect }: { si
   const [page, setPage] = useState(0);
   const entries = signals.flatMap((signal) => {
     const attribution = `${signal.owner_name ?? signal.owner_id ?? "Owner not recorded"}${signal.recipient ? ` → ${signal.recipient_name ?? signal.recipient.id} (${signal.recipient.type})` : ""}`;
-    return textPages(`${attribution}. ${signal.title}. ${signal.detail ?? ""}`).map((body) => ({ signal, body }));
+    return textPages(`${attribution}. ${signal.title}. ${signal.detail ?? ""}. Source: ${signal.source_system ?? "Agent Room"}. Recorded ${signal.updated_at}`, 16).map((body) => ({ signal, body }));
   });
   const index = entries.length ? page % entries.length : 0;
   const entry = entries[index];
-  const x = human ? 1.24 : -1.24;
-  const width = human ? 0.78 : 1.02;
+  const x = human ? 1.1 : -1.1;
+  const width = 0.9;
   const color = human ? "#cfbaff" : "#a5e9d6";
-  return <group position={[0, compact ? 0.62 : 0, 0]} userData={{ kind: human ? "human-escalations" : "coordination-surface" }}>
-    <Label title={human ? "Human escalations" : "Coordination"} detail={`${signals.length} authorized summary records`} color={color} position={[x, 0.51, 0.2]} width={width} />
-    <Label title={entry?.body ?? (human ? "No explicit human escalation recorded" : "No agent work or request recorded")} detail={entry ? `${entry.signal.project_name} · ${entry.signal.status}` : "Coverage is shown separately"} color={color} position={[x, 0.1, 0.2]} width={width}
+  const turn = () => setPage((value) => value + 1);
+  return <group userData={{ kind: human ? "human-escalations" : "coordination-surface" }}>
+    <Label title={human ? "Human escalations" : "Coordination"} detail={compact && entries.length > 1 ? `${signals.length} records · ${index + 1}/${entries.length} · next` : `${signals.length} authorized summary records`} color={color} position={[x, 0.6, 0.15]} width={compact ? 0.76 : width} onClick={compact && entries.length > 1 ? turn : undefined} />
+    <Label title={entry?.body ?? (human ? "No explicit human escalation recorded" : "No agent work or request recorded")} detail={entry ? `${entry.signal.project_name} · ${entry.signal.status}` : "Coverage is shown separately"} color={color} position={[x, compact ? 0.28 : 0.23, 0.15]} width={width} reading
       onClick={entry && onSelect ? () => onSelect(entry.signal) : undefined} />
-    {entry && !compact && <Label title={entry.signal.source_system ? `Source: ${entry.signal.source_system}` : "Recorded in Agent Room"} detail={entry.signal.updated_at} color="#b5c8de" position={[x, -0.29, 0.2]} width={width} />}
-    {entries.length > 1 && <Label title="Next coordination page" detail={`${index + 1}/${entries.length}`} color={color} position={[x, compact ? 0.85 : -0.65, 0.2]} width={0.7} onClick={() => setPage((value) => value + 1)} />}
+    {entry && !compact && <Label title={entry.signal.source_system ? `Source: ${entry.signal.source_system}` : "Recorded in Agent Room"} detail={entry.signal.updated_at} color="#b5c8de" position={[x, -0.14, 0.15]} width={width} />}
+    {entries.length > 1 && !compact && <Label title="Next coordination page" detail={`${index + 1}/${entries.length}`} color={color} position={[x, -0.51, 0.15]} width={0.7} onClick={turn} />}
   </group>;
 }
 
@@ -485,11 +506,11 @@ function RequestInspector({ request, agents = [], signals = [] }: { request: Coo
     ...request.evidence_ids.map((id) => `Evidence reference: ${id}`),
     ...(request.response?.evidence_ids ?? []).map((id) => `Response evidence reference: ${id}`),
     `Request recorded ${request.updated_at} · version ${request.version}`,
-  ].flatMap((value) => textPages(value));
+  ].flatMap((value) => textPages(value, 16));
   return <group userData={{ kind: "request-inspector", request_id: request.id }}>
-    <Label title="Coordination request" detail={`${request.status} · ${page + 1}/${pages.length}`} color="#c7b4ef" position={[1.17, 0.1, 0.15]} width={0.92} />
-    <Label title={pages[page] ?? ""} detail="Respond in the project inspector" color="#b9c9de" position={[1.17, -0.27, 0.15]} width={0.92} />
-    <Label title="Next request page" detail="Pinch to turn page" color="#9be7d2" position={[1.17, -0.61, 0.15]} width={0.65} onClick={() => setPage((value) => (value + 1) % pages.length)} />
+    <Label title="Coordination request" detail={`${request.status} · ${page + 1}/${pages.length}`} color="#c7b4ef" position={[1.1, -0.08, 0.15]} width={0.9} />
+    <Label title={pages[page] ?? ""} detail="Respond in the project inspector" color="#b9c9de" position={[1.1, -0.44, 0.15]} width={0.9} reading />
+    <Label title="Next request page" detail="Pinch to turn page" color="#9be7d2" position={[1.1, -0.78, 0.15]} width={0.65} onClick={() => setPage((value) => (value + 1) % pages.length)} />
   </group>;
 }
 
@@ -519,24 +540,27 @@ function SceneContent(props: SceneContentProps) {
     {projection.nodes.filter((node) => node.kind === "region").map((node) => <RegionHub key={node.id} node={node} onSelect={select} />)}
     {projection.nodes.filter((node) => node.kind === "agent").map((node) => <Participant key={node.id} node={node} onSelect={select} />)}
     {projection.nodes.filter((node) => node.active).map((node) => <SignalRing key={node.id} node={node} animate={animate && !reducedMotion} />)}
-    {selectedNode && <mesh position={selectedNode.position} raycast={() => undefined}>
+    {selectedNode && <mesh position={selectedNode.position} userData={{ kind: "selected-node-indicator", resource_id: selectedNode.id }} raycast={() => undefined}>
       <torusGeometry args={[selectedNode.kind === "project" ? 0.5 : 0.34, 0.008, 6, 48]} />
       <meshBasicMaterial color="#e5edff" transparent opacity={0.8} toneMapped={false} />
     </mesh>}
     {labels.filter((node) => node.kind !== "region").map((node) => <Label key={node.id} title={node.kind === "agent" ? `Agent · ${node.title}` : node.title} detail={node.attention ? `${node.subtitle} · ${node.attention} attention` : node.subtitle}
-      color={node.color} position={[node.position[0], node.position[1] - (node.kind === "project" ? 0.85 : 0.7), node.position[2] + 0.12]}
-      width={2.55} prominent onClick={() => { select(node); }} />)}
+      color={node.color} {...nodeLabelLayout(node)} prominent onClick={() => { select(node); }} />)}
   </group>;
   if (!immersive) return <>
     <DesktopNavigation nodes={projection.nodes} resetToken={resetToken} reducedMotion={reducedMotion} />
     {sculpture}
   </>;
   return <SpatialPlacement>
-    <group scale={Math.min(0.17, 1.5 / projection.radius)}>{sculpture}</group>
-    <Label title="Exit immersive" detail="Return to desktop" color="#bbceef" position={[0.48, 0.9, 0.1]} width={0.65} onClick={props.onExit} />
-    {props.onBack && <Label title="All projects" detail="Return to portfolio" color="#b3d9ff" position={[-0.48, 0.9, 0.1]} width={0.65} onClick={props.onBack} />}
-    {projection.unresolvedDependencies > 0 && <Label title="Dependency details unavailable" detail={`${projection.unresolvedDependencies} declared links`} color="#ffca92" position={[-0.48, 0.55, 0.1]} width={0.75} />}
-    {projection.cycleAffectedTaskIds.length > 0 && <Label title="Tasks in / downstream of cycle" detail={`${projection.cycleAffectedTaskIds.length} tasks`} color="#ffca92" position={[0.48, 0.55, 0.1]} width={0.75} />}
+    <group {...fitImmersiveGraph(projection.nodes)} userData={{ kind: "workspace-sculpture" }}>{sculpture}</group>
+    <group userData={{ kind: "workspace-navigation" }}>
+      <Label title="Exit immersive" detail="Return to desktop" color="#bbceef" position={[0.29, 0.88, 0.15]} width={0.52} onClick={props.onExit} />
+      {props.onBack && <Label title="All projects" detail="Return to portfolio" color="#b3d9ff" position={[-0.29, 0.88, 0.15]} width={0.52} onClick={props.onBack} />}
+    </group>
+    <group userData={{ kind: "workspace-diagnostics" }}>
+      {projection.unresolvedDependencies > 0 && <Label title="Dependency details unavailable" detail={`${projection.unresolvedDependencies} declared links`} color="#ffca92" position={[-0.29, -0.68, 0.15]} width={0.52} />}
+      {projection.cycleAffectedTaskIds.length > 0 && <Label title="Tasks in / downstream of cycle" detail={`${projection.cycleAffectedTaskIds.length} tasks`} color="#ffca92" position={[0.29, -0.68, 0.15]} width={0.52} />}
+    </group>
     <CoordinationSurface signals={(props.signals ?? []).filter((item) => !item.human_escalation)} human={false} onSelect={props.onSignalSelect} />
     <CoordinationSurface signals={(props.signals ?? []).filter((item) => item.human_escalation)} human compact={Boolean(selectedTask || selectedRequest)} onSelect={props.onSignalSelect} />
     {selectedTask ? <TaskInspector key={selectedTask.id} task={selectedTask} runs={props.runs} evidence={props.evidence} artifacts={props.artifacts} /> : selectedRequest ? <RequestInspector key={`${selectedRequest.id}:${selectedRequest.version}`} request={selectedRequest} agents={props.agents} signals={props.signals} /> : null}

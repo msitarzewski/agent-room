@@ -62,6 +62,10 @@ After QA, atomically install the binaries and restart only `local.agentroom`;
 confirm readiness before publishing the new assets and index. Keep old hashed
 assets available for already open tabs. Native daemon changes require
 `launchctl kickstart` after installation.
+Frontend-only updates can retain the previously verified native binaries without
+a daemon restart. Record frontend revision, dirty/clean status, file hashes and
+activation phase separately from native provenance in ignored deployment/build
+metadata; never imply both artifacts share a revision when only web is rebuilt.
 Use the existing CLI with `--config data/local/agentroom.conf` for migrations,
 doctor, and scoped administration. Keep private snapshots of both `agentroom`
 and `agentroom_identity` databases before changes; the initial restart snapshots
