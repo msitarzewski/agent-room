@@ -4,9 +4,9 @@
 
 **State:** DOCS
 
-**Substate:** RUNNING
+**Substate:** IDLE
 
-**Task status:** AGENT-FIRST COORDINATION WORKSPACE — LOCAL ACCEPTANCE PASSED
+**Task status:** AGENT-FIRST COORDINATION WORKSPACE — COMPLETE LOCALLY
 
 ## Current Task
 
@@ -27,12 +27,21 @@ Runtime source-only and audit privacy findings are fixed. Existing 16 other
 human task records are unchanged. Sentry remains independently supervised with
 99 exact source-only project scopes and no delivery backlog/quarantine.
 
-Remaining operational steps: commit the reviewed implementation/docs, rebuild
-from the clean revision, verify native/web provenance and readiness, close root
-presence, revoke temporary acceptance credentials, and record final recovery
-state privately. Physical Vision Pro interaction/comfort/frame pacing and pipx
-promotion remain separate. No provider-hook service or autonomous executor was
-installed. Keep private runtime/evidence ignored; read the release record below.
+Implementation commit `796c235` is verified from a clean checkout: native and
+Linux daemon/CLI provenance records the exact revision with vcs.modified=false;
+the pinned web build matches installed assets byte for byte. Readiness is 204,
+HTTPS workspace is 200, and committed-build evidence is attached to the actual
+review task. Both temporary participants are disconnected, with root session
+idle and peer session closed. Their queues are empty; both acceptance tokens
+are revoked and raw credentials removed. Durable identity state is retained.
+
+The final documentation checkpoint uses the same clean rebuild/activation
+procedure. Exact deployed revision, hashes, and recovery phase are private in
+`data/local/coordination/final-state.json` and `data/local/deployment.json`;
+check those on recovery before assuming the last operation finished. No remote
+activation, provider-hook service, or autonomous executor is claimed. Next are
+physical Vision Pro interaction/comfort/frame pacing, deliberate runtime
+onboarding, and verified pipx promotion. Keep private runtime/evidence ignored.
 
 2026-10-15: Michael approved proceeding with the agent-first plan. Implementation
 is authorized on the current feature branch: typed machine requests, narrowly

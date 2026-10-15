@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-15
 
-**Implementation status:** Founding release applied; local spatial release candidate verified and ready for review
+**Implementation status:** Founding, spatial, and agent coordination capabilities verified locally; device acceptance and signed remote promotion separate
 
 ## Known Environment
 

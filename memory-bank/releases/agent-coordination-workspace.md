@@ -1,7 +1,7 @@
 # Agent coordination workspace
 
 **Updated:** 2026-10-15
-**State:** DOCS / RUNNING — local acceptance passed; commit/clean build next
+**State:** COMPLETE LOCALLY — checklist 9/9; device/promotion checks separate
 **Authorization:** Michael approved the agent-first coordination and portfolio-legibility plan after clarifying that agents are the primary participants and he is mostly a passenger.
 **Branch:** `feat/spatial-workspace`
 **Baseline:** `880b5e1`, with the already authorized Memory Bank and 99-project operational updates preserved.
@@ -94,10 +94,19 @@ request reads, outside-project runtime reads, and public bearer use return 403.
 Runtime mutation denial and historical audit privacy are proven in isolated
 SQL/API regressions. Secrets and detailed evidence remain ignored and private.
 
-The implementation/docs commit and clean rebuild follow this documentation
-checkpoint. Exact final source provenance, asset hashes, rollback snapshots,
-and operational phase are recorded under private `data/local/coordination/`
-and `data/local/deployment.json`; verify them after interrupted execution.
+Implementation checkpoint `796c235` is committed and clean-built for native
+Apple Silicon and static Linux/amd64 daemon/CLI, with exact embedded revision
+and vcs.modified=false. The pinned web rebuild matches installed assets byte
+for byte; clean activation returns readiness 204 and HTTPS workspace 200.
+Readable committed-build evidence is attached to the actual release task.
+Root's final reporting state is disconnected/session idle; peer is disconnected/
+session closed. Both queues are empty, both temporary tokens revoked, and raw
+credentials removed. Preserve durable reporter identity state for future use.
+
+This final documentation checkpoint is rebuilt through the same procedure.
+Exact final source provenance, asset hashes, rollback snapshots, and operational
+phase are recorded under private `data/local/coordination/` and
+`data/local/deployment.json`; verify them after interrupted execution.
 
 Use isolated database/API/MCP tests for authorization, recipient isolation,
 concurrent version changes, idempotent retries, terminal states, source rejection,
@@ -202,3 +211,12 @@ measure no physical-headset performance indirectly from browser tests.
   for open tabs. Final native security candidate is running with readiness 204.
   Live read-only checks deny source request reads, outside-project runtime access,
   and public bearer use with 403. Actual HTTPS portfolio acceptance is next.
+- Actual HTTPS portfolio acceptance passes in both engines: 99 authorized
+  summaries, four real regions, twelve-project disjoint pages, retained return
+  position, actual peer response/evidence, mobile layout, CSP, and healthy live
+  sockets. The peer request is resolved at version 3; owned task is in review.
+  Final source/history secret inventory and all eleven Semgrep rules pass.
+  `796c235` clean native/Linux/web builds and local activation are verified.
+  Temporary reporting is ended and acceptance credentials revoked/removed.
+  Current local release checklist is complete; full device and remote promotion
+  acceptance remain separate, with no automatic native hook/execution claim.

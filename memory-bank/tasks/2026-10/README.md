@@ -7,7 +7,8 @@
 - Michael's immersive screenshot shows similar unlabeled project icons without
   useful grouping, urgency, or asks. He requested design thoughts and subsequently approved the agent-first
   implementation plan.
-- State: DOCS / RUNNING, completing commit/clean build. The implementation and
+- State: DOCS / IDLE. Implementation checkpoint `796c235` is committed and
+  clean-built for native/Linux/web with verified local activation. The implementation and
   actual local acceptance pass: 137 frontend tests, 28 native browser checks
   plus four final fit checks, backend 84.7% with all critical packages above 90%,
   security/license/advisory/completeness gates, and real 99-project HTTPS checks
@@ -19,6 +20,9 @@
   accepting completion. Runtime source and audit privacy findings are repaired.
 - Preserve source/human authority and honest unknown data. Sentry's 99-project
   source-only publisher is unchanged. No new background service or executor.
+- Actual peer request is resolved; the owned release task is in review, with
+  committed-build evidence. Both temporary runtime participants are disconnected,
+  queues empty, credentials revoked/removed. Device and remote checks remain.
 - Track implementation in [Agent coordination workspace](../../releases/agent-coordination-workspace.md).
 - See [99-project immersive feedback](zoomable-control-room-plan.md#99-project-immersive-feedback--2026-10-15).
 
