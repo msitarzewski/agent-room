@@ -13,6 +13,7 @@ This index routes future sessions to the smallest useful context set. `boot.md` 
 
 ## Recent Task Records
 
+- [Information layout follow-up](./releases/agent-coordination-workspace.md#information-layout-follow-up--2026-10-15) — deployed frontend `5ef2b30`, overlap/pagination/focus verification, clean-build provenance, and remaining device checks
 - [Agent coordination workspace](./releases/agent-coordination-workspace.md) — approved agent-first request workflow, grouped portfolio, and shared desktop/XR coordination
 - [Continuous Sentry observations](./releases/continuous-sentry-observations.md) — automatic collection, durable delivery, scoped setup, and activity/source freshness
 - [First spatial workspace release](./releases/spatial-workspace.md) — approved scope, stable Sentry checklist, and ongoing validation evidence

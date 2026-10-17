@@ -11,7 +11,8 @@
 ## Current Task
 
 Michael's necessary-information overlap follow-up is implemented on
-`feat/spatial-workspace`, extending baseline `14b5c43`. Desktop connection
+`feat/spatial-workspace` and committed as `5ef2b30`, extending baseline
+`14b5c43`. Desktop connection
 header/details, toolbar, notices, canvas, and hint reserve separate flow space.
 Long identities wrap; narrow/200%-text inspectors and confirmation controls stay
 reachable. Confirmation receives focus and returns it to its trigger on cancel,
@@ -33,7 +34,9 @@ rollback copies are ignored. Physical headset comfort/frame pacing remain
 unmeasured; CPU scene geometry and browser checks do not substitute for them.
 
 Verified frontend assets are installed atomically, retaining older hashed assets
-for open tabs. Native binaries remain the verified `14b5c43` build; no daemon,
+for open tabs. The clean `5ef2b30` build matches the accepted candidate byte for
+byte; all nine installed files were verified through tailnet HTTPS. Native
+binaries remain the verified `14b5c43` build; no daemon,
 Sentry publisher, database, identity configuration, or permissions changed.
 Frontend revision/hashes and current activation phase are recorded separately in
 `data/local/deployment.json` and
@@ -41,6 +44,15 @@ Frontend revision/hashes and current activation phase are recorded separately in
 The authorized source checkpoint and final clean frontend activation are
 recorded in that private metadata, which is authoritative for deployed artifact
 state. See [information layout follow-up](releases/agent-coordination-workspace.md#information-layout-follow-up--2026-10-15).
+
+Final source-publisher check for this release found 99 projects, zero pending
+events, zero quarantined events, and no collection or transport error. This is
+the recorded release check, not a claim of a fresh scan on every docs update.
+Recovery copies are private in `data/local/coordination/backups/ux-layout-before`.
+Next: inspect dense information and input on the actual Vision Pro, measure
+comfort/frame pacing, deliberately onboard real agent runtimes with scoped
+authority, and verify the eventual pipx host before remote promotion. Michael
+remains mostly a passenger; agent coordination is the primary product workflow.
 
 ## Previous Local Release
 

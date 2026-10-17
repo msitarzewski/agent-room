@@ -51,6 +51,13 @@ time. Typed peer requests and explicit metadata reporting have been exercised
 by the actual coding agents. No automatic provider-hook service or autonomous
 worker executor is installed.
 
+The information-layout follow-up is committed and deployed as frontend
+`5ef2b30`; native binaries remain `14b5c43`. Separate desktop/XR information
+regions, measured text fitting, complete context pages, and reachable
+confirmations pass 140 frontend tests and 30 Chromium/WebKit browser checks.
+Actual HTTPS acceptance covers the 99-project instance, including narrow and
+200%-text layouts. Detailed Vision Pro comfort/input/frame pacing remains open.
+
 Read [Agent coordination workspace](releases/agent-coordination-workspace.md)
 for the current release, verification, limitations, and recovery state.
 

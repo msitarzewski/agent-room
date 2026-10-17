@@ -8,8 +8,9 @@
 and immersive spaces, with long recorded context fully available through
 wrapping/paging. 140 frontend tests and 30 Chromium/WebKit browser checks pass;
 actual authenticated 99-project HTTPS checks cover wide/narrow/200%-text layout.
-The verified frontend is installed with rollback copies; native/source services
-remain unchanged. See [information layout follow-up](releases/agent-coordination-workspace.md#information-layout-follow-up--2026-10-15).
+The clean `5ef2b30` frontend is installed with rollback copies and verified
+through HTTPS; native binaries remain `14b5c43` and source services are unchanged.
+See [information layout follow-up](releases/agent-coordination-workspace.md#information-layout-follow-up--2026-10-15).
 
 2026-10-15 product clarification: agents are the primary participants; Michael
 is mostly a passenger. The approved coordination iteration now implements typed
@@ -140,6 +141,6 @@ No headset frame-rate or comfort measurement has been claimed.
 ## Current Blockers
 
 - repository protection and private vulnerability-reporting configuration
-- OIDC client registration and secret
+- remote identity configuration verification; local OIDC is already operational
 - encrypted backup destination and retention
 - Hermes production credential and live hook/MCP configuration

@@ -227,12 +227,11 @@ Michael requested ensuring necessary information does not overlap. The prior
 9/9 capability checklist remains complete; this approved UX follow-up extends
 existing components/tests without assigning a new release identifier.
 
-Current findings: desktop absolute toolbar/notice/hint positions can collide
-when controls/text wrap. The XR radius-scaled graph can extend into side panels;
-warnings collide with coordination space, compact human content can rise too
-high, and fixed-character texture wrapping can overrun measured text bounds.
-Reserve distinct layout space, retain all source/evidence/request information
-through pagination, and verify actual geometry/ink and responsive browser bounds.
+The repaired layout had absolute desktop toolbar/notice/hint positions that
+could collide when controls/text wrapped. The radius-scaled XR graph could
+extend into side panels; warnings collided with coordination space, compact
+human content rose too high, and fixed-character texture wrapping could overrun
+text bounds. The fix reserves distinct space and preserves full context.
 Implemented separate desktop toolbar/notice/canvas/hint rows, a normal-flow
 connection header/details, wrapping for long identities, and focused inline
 confirmation with trigger restoration. XR fits actual node/label bounds into a
@@ -258,3 +257,15 @@ follow-up leaves the verified native `14b5c43` build, Sentry publisher, database
 identity, and permissions unchanged. Frontend revision/hashes/activation phase
 are recorded separately in ignored deployment/build metadata. Physical Vision
 Pro interaction/comfort/frame pacing and remote promotion remain separate.
+
+Final checkpoint: `5ef2b30f5f1906093124b752ebc32b80a35ca900`. The production
+frontend was rebuilt from that clean revision and matched the browser-accepted
+candidate byte for byte. All nine installed files were checked through tailnet
+HTTPS. Native provenance remains `14b5c43`; the frontend-only update required
+no daemon restart. Current rollback copies are under ignored
+`data/local/coordination/backups/ux-layout-before`, with the exact frontend
+manifest at `data/local/coordination/logs/ux-layout-build.json` and activation
+phase `clean-committed-frontend-active` in private deployment metadata. The final
+publisher check found 99 projects, zero pending/quarantined events, and no
+collection/transport error. These are recorded release checks, not new probes
+performed during the documentation handoff.

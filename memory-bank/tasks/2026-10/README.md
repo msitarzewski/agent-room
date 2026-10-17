@@ -17,6 +17,10 @@
 - Frontend installed with private rollback copies and old assets retained.
   Native binaries and source services remain unchanged; deployment metadata
   records frontend provenance separately. No new release identifier.
+- Final checkpoint: `5ef2b30`. Clean frontend matches the accepted candidate;
+  all nine installed files were verified through HTTPS. Native remains
+  `14b5c43`. The final publisher check found 99 projects, zero pending/quarantined
+  events and no collection/transport error. No remote activation was performed.
 - See [coordination release iteration record](../../releases/agent-coordination-workspace.md#information-layout-follow-up--2026-10-15).
 
 ### 2026-10-15: [COMPLETED] Portfolio legibility and agent coordination at 99 projects
