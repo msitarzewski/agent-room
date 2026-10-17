@@ -34,6 +34,102 @@ type EventPage struct {
 	NextCursor int64          `json:"next_cursor,omitempty"`
 }
 
+// WorkspaceSnapshot is a complete project projection and its event watermark,
+// read from the same database snapshot. The resource arrays are always present.
+type WorkspaceSnapshot struct {
+	ProjectID   string             `json:"project_id"`
+	Cursor      int64              `json:"cursor"`
+	GeneratedAt time.Time          `json:"generated_at"`
+	Resources   WorkspaceResources `json:"resources"`
+	Sources     []WorkspaceSource  `json:"sources"`
+}
+
+type WorkspaceResources struct {
+	Tasks     []json.RawMessage `json:"tasks"`
+	Agents    []json.RawMessage `json:"agents"`
+	Runs      []json.RawMessage `json:"runs"`
+	Attention []json.RawMessage `json:"attention"`
+	Evidence  []json.RawMessage `json:"evidence"`
+	Artifacts []json.RawMessage `json:"artifacts"`
+	Claims    []json.RawMessage `json:"claims"`
+	Approvals []json.RawMessage `json:"approvals"`
+	Requests  []json.RawMessage `json:"requests"`
+}
+
+type WorkspaceSource struct {
+	System                     string                     `json:"system"`
+	LastSeen                   time.Time                  `json:"last_seen"`
+	LastReceivedAt             time.Time                  `json:"last_received_at"`
+	LastCollectedAt            *time.Time                 `json:"last_collected_at"`
+	LastSuccessfulCollectionAt *time.Time                 `json:"last_successful_collection_at"`
+	ScanStatus                 *string                    `json:"scan_status"`
+	ProjectObservation         *domain.ProjectObservation `json:"project_observation,omitempty"`
+}
+
+type CreateCoordinationInput struct {
+	ID               string                       `json:"id"`
+	Kind             string                       `json:"kind"`
+	Title            string                       `json:"title"`
+	Body             string                       `json:"body"`
+	Recipient        domain.CoordinationRecipient `json:"recipient"`
+	TaskID           string                       `json:"task_id,omitempty"`
+	EvidenceIDs      []string                     `json:"evidence_ids,omitempty"`
+	EscalationReason string                       `json:"escalation_reason,omitempty"`
+}
+
+type CoordinationActionInput struct {
+	Body        string   `json:"body,omitempty"`
+	EvidenceIDs []string `json:"evidence_ids,omitempty"`
+	Note        string   `json:"note,omitempty"`
+}
+
+type CoordinationCounts struct {
+	RunningWork           int `json:"running_work"`
+	AgentPresence         int `json:"agent_presence"`
+	UnfinishedTasks       int `json:"unfinished_tasks"`
+	SourceUnfinishedTasks int `json:"source_unfinished_tasks"`
+	BlockedTasks          int `json:"blocked_tasks"`
+	CanonicalBlockedTasks int `json:"canonical_blocked_tasks"`
+	SourceBlockedTasks    int `json:"source_blocked_tasks"`
+	Requests              int `json:"requests"`
+	Reviews               int `json:"reviews"`
+	HumanEscalations      int `json:"human_escalations"`
+	HumanApprovals        int `json:"human_approvals"`
+	OpenAttention         int `json:"open_attention"`
+}
+
+type CoordinationItem struct {
+	Kind            string                        `json:"kind"`
+	ResourceType    domain.ResourceType           `json:"resource_type"`
+	ID              string                        `json:"id"`
+	Title           string                        `json:"title"`
+	Detail          string                        `json:"detail,omitempty"`
+	Status          string                        `json:"status"`
+	UpdatedAt       time.Time                     `json:"updated_at"`
+	OwnerID         string                        `json:"owner_id,omitempty"`
+	OwnerName       string                        `json:"owner_name,omitempty"`
+	RecipientName   string                        `json:"recipient_name,omitempty"`
+	RequestKind     string                        `json:"request_kind,omitempty"`
+	Recipient       *domain.CoordinationRecipient `json:"recipient,omitempty"`
+	TaskID          string                        `json:"task_id,omitempty"`
+	TargetType      string                        `json:"target_type,omitempty"`
+	TargetID        string                        `json:"target_id,omitempty"`
+	EvidenceIDs     []string                      `json:"evidence_ids,omitempty"`
+	SourceSystem    string                        `json:"source_system,omitempty"`
+	HumanEscalation bool                          `json:"human_escalation"`
+}
+
+type CoordinationSummary struct {
+	Counts    CoordinationCounts `json:"counts"`
+	Items     []CoordinationItem `json:"items"`
+	Truncated bool               `json:"truncated"`
+	Complete  bool               `json:"complete"`
+}
+
+type WorkspaceRepository interface {
+	Workspace(context.Context, string) (WorkspaceSnapshot, error)
+}
+
 type Mutation struct {
 	Resource json.RawMessage
 	Event    domain.Event
@@ -97,6 +193,7 @@ type IDGenerator interface {
 }
 
 type Actor struct {
+	Human        bool
 	ID           string
 	Capabilities map[string]struct{}
 }

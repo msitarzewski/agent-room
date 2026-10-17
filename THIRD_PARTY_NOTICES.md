@@ -29,6 +29,15 @@ the complete redistributed runtime license texts under `third_party/`.
 | `react` | MIT |
 | `react-dom` | MIT |
 | `scheduler` | MIT |
+| `three`, `@react-three/fiber`, `@react-three/xr`, `@pmndrs/xr`, `@pmndrs/handle`, `@pmndrs/pointer-events` | MIT terms; some npm manifests use `SEE LICENSE IN LICENSE` |
+| Spatial runtime transitive dependencies | Reviewed declarations and full license terms in `third_party/web-licenses/runtime-manifest.json` and `spatial-runtime-LICENSES.txt` |
+
+The spatial runtime license bundle retains all locked runtime package grants,
+including the Apache-2.0/BSD-3-Clause Protocol Buffers combination and Font
+Awesome's CC-BY-4.0 icon attribution plus MIT code terms. Development emulation
+is disabled and its sample environments are removed from the production build.
+The dependency inventory conservatively includes the complete locked runtime
+tree. The license gate checks versions and the redistributed text hashes.
 
 The Model Context Protocol Go SDK is transitioning from MIT to Apache-2.0.
 Individual contributions remain under the applicable original license as

@@ -95,11 +95,12 @@ grep -q '^release_installed=1$' deploy/deploy.sh || failed=1
 grep -q 'rm -rf -- "${release_dir}"' deploy/deploy.sh || failed=1
 grep -q 'artifact-backup.sh' deploy/backup.sh || failed=1
 grep -q 'artifact-restore.sh' deploy/restore.sh || failed=1
-grep -q "id = \"GO-2026-5932\"" .github/workflows/security.yml || failed=1
-grep -q "ignoreUntil = 2026-10-27" .github/workflows/security.yml || failed=1
 grep -q 'go_dependencies="$(go list -deps ./...)"' .github/workflows/security.yml || failed=1
 grep -q "grep -q '\\^golang.org/x/crypto/openpgp'" .github/workflows/security.yml || failed=1
-grep -q "id = \"GO-2026-5932\"" tests/security/static-security.sh || failed=1
+grep -q "grep -q '\\^golang.org/x/crypto/openpgp'" tests/security/static-security.sh || failed=1
+grep -q 'osv-scanner scan source --recursive \.$' .github/workflows/security.yml || failed=1
+grep -q '^osv-scanner scan source --recursive \.$' tests/security/static-security.sh || failed=1
+grep -q 'IgnoredVulns' .github/workflows/security.yml tests/security/static-security.sh && failed=1
 grep -q 'honnef.co/go/tools/cmd/staticcheck@v0.7.0' .github/workflows/security.yml || failed=1
 grep -q 'staticcheck -tags=integration' .github/workflows/security.yml || failed=1
 grep -q 'staticcheck -tags=integration' tests/security/static-security.sh || failed=1

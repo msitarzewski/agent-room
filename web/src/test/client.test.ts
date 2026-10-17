@@ -1,5 +1,6 @@
 import { vi } from "vitest";
 import { api, ApiError } from "../api/client";
+import type { CoordinationRequest } from "../api/types";
 import { approval, attention, claim, run, task } from "./fixtures";
 
 function response(body: unknown, init?: ResponseInit): Response {
@@ -18,6 +19,28 @@ function jsonBody(init: RequestInit): unknown {
 }
 
 describe("canonical API client contract", () => {
+  it("scopes coordination reads and sends versioned idempotent response and closure commands", async () => {
+    const request: CoordinationRequest = { ...task, id: "request/context", title: "Actual context request", body: "Recorded question.", kind: "context", owner_id: "agent_builder", owner_type: "agent", recipient: { type: "agent", id: "agent_reviewer" }, evidence_ids: [], status: "open", version: 3 };
+    const fetch = vi.fn().mockImplementation(() => Promise.resolve(response(request)));
+    vi.stubGlobal("fetch", fetch);
+    const controller = new AbortController();
+    api.setCsrfToken("request-csrf");
+    await api.coordinationRequests("project_alpha", controller.signal, "opaque-next");
+    await api.respondToRequest(request, "The trace is verified.");
+    await api.closeRequest(request, "resolve", "Accepted handoff.");
+    await api.closeRequest(request, "cancel", "Superseded.");
+    expect(fetch).toHaveBeenNthCalledWith(1, "/api/v1/requests?project_id=project_alpha&cursor=opaque-next", expect.objectContaining({ signal: controller.signal }));
+    for (const [index, action, body] of [[1, "respond", { body: "The trace is verified." }], [2, "resolve", { note: "Accepted handoff." }], [3, "cancel", { note: "Superseded." }]] as const) {
+      const [url, init] = callAt(fetch, index);
+      expect(url).toBe(`/api/v1/requests/request%2Fcontext/${action}?project_id=project_alpha`);
+      expect(jsonBody(init)).toEqual(body);
+      expect(new Headers(init.headers).get("If-Match")).toBe("3");
+      expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("request-csrf");
+      expect(new Headers(init.headers).get("Idempotency-Key")).toBeTruthy();
+    }
+    expect(new Set([1, 2, 3].map((index) => new Headers(callAt(fetch, index)[1].headers).get("Idempotency-Key"))).size).toBe(3);
+  });
+
   it("uses same-origin credentials and the canonical collection query parameters", async () => {
     const fetch = vi.fn()
       .mockResolvedValueOnce(response({ items: [] }))

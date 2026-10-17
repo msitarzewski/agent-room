@@ -1,8 +1,124 @@
 # Decisions
 
-**Last updated:** 2026-07-28
+**Last updated:** 2026-10-15
 
 Only accepted decisions belong here. Open technical choices remain in `techContext.md` and `build-deployment.md`.
+
+## 2026-10-15: Agents Are the Primary Participants
+
+**Status:** Explicitly clarified by Michael; applies to product/design direction.
+
+**Context:** The 99-project immersive proposal centered a human Needs You tray.
+Michael reminded us that the project is really for agents and he is mostly a
+passenger. Earlier human-supervision language does not capture that priority.
+
+**Decision:** Center agent work, ownership, requests, dependencies, reviews, and
+handoffs. Machine-readable coordination and authorized tools come first; desktop
+and XR show the same world to a human observer or occasional participant.
+Routine asks should reach the responsible agent. Human escalation is reserved
+for permissions, policy decisions, or issues agents cannot resolve within their
+authority. Repositories supply context rather than every repository becoming
+an equally prominent actor in the room.
+
+**Consequences:** Revise the legibility proposal around Work, Coordination,
+Evidence, and Human Escalations. Existing agent/run/session/task models and
+adapters are extension points. Sentry provides repository/task observations;
+live agent coordination still needs real runtime signals and verified request/
+handoff contracts. This clarification does not authorize launching workers,
+relaxing permissions, broadening source tokens, or claiming unimplemented
+autonomous orchestration. Existing evidence, review, audit, and safety rules
+remain in force.
+
+**Approved implementation:** Michael's subsequent "proceed with this plan"
+authorized the typed coordination iteration. Existing resource/command/event/
+audit storage now carries named participant requests and versioned lifecycle
+actions, with recipient privacy across reads, events, streams, and audit details.
+Ordinary runtime source credentials accept actor-bound typed observations;
+metadata-only explicit reporting uses durable retry and five-minute leases.
+The same authorized summaries drive four stable desktop/XR regions with
+twelve-project pages. Known work/asks take priority while incomplete coverage
+remains qualified; only complete recent coverage can be Quiet. Actual two-agent
+reporting, ownership, evidence, peer response/resolution, and real 99-project
+HTTPS viewing are verified. Automatic worker execution/hooks remain outside
+this decision's implementation claim. No SQL migration or dependency is added.
+
+**References:** `projectbrief.md#mission`; `productContext.md#core-experience`;
+`tasks/2026-10/zoomable-control-room-plan.md#99-project-immersive-feedback--2026-10-15`.
+Implementation record: `releases/agent-coordination-workspace.md`.
+
+## 2026-10-14: Independent Durable Sentry Publisher
+
+**Status:** Accepted for the local continuous-feed build. Michael explicitly
+approved full operator project permissions and source-only publisher access for
+all discovered projects on 2026-10-15; the 99-project setup is complete.
+
+**Context:** One-time imports do not keep the observatory current. Sentry already
+owns repository discovery and Markdown parsing, while its existing Vikunja
+board, watcher, Git history, and backups must continue independently.
+
+**Decision:** Reuse Sentry's scanner read-only in an Agent Room-owned Python
+stdlib collector. Persist immutable observations, fingerprints, sequences, and
+identity bindings in private SQLite before HTTP delivery. Operator commands own
+project/access setup; source publishers have exact scopes and only ingestion
+capabilities. Add typed project scan reports so zero-task scans, partial reads,
+collection time, and receipt time remain explicit. Never infer deletion from
+absence or promote source status into human supervision.
+
+**Alternatives:** Modifying Sentry's board sync would couple independent
+services. A transient script would lose observations during an outage. Reusing
+the server outbox alone cannot protect observations before server ingestion.
+
+**Consequences:** The source workstation retains a separate private queue and
+expiring token. Initial observation covered the existing Agent Room project.
+After Michael's explicit 2026-10-15 approval, the existing publisher covers all
+99 freshly discovered projects with exact source-only scopes, and the operator
+has full project permissions. No Sentry source/configuration change or new
+background process was needed. Future unmapped discoveries remain explicit
+provisioning needs rather than silently inheriting access.
+
+**References:** `releases/continuous-sentry-observations.md`;
+`systemPatterns.md#source-observations-and-supervision`;
+`build-deployment.md#local-sentry-publisher`.
+
+## 2026-10-14: Local Tailnet Deployment Uses MiradorXR's HTTPS Pattern
+
+**Status:** Local staging step toward the operator-designated remote machine.
+
+**Context:** The first desktop/WebXR candidate needs a secure origin reachable
+from Vision Pro on the existing tailnet, using this Apple Silicon workstation.
+
+**Decision:** Run the existing native Go daemon and production web build behind
+Tailscale Serve on dedicated HTTPS app port 4445. Use HTTPS port 4446 for a local
+Dex identity provider, persistent isolated PostgreSQL databases, normal OIDC
+authorization, and a per-user launch agent. Preserve existing Serve mappings.
+Private runtime values and generated operator credentials stay in ignored
+`data/local/`. This does not replace the signed Linux/Caddy promotion contract.
+Michael confirmed that the remote machine is the eventual home; the local
+installation supports headset testing first. Its actual host identifier is in
+the private deployment record. Verify its platform before building the promoted
+artifact; this decision does not authorize remote activation.
+
+**Consequences:** The headset can use the same web application over an HTTPS
+origin without a native visionOS package. The workstation, Docker Desktop, and
+Tailscale must remain available. Device acceptance and production promotion
+still require their own evidence. At this deployment checkpoint no automatic
+Sentry connector was installed; the later independent-publisher decision above
+records its separate implementation and current scope.
+
+**References:** `build-deployment.md#local-tailnet-deployment`;
+`releases/spatial-workspace.md`.
+
+## 2026-10-13: Shared Spatial Workspace and MiradorXR Technical Reference
+
+**Status:** Accepted for the user-authorized first release.
+
+**Context:** Michael requested an original magical desktop/WebXR workspace and identified the team's tested MiradorXR implementation as the technical reference.
+
+**Decision:** Extend the existing React/TypeScript client and Go/PostgreSQL control plane. Use Three.js, React Three Fiber, and react-three/xr with shared selection and domain data. Use WebGPU on desktop where available and the proven WebGL immersive stage because installed Fiber/XR session code assumes WebGL manager interfaces. Keep all controls on the existing command API. Sentry observations retain their own source state.
+
+**Consequences:** Input, lifecycle, loading, and resource-ownership patterns are reusable. Scene design is original. Desktop graphics and XR rendering have explicit lifecycle boundaries; no WebGPU XR capability is claimed until its actual library combination is validated.
+
+**References:** `releases/spatial-workspace.md`; `tasks/2026-10/zoomable-control-room-plan.md`.
 
 ## 2026-07-27: Human Control Plane Mission
 
@@ -263,3 +379,18 @@ license texts, and SPDX SBOM with release archives.
 - dependency licenses remain an audited release input
 
 **Reference:** `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`
+
+## 2026-10-17: GitHub is an independent read-only observation source
+
+**Status:** Approved by Michael's instruction to get the monitor working and merged.
+
+Extend existing typed source observations, delivery and coordination views with
+GitHub issues/PRs/reviews/checks. Preserve Sentry identities and independent source
+freshness; GitHub facts never accept canonical completion or replace human-owned
+fields. Start with explicit outbound GET polling for the private local deployment;
+public repository access needs no GitHub credential. Optional protected token
+files are explicit. Source credentials receive only source ingestion for mapped
+projects. Development PR push/merge authority is separate from deployed monitor
+permissions. No automatic executor or new spatial interface is part of this scope.
+
+See [GitHub observations](releases/github-observations.md).

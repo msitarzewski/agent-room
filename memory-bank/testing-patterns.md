@@ -2,7 +2,7 @@
 
 **Status:** Foundational quality contract
 
-**Last updated:** 2026-07-27
+**Last updated:** 2026-10-15
 
 ## Test Pyramid
 
@@ -57,6 +57,30 @@
 - avoid live network dependencies in deterministic suites
 
 ## Adapter Fixtures
+
+The metadata reporter's isolated CLI/adapter tests exercise exact uncertain
+delivery retries, scope binding, filesystem ownership/permissions, refused
+redirects, quarantine, and privacy allowlists. CLI tests run with `./cmd/...` in
+the existing race/coverage gate. Native runtime IDs in production acceptance
+must come from the currently working participants themselves; test fixtures
+never supply deployed activity.
+
+Coordination regressions cover named-recipient visibility across snapshots,
+overview, resource reads, event replay, and live stream frames; actor-bound
+responses, human-only escalation responses, ownership, terminal states,
+versions, and idempotent retries. Real SQL/API/MCP tests use a disposable
+database separate from local staging. Portfolio tests cover 99 projects,
+progressive pages, stable return selection, actual cross-project asks, partial
+coverage, source completion, and absent runtime observations.
+
+The Sentry collector's isolated stdlib gate is
+`PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests/sentry -v`.
+It does not require the live Sentry environment or network. Fault cases cover
+durable retry identity, rollback, restart, clock rollback, authorization
+isolation, unreadable/window-retained sources, bounded batches, token privacy,
+redirect refusal, and retained quarantine. CI and the local security gate both
+run it. Actual deployed acceptance uses real repository records, normal OIDC,
+and HTTPS Chromium/WebKit streams independently of these fixtures.
 
 Captured native payloads may be used as test fixtures when sanitized.
 

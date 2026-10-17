@@ -1,9 +1,10 @@
 # Agent Room
 
-Agent Room is a human control plane for supervising AI workers. It normalizes
-worker state across runtimes, directs human attention to consequential changes,
-ties completion claims to inspectable evidence, and makes interventions
-explicit, authorized, versioned, and auditable.
+Agent Room is a shared coordination workspace for agents. It brings work,
+ownership, requests, handoffs, and evidence into one attributable record across
+runtimes. Humans can observe, participate, steer, and decide exceptions; routine
+coordination should reach the responsible agents. Commands remain explicitly
+authorized, versioned, idempotent, and auditable.
 
 This repository is an implemented product foundation, not a finished autonomous
 worker platform. It includes the control-plane daemon and CLI, PostgreSQL
@@ -62,11 +63,96 @@ application consumes the same versioned HTTP contract documented in
 [`api/openapi/agent-room.v1.yaml`](api/openapi/agent-room.v1.yaml); adapter
 events use [`api/arp/event-envelope.schema.json`](api/arp/event-envelope.schema.json).
 
+## Spatial observatory
+
+Open **Observatory** in the sidebar, or visit `/workspace`. The portfolio groups
+projects into **Coordination**, **Work recorded**, **Quiet**, and **Coverage
+unknown**. Expand a region to reveal named projects in pages of twelve. Actual
+requests, blockers, reviews, ownership, and agent presence supply the signals;
+repository activity never implies a running worker. Quiet requires a complete,
+recent source collection and authorized coordination coverage.
+
+Select a project to unfold its tasks and recorded dependencies, then select a task to inspect runs,
+evidence, artifacts, review state, and source observations. Project and task
+selections are shareable through the URL. The searchable directory supports
+keyboard navigation and remains available when graphics cannot render.
+
+The desktop scene uses WebGPU when available and falls back to WebGL 2. Drag to
+explore, scroll to move closer, and use **Recenter view** to restore framing.
+Motion reflects reported running work and respects reduced-motion preferences.
+Attention remains within reach; source completion is separate from accepted
+completion. Review decisions require confirmation, and controls retain the
+existing project capabilities, resource versions, and command audit.
+
+In a secure browser with immersive WebXR support, **Enter immersive** opens the
+same project and selection using a dedicated WebGL 2 renderer. Select with the
+device's natural input, pinch the handle to reposition the workspace, and use **Exit
+immersive** or the headset's system control to return. Real Vision Pro comfort,
+input, and frame pacing still require acceptance on the exact visionOS build.
+The development emulator and sample environments are omitted from production.
+
+The [spatial release checklist](memory-bank/releases/spatial-workspace.md) and
+[coordination release](memory-bank/releases/agent-coordination-workspace.md)
+record implementation, verification, and device acceptance requirements.
+
+## Agent coordination
+
+Agents use the private, project-scoped MCP surface to
+`list_coordination_requests`, `create_coordination_request`, and
+`act_coordination_request`. Requests have kind `help`, `context`, `handoff`, or
+`review`, an authenticated owner, a named agent or human recipient, and optional
+same-project task/evidence references. A human recipient requires an explicit
+escalation reason. The named recipient responds; the requester resolves or
+cancels. An authorized operator can intervene with its own attribution.
+
+Each mutation needs an idempotency key; actions also need the current resource
+version. Narrow machine capabilities are `coordination:read`,
+`coordination:create`, `coordination:respond`, `coordination:resolve`, and
+`coordination:cancel`. Request bodies are recipient-scoped in resource reads,
+summaries, event replay, and live streams. Full project readers can observe all
+requests. A response does not transfer ownership, accept completion, or execute
+work. The browser uses the equivalent typed HTTP contract with its normal
+session, CSRF protection, and project permissions.
+
+`agentroomctl report` explicitly reports real agent/session metadata without
+loading daemon configuration or requiring database credentials:
+
+```sh
+agentroomctl report \
+  --project-id <authorized-project> --runtime codex \
+  --agent-id <token-actor-id> --instance-id <stable-instance-id> \
+  --display-name '<participant-name>' \
+  --state-dir /absolute/private/reporter-state \
+  --token-file /absolute/private/reporter-token \
+  --adapter-url http://127.0.0.1:54491
+```
+
+Use a separate project-scoped token with `event:ingest` and `source:codex`
+(or `source:claude` / `source:hermes`). Codex uses its actual `CODEX_THREAD_ID`;
+other callers supply `--session-id`. The reporter never reads conversations or
+starts workers. Provide `--run-id` and `--run-status` only for an actual bounded
+native run. Agent presence expires after five minutes; repeat reports during
+real work and report `--status idle --session-status idle` when it ends.
+
+Ordinary runtime source credentials accept only typed `agent.observed`,
+`session.observed`, and `run.observed` events, bound to the authenticated actor.
+Legacy codec lifecycle exports must be mapped to this typed contract before
+connecting a provider-hook service. They cannot update human tasks, approvals,
+or another participant's runs through generic event names.
+
+State directories require mode 0700; token/state files require mode 0600 and
+current-user ownership. Observations persist before transmission; `--retry`
+drains the original queued bodies without creating activity. Only HTTP 202
+acknowledges delivery. Permanent invalid or expired observations stay
+quarantined for review. Preserve the directory across restarts, and never
+commit runtime state or bearer credentials. This explicit reporter is not an
+installed provider-hook service or autonomous worker executor.
+
 ## Prerequisites
 
 Development uses the versions pinned by the repository:
 
-- Go 1.26.5 (the `toolchain` in [`go.mod`](go.mod))
+- Go 1.26.9 (the `toolchain` in [`go.mod`](go.mod))
 - Node.js 24.8.0 and npm 11.6.0
 - Docker with Compose for PostgreSQL 18 and the local Dex provider
 - Git, `curl`, and `jq`
@@ -131,6 +217,16 @@ authorization and an isolated target; see
 [deploy/README.md](deploy/README.md#development-and-security-verification).
 
 ## Native Apple Silicon development
+
+For the already configured local tailnet installation, open the URL in
+`data/local/deployment.json` and sign in with the `username` and `password` in
+`data/local/secrets/login.json`. These are private generated credentials. The
+app is served over Tailscale HTTPS port 4445, with its identity provider on port
+4446, using a supervised native daemon and persistent local containers. See the
+[local deployment runbook](memory-bank/build-deployment.md#local-tailnet-deployment)
+for status, restart, update, and stop procedures. This is also the WebXR entry
+point for Vision Pro Safari. Michael has confirmed immersive operation; detailed
+interaction, comfort, recovery, and measured frame pacing remain device checks.
 
 The supported workstation shape is a native Go daemon and frontend build, with
 PostgreSQL and Dex in loopback-published containers. Do not use the production
@@ -255,6 +351,123 @@ sudo deploy/rollback.sh \
   --public-url https://<public-host>
 ```
 
+## GitHub observations
+
+The independent [GitHub monitor](adapters/github/agentroom_github.py) reads
+issues, pull requests, reviews and current-head check/status results through
+GitHub's REST API. It performs outbound GET requests only. Public repositories
+need no GitHub credential; private repositories require an explicitly configured,
+owner-only read token file. Expiring GitHub App tokens must be refreshed outside
+the collector. It never reads the development CLI's credential or writes GitHub.
+
+Copy [the configuration example](deploy/config/github-connector.toml.example)
+to private storage and explicitly map each repository to an existing Agent Room
+project. Provision an Agent Room service token with only `event:ingest` and
+`source:github` for those project IDs. This publisher cannot create projects,
+change memberships, approve completion, or change task ownership.
+
+```sh
+python3 -B adapters/github/agentroom_github.py \
+  --config /path/to/private/github-connector.toml watch
+```
+
+Python 3.11+ and the complete checkout are required; delivery is shared with
+Sentry in `adapters/source.py`. `watch` polls every 900 seconds by default;
+`once` collects and sends a bounded batch; `status` reads persisted health.
+Exit 2 means delivery remains pending and exit 1 reports collection/delivery
+errors or quarantine. Keep state directories mode 0700 and token files mode
+0600. Preserve the durable state directory across restarts and host moves.
+
+Repository numeric identity is bound to its project on first verified access.
+Issues and PRs keep distinct stable identities across close/reopen and updates.
+Pagination, conditional requests, API request budgets, rate-limit backoff and
+partial coverage are explicit. Missing data never deletes tasks or establishes
+successful checks. Check results refer to the current PR head; branch-protection
+requirements and merge eligibility are not inferred. Observed failures or
+requested changes surface source blockers for agent triage; review signals do
+not accept a canonical completion claim or automatically escalate to a human.
+Closed and merged PRs are distinct source facts. Historical CI on closed PRs
+is not repeatedly refreshed.
+
+GitHub and Sentry have independent source report/freshness records in the same
+project, retaining canonical names and human-owned fields. The monitor uses the
+same private typed observation endpoint described below. When rolling back to
+a daemon without GitHub support, stop this publisher before restoring binaries;
+retain its queue for deliberate recovery. See the
+[GitHub release record](memory-bank/releases/github-observations.md).
+
+## Sentry observations
+
+The independent [Sentry connector](adapters/sentry/agentroom_sentry.py) reuses
+Sentry's read-only scanner and publishes project and task observations through
+the private adapter endpoint. Sentry's own board, watcher, history, and backups
+continue operating independently. Install the connector from this checkout on
+the source workstation, using Sentry's existing Python environment (Python 3.11
+or newer). It is separate from the daemon/web release archive.
+
+Copy [the configuration example](deploy/config/sentry-connector.toml.example)
+to private runtime storage. Resolve each source path to an operator-provisioned
+project ID. Use `agentroomctl project ensure` and `membership grant` for setup;
+the publisher cannot provision projects or memberships. A service token can
+cover a comma-separated list of exact project IDs with only `event:ingest` and
+`source:sentry`; keep its file owner-only and rotate it before expiry. Configure
+the private adapter URL with HTTPS, or loopback HTTP on the same host.
+
+```sh
+/path/to/sentry/.venv/bin/python -B adapters/sentry/agentroom_sentry.py \
+  --config /path/to/private/connector.toml watch
+```
+
+`watch` collects every 300 seconds by default and drains queued observations
+between polls. `once` performs a bounded collection/delivery pass; exit 2 means
+pending delivery remains, and exit 1 reports errors or quarantined observations.
+`status` reports backlog, provisioning needs, and collection/delivery errors.
+Queue records are durable before transmission and retries preserve event IDs,
+sequences, payloads, and collection times. Missing or unreadable source records
+never delete existing tasks. Unmapped projects require operator provisioning;
+permanent invalid records remain quarantined for review. Preserve the state
+directory across restarts and host moves to retain identity and ordering.
+
+Give an observation publisher only `event:ingest` and `source:sentry` for its
+chosen projects. Send `POST /api/v1/ingest?project_id=<project-id>` to the private
+adapter listener with its bearer service token. The body contains an `events`
+array; each event supplies `project_id`, `type: "task.observed"`,
+`subject_type: "task"`, a nonempty `subject_id`, `source_system: "sentry"`, a
+stable `source_event_id`, and a positive monotonically increasing
+`source_sequence` for that source task. The server derives the canonical task
+ID from the project and the payload's `external_id`; the supplied subject ID
+does not choose an arbitrary resource.
+
+The payload requires `external_id`, `title`, and `status`. It optionally includes
+`description`, an HTTP(S) `external_url`, and `dependencies` containing external
+task IDs from the same project. Unknown payload fields and resource replacements
+are rejected. Use the current observation time for `occurred_at`, or omit it
+for server time; the endpoint accepts at most 30 days of clock skew into the
+past and five minutes into the future. Retries retain the source event ID;
+later observations advance the sequence. See the precise
+[TaskObservation contract](api/openapi/agent-room.v1.yaml).
+
+New observations create supervised tasks in `inbox`. Later source updates
+retain human-owned fields and record the latest observation separately. A
+blocked source task creates deduplicated attention, and a newer unblocked
+observation resolves only that source-owned item. A human resolution stays
+resolved until a new unblocked-to-blocked episode. Source `Done` never accepts a
+completion claim.
+
+`project.observed` reports the actual collection time, source name/path/status,
+scan status (`complete`, `partial`, or `unreadable`), and task count, including
+successful zero-task scans. It updates a separate source report and preserves
+the operator's project name. Workspace and overview responses distinguish
+`last_collected_at`, `last_received_at`, and `last_successful_collection_at`;
+queued delivery cannot make an old scan appear fresh. The browser labels project
+activity separately from connection opening and heartbeat receipt.
+
+`GET /api/v1/workspace?project_id=<project-id>` returns one authorized,
+transactionally consistent snapshot of the resources and source receipt times
+used by the scene. It requires read access to every included resource kind;
+partial graphs fail closed. WebSocket catchup and resync messages refresh the
+snapshot. No private adapter credentials belong in browser configuration.
+
 ## Hermes and Pip
 
 Pip is a persistent Hermes participant and is distinct from any physical host
@@ -286,6 +499,7 @@ Codex, Claude, Hermes, or other worker processes.
   boundaries
 - [`internal/adapters`](internal/adapters) — Codex, Claude, and Hermes-native
   normalization/client foundations
+- [`adapters/sentry`](adapters/sentry) — independent durable source collector
 - [`web`](web) — browser control room
 - [`api`](api) — HTTP and ARP contracts
 - [`db`](db) — embedded migrations and SQL queries

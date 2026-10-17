@@ -52,3 +52,19 @@ func TestContextRejectsMissingScopeAndEncodingFailures(t *testing.T) {
 		t.Fatalf("default event=%+v err=%v", event, err)
 	}
 }
+
+func TestUsageMetadataAllowsOnlyValidatedCounters(t *testing.T) {
+	counts := UsageCounts(json.RawMessage(`{"input_tokens":12,"output_tokens":-1,"cache_read_input_tokens":null,"cached_input_tokens":1.5,"total_tokens":1000000000001,"prompt":"fixture-secret","extra":{"token":"fixture-secret"}}`))
+	if len(counts) != 1 || counts["input_tokens"] != 12 {
+		t.Fatalf("usage=%+v", counts)
+	}
+	if MetadataToken("tool with private input", 64) != "" || MetadataToken("Read", 2) != "" || MetadataToken("Read", 64) != "Read" {
+		t.Fatal("invalid metadata token validation")
+	}
+	if _, err := SourceSequence(-1, 1); err == nil {
+		t.Fatal("negative base sequence accepted")
+	}
+	if _, err := SourceSequence(1, 0); err == nil {
+		t.Fatal("nonpositive sequence offset accepted")
+	}
+}

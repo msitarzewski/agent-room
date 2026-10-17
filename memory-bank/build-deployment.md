@@ -1,10 +1,209 @@
 # Build and Deployment
 
-**Status:** Approved deployment architecture; production activation in progress
+**Status:** Local tailnet deployment running; signed Linux production promotion separate
 
-**Last updated:** 2026-07-28
+**Last updated:** 2026-10-17
 
-## Topology
+## Local Tailnet Deployment
+
+Michael authorized MiradorXR's local loopback + Tailscale Serve HTTPS pattern.
+This macOS deployment extends the native Apple Silicon procedure in `README.md`
+and existing `deploy/compose/compose.yaml` PostgreSQL/Dex definitions. It runs
+the production web build with `AGENTROOM_DEV=false` and normal OIDC authorization.
+
+| Component | Local binding | Tailnet HTTPS |
+| --- | --- | --- |
+| Native application | `127.0.0.1:4445` | dedicated port 4445 |
+| Dex identity provider | `127.0.0.1:5557` | dedicated port 4446, `/dex` issuer |
+| PostgreSQL | `127.0.0.1:55440` | none |
+| Administration | `127.0.0.1:54490` | none |
+| Private adapter | `127.0.0.1:54491` | none |
+
+Tailscale Serve owns HTTPS and WebSocket proxying. The application trusts only
+loopback proxies and its configured HTTPS origin. MiradorXR's port 4444 and all
+other existing tailnet mappings are retained; Funnel is not enabled.
+
+Actual URLs are in `data/local/deployment.json`. Operator credentials are in
+`data/local/secrets/login.json`; use the `username` and `password` values at the
+OIDC login screen. These ignored files stay private, outside Git and Sentry docs.
+`data/local/agentroom.conf` references private secret files. Application and Dex
+use separate non-superuser database roles and databases; Dex signing keys and
+identity sessions persist in PostgreSQL. The Compose project is `agentroom-local`.
+
+### Local Lifecycle
+
+The native `bin/agentroomd` is supervised by per-user launch agent
+`local.agentroom`. Its installed LaunchAgents entry links to
+`data/local/local.agentroom.plist`. It starts at user login and restarts after
+failure; database containers use `unless-stopped`. Docker Desktop, Tailscale,
+and an awake workstation are required for remote headset access.
+
+Check or restart the existing installation from the repository root:
+
+```sh
+docker compose -f data/local/compose.json up --detach --wait postgres dex
+launchctl print "gui/$(id -u)/local.agentroom"
+launchctl kickstart -k "gui/$(id -u)/local.agentroom"
+curl --fail http://127.0.0.1:54490/readyz
+tailscale serve status
+```
+
+The readiness success response is HTTP 204. For a browser document check, send
+`Accept: text/html` to the HTTPS `/workspace` URL. An unauthenticated workspace
+API read must return 401. Login preserves the selected project/task deep link.
+Diagnostic logs and browser/restart evidence are in `data/local/logs/`.
+
+For updates, rerun the repository checks and build candidate assets separately
+with `npm --prefix web run build -- --outDir /private/tmp/agentroom-candidate-web`.
+The running daemon reads `web/dist` directly: a default build would change the
+live frontend before verification. Build candidate native binaries separately
+with the pinned Go toolchain, and preserve the existing binaries/assets/config.
+After QA, atomically install the binaries and restart only `local.agentroom`;
+confirm readiness before publishing the new assets and index. Keep old hashed
+assets available for already open tabs. Native daemon changes require
+`launchctl kickstart` after installation.
+Frontend-only updates can retain the previously verified native binaries without
+a daemon restart. Record frontend revision, dirty/clean status, file hashes and
+activation phase separately from native provenance in ignored deployment/build
+metadata; never imply both artifacts share a revision when only web is rebuilt.
+Use the existing CLI with `--config data/local/agentroom.conf` for migrations,
+doctor, and scoped administration. Keep private snapshots of both `agentroom`
+and `agentroom_identity` databases before changes; the initial restart snapshots
+are in `data/local/backups/`. This local instance has not installed the Linux
+pgBackRest/off-host backup policy described below.
+
+To stop this instance while retaining its data:
+
+```sh
+launchctl bootout "gui/$(id -u)/local.agentroom"
+docker compose -f data/local/compose.json stop
+tailscale serve --https=4445 off
+tailscale serve --https=4446 off
+```
+
+To reload a stopped launch agent, use `launchctl bootstrap "gui/$(id -u)"
+data/local/local.agentroom.plist`, then restore only its two Serve mappings to
+the loopback app and Dex ports:
+
+```sh
+tailscale serve --bg --https=4445 --yes http://127.0.0.1:4445
+tailscale serve --bg --https=4446 --yes http://127.0.0.1:5557
+```
+
+Never reset all Serve routes or remove database
+volumes to restart this instance. Preserve the checkout, private runtime files,
+and LaunchAgents link. Sentry's independent services are unaffected.
+
+Physical Vision Pro acceptance and signed Linux promotion remain separate from
+the local WebXR build. Read `releases/spatial-workspace.md` for their checklist.
+
+The operator-designated remote machine is the eventual deployment home. This
+local installation is a staging step for headset testing. Its actual host
+identifier stays in `data/local/deployment.json`; verify that host's platform
+before producing the promoted artifact and activating the remote service.
+
+## Local Sentry Publisher
+
+The independent publisher runs from this checkout with Sentry's existing Python
+environment. It uses Sentry's scanner read-only; its current board, watcher,
+history, backups, and source configuration are unchanged. The connector is
+installed separately from the daemon/web release archive.
+
+Private configuration is `data/local/sentry/connector.toml`, durable SQLite state
+is `data/local/sentry/state/`, and publisher credentials are under
+`data/local/sentry/secrets/`. Directories are owner-only, files mode 0600.
+The active configuration maps all 99 projects discovered and explicitly approved
+on 2026-10-15. Existing project IDs and the durable queue are preserved. The
+operator has the established full project permissions, while the publisher has
+only `event:ingest,source:sentry` across those exact project IDs. Newly discovered
+unmapped projects are reported as needing provisioning, not silently imported.
+
+```sh
+/path/to/sentry/.venv/bin/python -B adapters/sentry/agentroom_sentry.py \
+  --config data/local/sentry/connector.toml status
+launchctl print "gui/$(id -u)/local.agentroom-sentry"
+launchctl kickstart -k "gui/$(id -u)/local.agentroom-sentry"
+```
+
+The launch agent uses `watch`, collects every 300 seconds, and drains pending
+delivery between collections. Its private plist and logs are in
+`data/local/sentry/`. Preserve its state directory and source instance/path
+bindings through restart or host migration. Never reset the queue to repair
+transport or authorization failures: immutable queued observations are retried
+with their original event IDs, sequences, and collection times. `status` exposes
+pending delivery, quarantined records, provisioning needs, and safe error codes.
+Unmapped/unreadable/window-expired sources do not delete existing records.
+
+Provision additional projects using `agentroomctl project ensure` and the
+existing `membership grant` operator commands before changing the mapping.
+Reconciliation preserves canonical names, and unchanged grants do not rotate
+sessions. Actual access changes rotate sessions as before. Publisher tokens
+use exact project IDs and only `event:ingest,source:sentry`; no wildcard,
+administration, database access, or resource replacement is granted.
+
+The local token has a 30-day lifetime; its actual expiry and ID are in
+`data/local/sentry/publisher-metadata.json`. Before expiry, create a replacement
+with the same exact scopes, atomically replace the mode-0600 token file, verify
+delivery, then revoke the previous token using the CLI. No collector restart is
+needed to reload the token. Do not print or copy tokens into Memory Bank files.
+Stop only this publisher with `launchctl bootout` for its own label. Agent Room
+and Sentry remain independently supervised.
+
+## Local GitHub Publisher
+
+The read-only GitHub provider is supervised as `local.agentroom-github` and
+uses the existing private adapter listener. Private configuration/state/token,
+logs, backups and build evidence live in ignored `data/local/github/`.
+Directories are owner-only; token/config files are mode 0600. Its initial mapping
+covers this repository's existing Agent Room project, with only event:ingest
+and source:github on its Agent Room token. Public GitHub access is anonymous;
+no development GitHub credential is copied. Optional private GitHub read tokens
+must be explicitly configured and renewed externally. Actual source-token ID
+and expiry are in private `publisher-metadata.json` (90-day initial lifetime).
+
+```sh
+python3 -B adapters/github/agentroom_github.py \
+  --config data/local/github/connector.toml status
+launchctl print "gui/$(id -u)/local.agentroom-github"
+launchctl kickstart -k "gui/$(id -u)/local.agentroom-github"
+```
+
+The default local poll is 900 seconds with a bounded request budget. `status`
+is read-only. Do not run `once` concurrently with `watch`: one process owns the
+state lock. Restart only this publisher to request a fresh immediate pass.
+Preserve its state directory and repository binding through restarts/moves;
+never clear the queue to repair transport. GitHub report freshness is independent
+of Sentry's report in the same project. Existing source fields remain attributed
+and cannot accept canonical completion or change human authority.
+
+The pre-install snapshot includes native/web/configuration, both databases and
+a consistent Sentry queue. Stop this publisher before rolling back to a daemon
+without typed GitHub observation support, then restore the recorded artifacts.
+Keep its queue for deliberate recovery. No new public ingress route or tailnet
+mapping is needed. Final merged artifact provenance and activation phase are
+recorded under `github_observations` in private deployment metadata. See
+[GitHub observations](releases/github-observations.md).
+
+## Local Participant Reporting
+
+The approved agent coordination iteration adds an explicit metadata-only
+`agentroomctl report` command. It requires a separately provisioned, exact-project
+runtime token with `event:ingest,source:<runtime>`. Coordination capabilities are
+separate and can be narrowed to requester or recipient actions. Sentry's
+publisher credential remains source-only and must not acquire these permissions.
+
+Reports run as the actual participant with its own native session identity.
+They do not require database configuration, read conversation files, launch
+workers, or install another service. Keep private state in a distinct mode-0700
+directory per actor/project/runtime/instance/endpoint binding, and bearer files
+mode 0600. Retry using `--retry` with the same binding; never delete the state to
+work around an uncertain delivery. Only HTTP 202 clears queued observations.
+Presence expires after five minutes. Report idle/closed at the end of actual
+work, and revoke temporary acceptance credentials when testing is complete.
+See `README.md#agent-coordination` for the command and
+`releases/agent-coordination-workspace.md` for acceptance evidence.
+
+## Production Topology
 
 ```
 Public Internet

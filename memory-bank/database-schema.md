@@ -2,7 +2,7 @@
 
 **Status:** Domain model, not a database migration
 
-**Last updated:** 2026-07-28
+**Last updated:** 2026-10-15
 
 PostgreSQL 18 is the selected storage engine. These entities and invariants
 remain independent of physical schema details.
@@ -20,6 +20,11 @@ Authenticated person with roles and policy assignments.
 ### Agent
 
 Persistent participant identity with name, role, capabilities, runtime home, voice/avatar presentation, and trust profile.
+
+Explicit runtime observations add an observed status/time, native instance
+reference, and five-minute presence lease. Availability is separate from a
+running Run. Session/run observations bind to the authenticated agent and use
+project/runtime/agent/native identity for their canonical IDs.
 
 ### AgentInstance
 
@@ -48,6 +53,18 @@ Work item with owner, status, version, dependencies, priority, budget, review st
 ### TaskTransition
 
 Attributable transition request and result. Stores prior state, requested state, accepted state, reason, actor, policy decision, and causation.
+
+### CoordinationRequest
+
+An explicit help/context/handoff/review request with an authenticated owner and
+named agent/human recipient. Same-project task/evidence references provide
+context. Status is open, responded, resolved, or cancelled; response and closure
+retain actual actor/time and evidence. Human recipients require an escalation
+reason and human participation. Versions, idempotency, recipient privacy, and
+audit attribution apply. No implicit ownership transfer or completion acceptance.
+
+The existing generic resources/events/commands/audit storage carries this new
+resource kind; no SQL migration is needed for the coordination release.
 
 ### Claim
 

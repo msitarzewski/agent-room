@@ -3,7 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
 import { vi } from "vitest";
 import { App } from "../App";
-import { AuthProvider } from "../auth/AuthContext";
+import { AuthProvider, safeLoginReturnTo } from "../auth/AuthContext";
+import { api } from "../api/client";
+import type { ProjectBrief } from "../api/types";
 import {
   artifact,
   approval,
@@ -24,6 +26,7 @@ interface FetchOptions {
   authenticated?: boolean;
   degradedHealth?: boolean;
   nullProjects?: boolean;
+  brief?: ProjectBrief;
 }
 
 interface ControlledSocket {
@@ -56,7 +59,9 @@ function mockApi(options: FetchOptions = {}) {
       return Promise.resolve(Response.json({ title: "Unavailable", detail: "Adapter is offline.", status: 503 }, { status: 503 }));
     }
     if (url.pathname === "/api/v1/brief/acknowledge" && init?.method === "POST") {
-      return Promise.resolve(Response.json({ reviewed_cursor: 42, replayed: false }));
+      if (typeof init.body !== "string") throw new Error("Expected a JSON review command.");
+      const command = JSON.parse(init.body) as { through_cursor: number };
+      return Promise.resolve(Response.json({ reviewed_cursor: command.through_cursor, replayed: false }));
     }
     if (url.pathname === "/api/v1/projects" && options.nullProjects) {
       return Promise.resolve(Response.json({ items: null }));
@@ -70,7 +75,7 @@ function mockApi(options: FetchOptions = {}) {
         : health));
     }
     if (url.pathname === "/api/v1/brief") {
-      return Promise.resolve(Response.json(projectBrief));
+      return Promise.resolve(Response.json(options.brief ?? projectBrief));
     }
     const items = options.empty ? [] : (endpointItems[url.pathname] ?? []);
     return Promise.resolve(Response.json({ items, next_cursor: null }));
@@ -106,12 +111,34 @@ describe("Agent Room application", () => {
     expect(document.body).not.toHaveTextContent(/identity provider|network membership|authorization code/i);
   });
 
-  it("returns unauthenticated protected routes to the public threshold", async () => {
-    await renderPath("/tasks", { authenticated: false });
+  it("preserves an unauthenticated protected destination while presenting the public threshold", async () => {
+    await renderPath("/workspace?project=project_alpha&task=task_1", { authenticated: false });
     expect(await screen.findByRole("heading", {
       name: "The work continues. The room remembers.",
     })).toBeInTheDocument();
-    expect(window.location.pathname).toBe("/");
+    expect(window.location.pathname).toBe("/workspace");
+    expect(window.location.search).toBe("?project=project_alpha&task=task_1");
+    const loginUrl = vi.spyOn(api, "loginUrl").mockReturnValue("#oidc-start");
+    await userEvent.setup().click(screen.getByRole("button", { name: "Enter quietly" }));
+    expect(loginUrl).toHaveBeenCalledWith("/workspace?project=project_alpha&task=task_1");
+  });
+
+  it("defaults root and legacy login entry to the root without a login loop", async () => {
+    const loginUrl = vi.spyOn(api, "loginUrl").mockReturnValue("#oidc-start");
+    const first = await renderPath("/", { authenticated: false });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Enter quietly" }));
+    expect(loginUrl).toHaveBeenLastCalledWith("/");
+    first.unmount();
+    await renderPath("/login?provider=ignored", { authenticated: false });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Enter quietly" }));
+    expect(loginUrl).toHaveBeenLastCalledWith("/");
+  });
+
+  it("preserves local query/fragment context and rejects unsafe or looping OIDC destinations", () => {
+    expect(safeLoginReturnTo("/workspace?project=alpha&task=task_1#evidence")).toBe("/workspace?project=alpha&task=task_1#evidence");
+    for (const target of ["", "https://outside.example/path", "//outside.example", "/\\outside.example", "/%2f%2foutside.example", "/%5coutside.example", "/login", "/safe/../login?again=yes", "/api/v1/auth/login", "/bad%escape", "/\noutside.example"]) {
+      expect(safeLoginReturnTo(target), target).toBe("/");
+    }
   });
 
   it("keeps a first login without project membership usable", async () => {
@@ -127,6 +154,8 @@ describe("Agent Room application", () => {
     const { container, calls } = await renderPath("/");
     expect(await screen.findByRole("heading", { name: "What needs you now" })).toBeInTheDocument();
     expect(screen.getByText("Review authentication evidence")).toBeInTheDocument();
+    expect(screen.getByText("Project coordination update")).toBeInTheDocument();
+    expect(screen.getByText(/work events · .* source checks · .* task reports/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Mark changes reviewed" }));
     await screen.findByText(/Changes through event 42 were marked reviewed/);
     const briefAck = calls.find((call) => call.url === "/api/v1/brief/acknowledge");
@@ -140,6 +169,17 @@ describe("Agent Room application", () => {
     expect(new Headers(mutation?.init?.headers).get("X-CSRF-Token")).toBe("test-csrf");
     expect(new Headers(mutation?.init?.headers).get("If-Match")).toBe("1");
     expect((await axe(container)).violations).toEqual([]);
+  });
+
+  it("separates routine source checks and task reports from work events without changing review cursors", async () => {
+    const brief = { ...projectBrief, through_cursor: 51, event_counts: { "project.observed": 7, "task.observed": 3, "review.requested": 1 } };
+    const { calls } = await renderPath("/", { brief });
+    expect(await screen.findByText("1 work events · 7 source checks · 3 task reports")).toBeInTheDocument();
+    expect(screen.getByText("project.observed")).toBeInTheDocument();
+    expect(screen.getByText("task.observed")).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Mark changes reviewed" }));
+    await screen.findByText(/Changes through event 51 were marked reviewed/);
+    expect(calls.find((call) => call.url === "/api/v1/brief/acknowledge")?.init?.body).toBe(JSON.stringify({ expected_cursor: 40, through_cursor: 51 }));
   });
 
   it("shows real run controls only when capabilities advertise them", async () => {
@@ -309,12 +349,17 @@ describe("Agent Room application", () => {
       occurred_at: "2026-07-27T12:01:00Z",
       data: {},
     }));
-    await screen.findByText(/updated/);
+    await screen.findByText(/Last project activity/);
+    const activity = screen.getByText(/Last project activity/);
+    expect(activity.querySelector("time")).toHaveAttribute("datetime", "2026-07-27T12:01:00Z");
+    expect(screen.getByText(/Connection opened/).querySelector("time")).toBeInTheDocument();
     act(() => socket?.emitMessage({
       cursor: 43,
       type: "heartbeat",
       occurred_at: "2026-07-27T12:01:01Z",
     }));
+    expect(screen.getByText(/Last message received/).querySelector("time")).toBeInTheDocument();
+    expect(activity.querySelector("time")).toHaveAttribute("datetime", "2026-07-27T12:01:00Z");
     act(() => socket?.emitMessage({
       cursor: 44,
       type: "resync_required",

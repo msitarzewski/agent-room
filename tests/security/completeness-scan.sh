@@ -7,7 +7,7 @@ cd "${repo_root}"
 command -v rg >/dev/null 2>&1 || { printf 'ripgrep is required\n' >&2; exit 1; }
 
 production_paths=()
-for candidate in cmd internal web/src deploy; do
+for candidate in cmd internal web/src deploy adapters; do
   [[ -e "${candidate}" ]] && production_paths+=("${candidate}")
 done
 (( ${#production_paths[@]} > 0 )) || {

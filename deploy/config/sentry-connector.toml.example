@@ -1,0 +1,20 @@
+# Run with the Sentry checkout's Python interpreter; no Vikunja access is used.
+# Provision Agent Room projects and exact project-scoped source:sentry tokens first.
+# once exits 2 if a bounded delivery pass leaves pending work; watch drains it.
+[connector]
+sentry_checkout = "/path/to/sentry"
+sentry_config = "/path/to/sentry/sentry.toml"
+state_dir = "/path/to/private/agentroom/sentry-state"
+instance_id = "workstation-source"
+ingest_url = "http://127.0.0.1:8082/api/v1/ingest"
+poll_seconds = 300
+timeout_seconds = 5
+batch_size = 50
+max_batch_bytes = 524288
+
+# Repeat once per provisioned project. Paths are resolved before comparison.
+# The publisher never creates projects or grants permissions.
+[[projects]]
+path = "/path/to/project"
+project_id = "operator-provisioned-project-id"
+token_file = "/path/to/private/agentroom/source-token"

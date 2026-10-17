@@ -163,6 +163,101 @@ func TestServerAndMCPIntegrationBoundaries(t *testing.T) {
 		return rawRequest(t, method, public.URL+path, body, headers, sessionCookie)
 	}
 
+	t.Run("workspace snapshot and long stream replay stay complete", func(t *testing.T) {
+		const workspaceProject = "workspace-http"
+		if _, err := repository.Pool().Exec(ctx, `INSERT INTO projects(id,name) VALUES($1,'HTTP workspace')`, workspaceProject); err != nil {
+			t.Fatal(err)
+		}
+		ingester := app.Actor{ID: "sentry-http", Capabilities: map[string]struct{}{"event:ingest": {}, "source:sentry": {}}}
+		events := make([]domain.Event, 1101)
+		for index := range events {
+			payload, _ := json.Marshal(domain.TaskObservation{ExternalID: fmt.Sprintf("task-%d", index), Title: "Observed HTTP task", Status: "working"})
+			events[index] = domain.Event{ProjectID: workspaceProject, Type: "task.observed", SubjectType: domain.ResourceTask, SubjectID: "source-task", SourceSystem: "sentry", SourceEventID: fmt.Sprintf("http-scan-%d", index), SourceSequence: 1, Payload: payload}
+		}
+		if err := service.Ingest(ctx, ingester, events); err != nil {
+			t.Fatal(err)
+		}
+		response := api(http.MethodGet, "/api/v1/workspace?project_id="+workspaceProject, nil, nil)
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("workspace status=%d body=%s", response.StatusCode, readBody(response))
+		}
+		defer response.Body.Close()
+		var snapshot app.WorkspaceSnapshot
+		if err := json.NewDecoder(response.Body).Decode(&snapshot); err != nil {
+			t.Fatal(err)
+		}
+		if len(snapshot.Resources.Tasks) != 1101 || snapshot.Cursor == 0 || len(snapshot.Sources) != 1 || snapshot.Sources[0].System != "sentry" || snapshot.Resources.Approvals == nil || snapshot.Resources.Agents == nil {
+			t.Fatalf("workspace tasks=%d cursor=%d sources=%+v", len(snapshot.Resources.Tasks), snapshot.Cursor, snapshot.Sources)
+		}
+		unauthenticated := rawRequest(t, http.MethodGet, public.URL+"/api/v1/workspace?project_id="+workspaceProject, nil, nil, nil)
+		expectHTTPProblem(t, unauthenticated, http.StatusUnauthorized, "authentication_required")
+		missingProject := api(http.MethodGet, "/api/v1/workspace", nil, nil)
+		expectHTTPProblem(t, missingProject, http.StatusBadRequest, "project_required")
+		if _, err := repository.Pool().Exec(ctx, `INSERT INTO user_accounts(id,username,display_name,capabilities) VALUES('workspace-scoped','workspace-scoped','Scoped',ARRAY['task:read']::text[]); INSERT INTO project_memberships(project_id,user_id,capabilities) VALUES('workspace-http','workspace-scoped',ARRAY['task:read']::text[])`); err != nil {
+			t.Fatal(err)
+		}
+		_, token, err := authManager.CreateSession(ctx, auth.User{ID: "workspace-scoped", Username: "workspace-scoped", DisplayName: "Scoped", Capabilities: []string{"task:read"}}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		limitedCookie := &http.Cookie{Name: auth.DevCookieName, Value: token}
+		limited := rawRequest(t, http.MethodGet, public.URL+"/api/v1/workspace?project_id="+workspaceProject, nil, nil, limitedCookie)
+		expectHTTPProblem(t, limited, http.StatusForbidden, "capability_denied")
+		crossProject := rawRequest(t, http.MethodGet, public.URL+"/api/v1/workspace?project_id="+projectID, nil, nil, limitedCookie)
+		expectHTTPProblem(t, crossProject, http.StatusForbidden, "capability_denied")
+		streamContext, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		connection, response, err := websocket.Dial(streamContext, "ws"+strings.TrimPrefix(public.URL, "http")+"/api/v1/stream?project_id="+workspaceProject+"&after=0", &websocket.DialOptions{HTTPHeader: http.Header{"Cookie": {sessionCookie.String()}, "Origin": {origin}}})
+		if err != nil {
+			if response != nil {
+				t.Fatalf("long-replay websocket status=%d body=%s err=%v", response.StatusCode, readBody(response), err)
+			}
+			t.Fatal(err)
+		}
+		defer connection.CloseNow()
+		_, message, err := connection.Read(streamContext)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var value realtime.Message
+		if err := json.Unmarshal(message, &value); err != nil {
+			t.Fatal(err)
+		}
+		if value.Type != "resync_required" {
+			t.Fatalf("long backlog silently truncated: %s", message)
+		}
+		connection.CloseNow()
+		for iteration := 0; iteration < 8; iteration++ {
+			idle, handshake, err := websocket.Dial(streamContext, "ws"+strings.TrimPrefix(public.URL, "http")+"/api/v1/stream?project_id="+workspaceProject+"&after="+strconv.FormatInt(snapshot.Cursor, 10), &websocket.DialOptions{
+				HTTPHeader: http.Header{"Cookie": {sessionCookie.String()}, "Origin": {origin}}, CompressionMode: websocket.CompressionContextTakeover,
+			})
+			if err != nil {
+				if handshake != nil {
+					t.Fatalf("idle reconnect %d status=%d err=%v", iteration, handshake.StatusCode, err)
+				}
+				t.Fatal(err)
+			}
+			if extensions := handshake.Header.Get("Sec-WebSocket-Extensions"); extensions != "" {
+				idle.CloseNow()
+				t.Fatalf("control stream negotiated compression: %s", extensions)
+			}
+			idle.CloseNow()
+			deadline := time.Now().Add(time.Second)
+			for {
+				server.limits.mu.Lock()
+				remaining := server.limits.sockets["httpapi-operator:"+workspaceProject]
+				server.limits.mu.Unlock()
+				if remaining == 0 {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("idle peer disconnect retained %d socket slots", remaining)
+				}
+				time.Sleep(time.Millisecond)
+			}
+		}
+	})
+
 	t.Run("web handlers traverse success and validation branches", func(t *testing.T) {
 		for _, path := range []string{
 			"/api/v1/projects",
@@ -662,6 +757,291 @@ func TestServerAndMCPIntegrationBoundaries(t *testing.T) {
 			if body := readBody(response); !strings.Contains(body, `"isError":true`) {
 				t.Fatalf("restricted MCP %s unexpectedly succeeded: %s", name, body)
 			}
+		}
+	})
+
+	t.Run("least privilege Sentry project heartbeat is visible without tasks", func(t *testing.T) {
+		const project = "sentry-empty-http"
+		if _, err := repository.EnsureProject(ctx, project, "Operator-owned project"); err != nil {
+			t.Fatal(err)
+		}
+		created, err := auth.CreateServiceTokenWithMetadata(ctx, repository.Pool(), "sentry-http-publisher", "Read-only Sentry publisher", "source:sentry", []string{project}, []string{"event:ingest", "source:sentry"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		headers := map[string]string{"Authorization": "Bearer " + created.Token, "Content-Type": "application/json"}
+		collected := time.Now().UTC().Add(-20 * time.Hour).Truncate(time.Microsecond)
+		observation := domain.ProjectObservation{ExternalID: "Software/empty-http", Name: "Source-reported project", Path: "/source/empty-http", Status: "Active", Reason: "Recent activity", CollectedAt: collected, ScanStatus: "complete", TaskCount: 0}
+		payload, _ := json.Marshal(observation)
+		event := domain.Event{ProjectID: project, Type: "project.observed", SubjectType: domain.ResourceProject, SubjectID: "source-id", SourceSystem: "sentry", SourceEventID: "empty-http-scan", SourceSequence: 1, Payload: payload}
+		body, _ := json.Marshal(map[string]any{"events": []domain.Event{event}})
+		post := func(project string, content []byte) *http.Response {
+			return rawRequest(t, http.MethodPost, adapter.URL+"/api/v1/ingest?project_id="+project, bytes.NewReader(content), headers, nil)
+		}
+		for retry := 0; retry < 2; retry++ {
+			response := post(project, body)
+			if response.StatusCode != http.StatusAccepted {
+				t.Fatalf("heartbeat status=%d body=%s", response.StatusCode, readBody(response))
+			}
+			_ = response.Body.Close()
+		}
+		response := api(http.MethodGet, "/api/v1/workspace?project_id="+project, nil, nil)
+		var snapshot app.WorkspaceSnapshot
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("workspace status=%d body=%s", response.StatusCode, readBody(response))
+		}
+		if err := json.NewDecoder(response.Body).Decode(&snapshot); err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+		if len(snapshot.Resources.Tasks) != 0 || len(snapshot.Sources) != 1 || snapshot.Sources[0].LastCollectedAt == nil || !snapshot.Sources[0].LastCollectedAt.Equal(collected) || snapshot.Sources[0].LastReceivedAt.Sub(collected) < 19*time.Hour || snapshot.Sources[0].ProjectObservation.TaskCount != 0 {
+			t.Fatalf("zero-task freshness=%+v", snapshot)
+		}
+		response = api(http.MethodGet, "/api/v1/overview?project_id="+project, nil, nil)
+		var overview struct {
+			Sources []app.WorkspaceSource `json:"sources"`
+		}
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("overview status=%d body=%s", response.StatusCode, readBody(response))
+		}
+		if err := json.NewDecoder(response.Body).Decode(&overview); err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+		if len(overview.Sources) != 1 || !overview.Sources[0].LastCollectedAt.Equal(collected) {
+			t.Fatalf("overview omitted heartbeat=%+v", overview)
+		}
+		// Scope checks precede ingestion; a publisher cannot provision a project.
+		denied := post("unprovisioned-http-project", body)
+		expectHTTPProblem(t, denied, http.StatusForbidden, "capability_denied")
+		var exists bool
+		if err := repository.Pool().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM projects WHERE id='unprovisioned-http-project')`).Scan(&exists); err != nil || exists {
+			t.Fatalf("publisher provisioned unknown project=%v err=%v", exists, err)
+		}
+		// Typed source metadata cannot smuggle canonical resource replacements.
+		event.SourceEventID, event.SourceSequence = "empty-http-authority", 2
+		var privileged map[string]any
+		_ = json.Unmarshal(payload, &privileged)
+		privileged["membership"] = []string{"project:all"}
+		event.Payload, _ = json.Marshal(privileged)
+		body, _ = json.Marshal(map[string]any{"events": []domain.Event{event}})
+		expectHTTPProblem(t, post(project, body), http.StatusBadRequest, "validation_failed")
+		var name string
+		if err := repository.Pool().QueryRow(ctx, `SELECT name FROM projects WHERE id=$1`, project).Scan(&name); err != nil || name != "Operator-owned project" {
+			t.Fatalf("canonical name=%s err=%v", name, err)
+		}
+	})
+
+	t.Run("typed participant requests cross REST MCP and human boundaries", func(t *testing.T) {
+		const project = "coordination-http"
+		if _, err := repository.EnsureProject(ctx, project, "Coordination HTTP"); err != nil {
+			t.Fatal(err)
+		}
+		caps := []string{"event:ingest", "source:codex", "coordination:create", "coordination:read", "coordination:respond", "coordination:resolve", "coordination:cancel", "overview:read"}
+		owner, err := auth.CreateServiceTokenWithMetadata(ctx, repository.Pool(), "coord-owner", "Owner", "agent:http-owner", []string{project}, caps, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		recipient, err := auth.CreateServiceTokenWithMetadata(ctx, repository.Pool(), "coord-recipient", "Recipient", "agent:http-recipient", []string{project}, caps, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		outsider, err := auth.CreateServiceTokenWithMetadata(ctx, repository.Pool(), "coord-outsider", "Outsider", "agent:http-outsider", []string{project}, []string{"coordination:read", "coordination:respond", "overview:read"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		publisher, err := auth.CreateServiceTokenWithMetadata(ctx, repository.Pool(), "coord-sentry", "Publisher", "source:sentry", []string{project}, []string{"event:ingest", "source:sentry"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		call := func(token, method, path string, input any, idem string, version int64) *http.Response {
+			t.Helper()
+			var body io.Reader
+			if input != nil {
+				raw, _ := json.Marshal(input)
+				body = bytes.NewReader(raw)
+			}
+			headers := map[string]string{"Authorization": "Bearer " + token, "Content-Type": "application/json"}
+			if idem != "" {
+				headers["Idempotency-Key"] = idem
+			}
+			if version > 0 {
+				headers["If-Match"] = strconv.FormatInt(version, 10)
+			}
+			return rawRequest(t, method, adapter.URL+path+"?project_id="+project, body, headers, nil)
+		}
+		for _, identity := range []struct{ actor, token string }{{"agent:http-owner", owner.Token}, {"agent:http-recipient", recipient.Token}} {
+			at := time.Now().UTC()
+			payload, _ := json.Marshal(domain.AgentObservation{AgentID: identity.actor, InstanceID: "http-test-instance", DisplayName: identity.actor + " display", Status: "idle", ObservedAt: at})
+			event := domain.Event{ProjectID: project, SubjectType: domain.ResourceAgent, SubjectID: "forged", Type: "agent.observed", SourceSystem: "codex", SourceEventID: identity.actor + "-presence", SourceSequence: 1, Payload: payload}
+			response := call(identity.token, http.MethodPost, "/api/v1/ingest", map[string]any{"events": []domain.Event{event}}, "", 0)
+			if response.StatusCode != http.StatusAccepted {
+				t.Fatalf("runtime ingest=%d body=%s", response.StatusCode, readBody(response))
+			}
+			_ = response.Body.Close()
+		}
+
+		// A source-only runtime credential cannot select legacy event names to
+		// bypass the actor-bound report contract and target another participant.
+		protected := []struct {
+			kind      domain.ResourceType
+			id, event string
+			value     any
+		}{
+			{domain.ResourceTask, "human-http-task", "task.completed", domain.Task{Base: domain.Base{ID: "human-http-task"}, Title: "Human task", OwnerID: "human", Status: "working", Description: "Preserve manual content", Priority: "high", Dependencies: []string{}}},
+			{domain.ResourceRun, "other-http-run", "run.cancelled", domain.Run{Base: domain.Base{ID: "other-http-run"}, AgentID: "agent:other", Status: "running", Capabilities: []string{}}},
+			{domain.ResourceSession, "other-http-session", "session.closed", domain.Session{Base: domain.Base{ID: "other-http-session"}, AgentID: "agent:other", Status: "active"}},
+			{domain.ResourceApproval, "human-http-approval", "approval.resolved", domain.Approval{Base: domain.Base{ID: "human-http-approval"}, Status: "pending", RequestedBy: "human", Reason: "Human approval", ExpiresAt: time.Now().Add(time.Hour)}},
+		}
+		for _, target := range protected {
+			created, err := service.Create(ctx, setupActor, target.kind, project, "protected-create-"+target.id, target.value, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			attack := domain.Event{ProjectID: project, SubjectType: target.kind, SubjectID: target.id, Type: target.event, SourceSystem: "codex", SourceEventID: "legacy-attack-" + target.id, SourceSequence: 2, Payload: json.RawMessage(`{}`)}
+			expectHTTPProblem(t, call(owner.Token, http.MethodPost, "/api/v1/ingest", map[string]any{"events": []domain.Event{attack}}, "", 0), http.StatusForbidden, "capability_denied")
+			raw, err := repository.Get(ctx, project, target.kind, target.id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var original, actual any
+			_ = json.Unmarshal(created.Resource, &original)
+			_ = json.Unmarshal(raw, &actual)
+			a, _ := json.Marshal(original)
+			b, _ := json.Marshal(actual)
+			if !bytes.Equal(a, b) {
+				t.Fatalf("API runtime changed protected %s", target.id)
+			}
+		}
+		input := app.CreateCoordinationInput{ID: "http-request", Kind: "context", Title: "Share context", Body: "Private participant context", Recipient: domain.CoordinationRecipient{Type: "agent", ID: "agent:http-recipient"}}
+		response := call(owner.Token, http.MethodPost, "/api/v1/requests", input, "http-coord-create", 0)
+		if response.StatusCode != http.StatusCreated || response.Header.Get("ETag") != "1" {
+			t.Fatalf("request create=%d body=%s", response.StatusCode, readBody(response))
+		}
+		var request domain.CoordinationRequest
+		if err := json.NewDecoder(response.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+		if request.OwnerID != "agent:http-owner" || request.OwnerType != "agent" || request.EvidenceIDs == nil {
+			t.Fatalf("server attribution=%+v", request)
+		}
+		expectHTTPProblem(t, call(publisher.Token, http.MethodPost, "/api/v1/requests", input, "source-forbidden", 0), http.StatusForbidden, "capability_denied")
+		expectHTTPProblem(t, call(outsider.Token, http.MethodGet, "/api/v1/requests/http-request", nil, "", 0), http.StatusNotFound, "not_found")
+		response = call(outsider.Token, http.MethodGet, "/api/v1/requests", nil, "", 0)
+		var page app.Page
+		if err := json.NewDecoder(response.Body).Decode(&page); err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+		if len(page.Items) != 0 {
+			t.Fatal("recipient list leaked")
+		}
+		expectHTTPProblem(t, call(recipient.Token, http.MethodPost, "/api/v1/requests/http-request/respond", app.CoordinationActionInput{Body: "Context supplied"}, "missing-version", 0), http.StatusPreconditionRequired, "version_required")
+		expectHTTPProblem(t, call(outsider.Token, http.MethodPost, "/api/v1/requests/http-request/respond", app.CoordinationActionInput{Body: "Wrong actor"}, "outside-response", 1), http.StatusForbidden, "capability_denied")
+		response = call(recipient.Token, http.MethodPost, "/api/v1/requests/http-request/respond", app.CoordinationActionInput{Body: "Context supplied"}, "http-coord-response", 1)
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("response=%d body=%s", response.StatusCode, readBody(response))
+		}
+		_ = response.Body.Close()
+		response = call(recipient.Token, http.MethodPost, "/api/v1/requests/http-request/respond", app.CoordinationActionInput{Body: "Context supplied"}, "http-coord-response", 1)
+		if response.StatusCode != http.StatusOK || response.Header.Get("Idempotency-Replayed") != "true" {
+			t.Fatalf("response retry=%d body=%s", response.StatusCode, readBody(response))
+		}
+		_ = response.Body.Close()
+		headers := map[string]string{"Authorization": "Bearer " + owner.Token}
+		mcpInput := `{"id":"mcp-human-request","kind":"help","title":"Explicit human decision","body":"Recorded reason","recipient":{"type":"human","id":"httpapi-operator"},"escalation_reason":"Need the designated human's judgment","idempotency_key":"mcp-human-create"}`
+		mcpResponse := mcpCall(t, adapter.URL+"/api/v1/mcp?project_id="+project, headers, 501, "create_coordination_request", mcpInput)
+		if body := readBody(mcpResponse); mcpResponse.StatusCode != http.StatusOK || strings.Contains(body, `"isError":true`) || !strings.Contains(body, "mcp-human-request") {
+			t.Fatalf("MCP typed create=%s", body)
+		}
+		mcpResponse = mcpCall(t, adapter.URL+"/api/v1/mcp?project_id="+project, headers, 502, "list_coordination_requests", `{}`)
+		if body := readBody(mcpResponse); mcpResponse.StatusCode != http.StatusOK || !strings.Contains(body, "mcp-human-request") {
+			t.Fatalf("MCP scoped list=%s", body)
+		}
+		expectHTTPProblem(t, call(recipient.Token, http.MethodPost, "/api/v1/requests/mcp-human-request/respond", app.CoordinationActionInput{Body: "Pretend human"}, "machine-human", 1), http.StatusForbidden, "capability_denied")
+		humanResponse := api(http.MethodPost, "/api/v1/requests/mcp-human-request/respond?project_id="+project, strings.NewReader(`{"body":"Human's explicit response"}`), mutationHeaders("human-coord-response", 1))
+		if humanResponse.StatusCode != http.StatusOK {
+			t.Fatalf("human response=%d body=%s", humanResponse.StatusCode, readBody(humanResponse))
+		}
+		if err := json.NewDecoder(humanResponse.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		_ = humanResponse.Body.Close()
+		if request.Response.ActorID != "httpapi-operator" {
+			t.Fatalf("human override attributed as agent=%+v", request)
+		}
+		mcpResponse = mcpCall(t, adapter.URL+"/api/v1/mcp?project_id="+project, headers, 503, "act_coordination_request", `{"request_id":"http-request","action":"resolve","expected_version":2,"idempotency_key":"mcp-resolve","note":"Context recorded"}`)
+		if body := readBody(mcpResponse); mcpResponse.StatusCode != http.StatusOK || strings.Contains(body, `"isError":true`) || !strings.Contains(body, "resolved") {
+			t.Fatalf("MCP resolve=%s", body)
+		}
+		response = api(http.MethodGet, "/api/v1/workspace?project_id="+project, nil, nil)
+		var snapshot app.WorkspaceSnapshot
+		if err := json.NewDecoder(response.Body).Decode(&snapshot); err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+		if len(snapshot.Resources.Requests) != 2 || len(snapshot.Resources.Agents) != 2 || len(snapshot.Resources.Runs) != 1 {
+			t.Fatalf("snapshot requests=%+v", snapshot)
+		}
+		// An event-reader with no mailbox participation must receive neither replay
+		// nor live request content. A visible sentinel proves the stream advanced.
+		if _, err := repository.Pool().Exec(ctx, `INSERT INTO user_accounts(id,username,display_name,capabilities) VALUES('coord-event-reader','coord-event-reader','Event reader','{}')`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repository.Pool().Exec(ctx, `INSERT INTO project_memberships(project_id,user_id,capabilities) VALUES($1,'coord-event-reader',ARRAY['event:read','coordination:read','audit:read']::text[])`, project); err != nil {
+			t.Fatal(err)
+		}
+		_, token, err := authManager.CreateSession(ctx, auth.User{ID: "coord-event-reader"}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		cookie := &http.Cookie{Name: auth.DevCookieName, Value: token}
+		legacyAudit := domain.AuditRecord{Base: domain.NewBase("coord-legacy-audit", project, time.Now().UTC()), ActorID: "agent:http-owner", Action: "respond.coordination_request", ResourceType: "coordination_request", ResourceID: "http-request", Outcome: "accepted", Details: json.RawMessage(`{"body":"Private historical response","request_body":"Private historical request"}`)}
+		legacyRaw, _ := json.Marshal(legacyAudit)
+		if _, err := repository.Pool().Exec(ctx, `INSERT INTO resources(project_id,kind,id,version,document,created_at,updated_at) VALUES($1,'audit',$2,1,$3,$4,$4)`, project, legacyAudit.ID, legacyRaw, legacyAudit.CreatedAt); err != nil {
+			t.Fatal(err)
+		}
+		for _, path := range []string{"/api/v1/audit", "/api/v1/audit/" + legacyAudit.ID} {
+			response := rawRequest(t, http.MethodGet, public.URL+path+"?project_id="+project, nil, nil, cookie)
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("audit read=%d body=%s", response.StatusCode, readBody(response))
+			}
+			if body := readBody(response); strings.Contains(body, "Private historical") || strings.Contains(body, "Private participant context") || strings.Contains(body, "Context supplied") || strings.Contains(body, "Human's explicit response") {
+				t.Fatalf("audit request body leaked=%s", body)
+			}
+		}
+		storedAudit, err := repository.Get(ctx, project, domain.ResourceAudit, legacyAudit.ID)
+		if err != nil || !strings.Contains(string(storedAudit), "Private historical response") {
+			t.Fatalf("read rewrote immutable audit=%s err=%v", storedAudit, err)
+		}
+		var retainedDetails int
+		if err := repository.Pool().QueryRow(ctx, `SELECT count(*) FROM audit_records WHERE project_id=$1 AND resource_type='coordination_request' AND outcome='accepted' AND details IS NOT NULL`, project).Scan(&retainedDetails); err != nil || retainedDetails != 0 {
+			t.Fatalf("new coordination audit retained bodies=%d err=%v", retainedDetails, err)
+		}
+		replay := rawRequest(t, http.MethodGet, public.URL+"/api/v1/events?project_id="+project, nil, nil, cookie)
+		if body := readBody(replay); strings.Contains(body, "Private participant context") || strings.Contains(body, "mcp-human-request") {
+			t.Fatalf("event replay leaked=%s", body)
+		}
+		streamCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		connection, handshake, err := websocket.Dial(streamCtx, "ws"+strings.TrimPrefix(public.URL, "http")+"/api/v1/stream?project_id="+project+"&after="+strconv.FormatInt(snapshot.Cursor, 10), &websocket.DialOptions{HTTPHeader: http.Header{"Cookie": {cookie.String()}, "Origin": {origin}}})
+		if err != nil {
+			if handshake != nil {
+				t.Fatalf("stream=%d body=%s", handshake.StatusCode, readBody(handshake))
+			}
+			t.Fatal(err)
+		}
+		defer connection.CloseNow()
+		raw, _ := json.Marshal(map[string]any{"resource": domain.CoordinationRequest{Base: domain.NewBase("hidden-live", project, time.Now()), OwnerID: "other", OwnerType: "agent", Recipient: domain.CoordinationRecipient{Type: "agent", ID: "elsewhere"}, Body: "Private live body"}})
+		server.hub.Publish(domain.Event{ProjectID: project, Type: "coordination_request.created", SubjectType: domain.ResourceCoordinationRequest, SubjectID: "hidden-live", Payload: raw, Cursor: snapshot.Cursor + 1})
+		server.hub.Publish(domain.Event{ProjectID: project, Type: "task.progress", SubjectType: domain.ResourceTask, SubjectID: "sentinel", Payload: json.RawMessage(`{}`), Cursor: snapshot.Cursor + 2})
+		_, frame, err := connection.Read(streamCtx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(frame), "Private live body") || !strings.Contains(string(frame), "task.progress") {
+			t.Fatalf("live stream isolation=%s", frame)
 		}
 	})
 

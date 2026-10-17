@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,28 +13,29 @@ import (
 type ResourceType string
 
 const (
-	ResourceAgent          ResourceType = "agent"
-	ResourceRun            ResourceType = "run"
-	ResourceSession        ResourceType = "session"
-	ResourceTask           ResourceType = "task"
-	ResourceAttention      ResourceType = "attention"
-	ResourceEvidence       ResourceType = "evidence"
-	ResourceArtifact       ResourceType = "artifact"
-	ResourceApproval       ResourceType = "approval"
-	ResourceIntervention   ResourceType = "intervention"
-	ResourceChatMessage    ResourceType = "chat_message"
-	ResourceBudget         ResourceType = "budget"
-	ResourceClaim          ResourceType = "claim"
-	ResourceAudit          ResourceType = "audit"
-	ResourceOrganization   ResourceType = "organization"
-	ResourceHuman          ResourceType = "human"
-	ResourceProject        ResourceType = "project"
-	ResourceHost           ResourceType = "host"
-	ResourceAgentInstance  ResourceType = "agent_instance"
-	ResourceTaskTransition ResourceType = "task_transition"
-	ResourceSituation      ResourceType = "situation"
-	ResourcePolicy         ResourceType = "policy"
-	ResourceDeployment     ResourceType = "deployment"
+	ResourceAgent               ResourceType = "agent"
+	ResourceRun                 ResourceType = "run"
+	ResourceSession             ResourceType = "session"
+	ResourceTask                ResourceType = "task"
+	ResourceAttention           ResourceType = "attention"
+	ResourceCoordinationRequest ResourceType = "coordination_request"
+	ResourceEvidence            ResourceType = "evidence"
+	ResourceArtifact            ResourceType = "artifact"
+	ResourceApproval            ResourceType = "approval"
+	ResourceIntervention        ResourceType = "intervention"
+	ResourceChatMessage         ResourceType = "chat_message"
+	ResourceBudget              ResourceType = "budget"
+	ResourceClaim               ResourceType = "claim"
+	ResourceAudit               ResourceType = "audit"
+	ResourceOrganization        ResourceType = "organization"
+	ResourceHuman               ResourceType = "human"
+	ResourceProject             ResourceType = "project"
+	ResourceHost                ResourceType = "host"
+	ResourceAgentInstance       ResourceType = "agent_instance"
+	ResourceTaskTransition      ResourceType = "task_transition"
+	ResourceSituation           ResourceType = "situation"
+	ResourcePolicy              ResourceType = "policy"
+	ResourceDeployment          ResourceType = "deployment"
 )
 
 type Base struct {
@@ -58,11 +61,43 @@ func (b Base) Validate() error {
 
 type Agent struct {
 	Base
-	DisplayName  string   `json:"display_name"`
-	Kind         string   `json:"kind"`
-	Status       string   `json:"status"`
-	Capabilities []string `json:"capabilities"`
-	Source       Source   `json:"source"`
+	DisplayName       string     `json:"display_name"`
+	Kind              string     `json:"kind"`
+	Status            string     `json:"status"`
+	Capabilities      []string   `json:"capabilities"`
+	Source            Source     `json:"source"`
+	ObservedAt        *time.Time `json:"observed_at,omitempty"`
+	PresenceExpiresAt *time.Time `json:"presence_expires_at,omitempty"`
+}
+
+type AgentObservation struct {
+	AgentID     string    `json:"agent_id"`
+	InstanceID  string    `json:"instance_id"`
+	DisplayName string    `json:"display_name"`
+	Status      string    `json:"status"`
+	ObservedAt  time.Time `json:"observed_at"`
+}
+
+type SessionObservation struct {
+	AgentID    string    `json:"agent_id"`
+	SessionID  string    `json:"session_id"`
+	Status     string    `json:"status"`
+	ObservedAt time.Time `json:"observed_at"`
+}
+
+type RunObservation struct {
+	AgentID    string    `json:"agent_id"`
+	RunID      string    `json:"run_id"`
+	SessionID  string    `json:"session_id,omitempty"`
+	TaskID     string    `json:"task_id,omitempty"`
+	Status     string    `json:"status"`
+	Summary    string    `json:"summary,omitempty"`
+	ObservedAt time.Time `json:"observed_at"`
+}
+
+func ObservedRuntimeID(projectID, system, actorID, kind, nativeID string) string {
+	digest := sha256.Sum256([]byte(strings.Join([]string{projectID, system, actorID, kind, nativeID}, "\x00")))
+	return "observed_" + kind + "_" + hex.EncodeToString(digest[:16])
 }
 
 type Organization struct {
@@ -80,10 +115,29 @@ type Human struct {
 
 type Project struct {
 	Base
-	OrganizationID string `json:"organization_id"`
-	Name           string `json:"name"`
-	Slug           string `json:"slug"`
-	Status         string `json:"status"`
+	OrganizationID                   string              `json:"organization_id"`
+	Name                             string              `json:"name"`
+	Slug                             string              `json:"slug"`
+	Status                           string              `json:"status"`
+	Source                           Source              `json:"source,omitempty"`
+	SourceStatus                     string              `json:"source_status,omitempty"`
+	SourceObservedAt                 *time.Time          `json:"source_observed_at,omitempty"`
+	SourceObservation                *ProjectObservation `json:"source_observation,omitempty"`
+	SourceLastSuccessfulCollectionAt *time.Time          `json:"source_last_successful_collection_at,omitempty"`
+}
+
+// ProjectObservation reports a source collection without changing project access
+// or the canonical project name. Partial scans retain their explicit status.
+type ProjectObservation struct {
+	ExternalID  string    `json:"external_id"`
+	Name        string    `json:"name"`
+	Path        string    `json:"path"`
+	Status      string    `json:"status"`
+	Reason      string    `json:"reason,omitempty"`
+	CollectedAt time.Time `json:"collected_at"`
+	ScanStatus  string    `json:"scan_status"`
+	TaskCount   int64     `json:"task_count"`
+	ScanError   string    `json:"scan_error,omitempty"`
 }
 
 type Host struct {
@@ -132,17 +186,81 @@ type Session struct {
 
 type Task struct {
 	Base
-	Title         string   `json:"title"`
-	Description   string   `json:"description,omitempty"`
-	OwnerID       string   `json:"owner_id,omitempty"`
-	Status        string   `json:"status"`
-	Priority      string   `json:"priority"`
-	Dependencies  []string `json:"dependencies"`
-	BudgetID      string   `json:"budget_id,omitempty"`
-	ReviewState   string   `json:"review_state,omitempty"`
-	ApprovalState string   `json:"approval_state,omitempty"`
-	BlockedReason string   `json:"blocked_reason,omitempty"`
-	Source        Source   `json:"source"`
+	Title             string           `json:"title"`
+	Description       string           `json:"description,omitempty"`
+	OwnerID           string           `json:"owner_id,omitempty"`
+	Status            string           `json:"status"`
+	Priority          string           `json:"priority"`
+	Dependencies      []string         `json:"dependencies"`
+	BudgetID          string           `json:"budget_id,omitempty"`
+	ReviewState       string           `json:"review_state,omitempty"`
+	ApprovalState     string           `json:"approval_state,omitempty"`
+	BlockedReason     string           `json:"blocked_reason,omitempty"`
+	Source            Source           `json:"source"`
+	SourceStatus      string           `json:"source_status,omitempty"`
+	SourceObservedAt  *time.Time       `json:"source_observed_at,omitempty"`
+	SourceObservation *TaskObservation `json:"source_observation,omitempty"`
+}
+
+// TaskObservation is source-reported work metadata. It never grants a source
+// authority to accept completion, change ownership, or decide an approval.
+type TaskObservation struct {
+	ExternalID   string   `json:"external_id"`
+	Title        string   `json:"title"`
+	Description  string   `json:"description,omitempty"`
+	Status       string   `json:"status"`
+	ExternalURL  string   `json:"external_url,omitempty"`
+	Dependencies []string `json:"dependencies,omitempty"`
+}
+
+func ObservedTaskID(projectID, externalID string) string {
+	digest := sha256.Sum256([]byte(projectID + "\x00" + externalID))
+	return "sentry_task_" + hex.EncodeToString(digest[:16])
+}
+
+// Task and project reports share contracts only for these explicitly supported
+// read-only sources. Runtime observations have a different authority boundary.
+func IsTaskObservationSource(system string) bool { return system == "sentry" || system == "github" }
+
+// ObservedTaskIDForSource preserves all existing Sentry identities and prevents
+// another provider's native IDs from claiming those tasks.
+func ObservedTaskIDForSource(projectID, system, externalID string) string {
+	if system == "sentry" {
+		return ObservedTaskID(projectID, externalID)
+	}
+	digest := sha256.Sum256([]byte(projectID + "\x00" + system + "\x00" + externalID))
+	return system + "_task_" + hex.EncodeToString(digest[:16])
+}
+
+// Sentry's original report uses the canonical project ID. Additional providers
+// receive separate source-report identities without renaming that legacy row.
+func ObservedProjectIDForSource(projectID, system string) string {
+	if system == "sentry" {
+		return projectID
+	}
+	digest := sha256.Sum256([]byte(projectID + "\x00" + system))
+	return system + "_project_" + hex.EncodeToString(digest[:16])
+}
+
+func SourceTaskBlocked(status string) bool {
+	return strings.EqualFold(strings.TrimSpace(status), "blocked")
+}
+
+func SourceTaskReview(system, status string) bool {
+	status = strings.ToLower(strings.TrimSpace(status))
+	return system == "github" && (status == "review" || status == "review_requested")
+}
+
+func SourceTaskUnfinished(system, status string) bool {
+	status = strings.ToLower(strings.TrimSpace(status))
+	switch system {
+	case "sentry":
+		return status == "upcoming" || status == "working" || status == "blocked"
+	case "github":
+		return status == "open" || status == "draft" || status == "blocked" || status == "review" || status == "review_requested"
+	default:
+		return false
+	}
 }
 
 type TaskTransition struct {
@@ -177,6 +295,42 @@ type Attention struct {
 	OwnerID        string     `json:"owner_id,omitempty"`
 	AcknowledgedAt *time.Time `json:"acknowledged_at,omitempty"`
 	ResolvedAt     *time.Time `json:"resolved_at,omitempty"`
+}
+
+// CoordinationRequest records an explicit request between participants. Responding
+// does not transfer task ownership, accept evidence, approve actions, or run work.
+type CoordinationRecipient struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}
+
+type CoordinationResponse struct {
+	ActorID     string    `json:"actor_id"`
+	Body        string    `json:"body"`
+	EvidenceIDs []string  `json:"evidence_ids"`
+	RespondedAt time.Time `json:"responded_at"`
+}
+
+type CoordinationResolution struct {
+	ActorID  string    `json:"actor_id"`
+	Note     string    `json:"note,omitempty"`
+	ClosedAt time.Time `json:"closed_at"`
+}
+
+type CoordinationRequest struct {
+	Base
+	Kind             string                  `json:"kind"`
+	Title            string                  `json:"title"`
+	Body             string                  `json:"body"`
+	OwnerID          string                  `json:"owner_id"`
+	OwnerType        string                  `json:"owner_type"`
+	Recipient        CoordinationRecipient   `json:"recipient"`
+	TaskID           string                  `json:"task_id,omitempty"`
+	EvidenceIDs      []string                `json:"evidence_ids"`
+	Status           string                  `json:"status"`
+	EscalationReason string                  `json:"escalation_reason,omitempty"`
+	Response         *CoordinationResponse   `json:"response,omitempty"`
+	Resolution       *CoordinationResolution `json:"resolution,omitempty"`
 }
 
 type Situation struct {
@@ -359,6 +513,8 @@ func DecodeResource(kind ResourceType, raw json.RawMessage) (any, error) {
 		target = &Task{}
 	case ResourceAttention:
 		target = &Attention{}
+	case ResourceCoordinationRequest:
+		target = &CoordinationRequest{}
 	case ResourceEvidence:
 		target = &Evidence{}
 	case ResourceArtifact:

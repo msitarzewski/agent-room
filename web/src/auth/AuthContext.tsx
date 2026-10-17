@@ -24,6 +24,20 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+/** OIDC may return to a local app location, never an external host or login loop. */
+export function safeLoginReturnTo(value: string): string {
+  if (!value.startsWith("/") || value.startsWith("//") || /[\s\\]/.test(value)) return "/";
+  try {
+    const target = new URL(value, window.location.origin);
+    const path = decodeURIComponent(target.pathname);
+    if (target.origin !== window.location.origin || path.startsWith("//") || path.includes("\\") ||
+      path.replace(/\/+$/, "") === "/login" || path.startsWith("/api/v1/auth/")) return "/";
+    return `${target.pathname}${target.search}${target.hash}`;
+  } catch {
+    return "/";
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<SessionEnvelope | null>(null);
   const [loading, setLoading] = useState(true);
@@ -69,7 +83,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const login = useCallback(() => {
-    window.location.assign(api.loginUrl(`${window.location.pathname}${window.location.search}`));
+    const returnTo = safeLoginReturnTo(`${window.location.pathname}${window.location.search}${window.location.hash}`);
+    window.location.assign(api.loginUrl(returnTo));
   }, []);
 
   const logout = useCallback(async () => {

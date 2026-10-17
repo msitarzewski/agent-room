@@ -83,6 +83,9 @@ export function AttentionPage() {
     "attention:manage",
   );
   const awaiting = canManage ? open.length : 0;
+  const sourceChecks = brief?.event_counts["project.observed"] ?? 0;
+  const taskReports = brief?.event_counts["task.observed"] ?? 0;
+  const workEvents = Object.values(brief?.event_counts ?? {}).reduce((sum, count) => sum + count, 0) - sourceChecks - taskReports;
   const reviewBrief = async () => {
     if (!brief || !projectId) return;
     setBriefBusy(true);
@@ -124,8 +127,9 @@ export function AttentionPage() {
             <article className="detail-card">
               <div className="card-heading">
                 <div>
-                  <p className="eyebrow">Deterministic project summary</p>
-                  <h3>{brief.events.length} changes · {brief.open_attention.length} open · {brief.pending_approvals.length} approvals</h3>
+                  <p className="eyebrow">Project coordination update</p>
+                  <h3>{workEvents} work events · {sourceChecks} source checks · {taskReports} task reports</h3>
+                  <p>{brief.open_attention.length} unresolved attention records · {brief.pending_approvals.length} pending approvals. Repeated source reports are observations, not new agent requests.</p>
                 </div>
                 <Freshness loadedAt={brief.generated_at} />
               </div>

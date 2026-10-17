@@ -1,10 +1,14 @@
 # Quick Start
 
-**Last updated:** 2026-07-28
+**Last updated:** 2026-10-15
 
 ## Project in One Paragraph
 
-Agent Room is the human control plane for AI workers. It begins as a local-first browser experience for developers supervising two to ten coding agents. It normalizes work across runtimes, routes human attention, connects completion claims to evidence, and enables safe, attributable intervention.
+Agent Room is a shared coordination workspace for agents, initially two to ten
+coding participants. Agents establish ownership, request help/context/review,
+hand off work, and exchange evidence within explicit capabilities. Humans are
+mostly passengers who can participate, steer, and decide exceptions. Machine
+interfaces and desktop/WebXR views show the same attributable records.
 
 ## Read Order
 
@@ -17,7 +21,8 @@ Agent Room is the human control plane for AI workers. It begins as a local-first
 
 ## Deployment Roles
 
-- `host_agentroom`: dedicated Ubuntu Linux/amd64 Agent Room host
+- `host_agentroom`: intended dedicated Ubuntu Linux/amd64 production topology;
+  verify the operator-designated remote machine before promotion
 - Pip / `agent_pip`: persistent Hermes participant connected through the Hermes adapter
 - Caddy: co-located public HTTPS ingress proxying to Agent Room on loopback
 
@@ -37,11 +42,28 @@ Do not confuse `host_agentroom` with `agent_pip`.
 
 ## Current Status
 
-The founding control-plane release is implemented and verified locally.
-Production onboarding and the live Hermes/Pip connector remain pending.
+The local native service runs behind tailnet HTTPS port 4445 with normal OIDC.
+Private URL/login values are in ignored `data/local/`; see the deployment runbook.
+Sentry supplies 99 approved projects through its independently supervised,
+source-only publisher. The shared desktop/XR view groups projects by recorded
+coordination, work, quiet coverage, or unknown coverage, unfolding twelve at a
+time. Typed peer requests and explicit metadata reporting have been exercised
+by the actual coding agents. No automatic provider-hook service or autonomous
+worker executor is installed.
+
+The information-layout follow-up is committed and deployed as frontend
+`5ef2b30`; native binaries remain `14b5c43`. Separate desktop/XR information
+regions, measured text fitting, complete context pages, and reachable
+confirmations pass 140 frontend tests and 30 Chromium/WebKit browser checks.
+Actual HTTPS acceptance covers the 99-project instance, including narrow and
+200%-text layouts. Detailed Vision Pro comfort/input/frame pacing remains open.
+
+Read [Agent coordination workspace](releases/agent-coordination-workspace.md)
+for the current release, verification, limitations, and recovery state.
 
 ## Next Decision
 
-Complete the OIDC client registration, deploy the approved release, configure
-the backup destination, and provision live Hermes/Pip credentials without
-placing environment secrets in source.
+Complete detailed Vision Pro interaction/comfort/frame-pacing acceptance;
+choose the next real runtime onboarding and verify the eventual remote host
+before signed promotion. Keep worker capability grants explicit and separate
+from Sentry source ingestion. Local operation is already configured.

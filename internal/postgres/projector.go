@@ -10,12 +10,28 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/msitarzewski/agent-room/internal/app"
 	"github.com/msitarzewski/agent-room/internal/domain"
 )
 
 func applyEventProjection(ctx context.Context, tx pgx.Tx, event domain.Event) error {
-	if event.SubjectID == "" || !projectable(event.SubjectType) {
+	sourceProject := domain.IsTaskObservationSource(event.SourceSystem) && event.Type == "project.observed" && event.SubjectType == domain.ResourceProject
+	if event.SubjectID == "" || (!projectable(event.SubjectType) && !sourceProject && len(commandResource(event)) == 0) {
 		return nil
+	}
+	// External approval requests may raise attention, but only authenticated
+	// commands create or decide an approval. Non-usage budget observations
+	// likewise cannot clear an enforced budget's exhaustion state.
+	if event.SourceSystem != "" && (event.SubjectType == domain.ResourceApproval ||
+		(event.SubjectType == domain.ResourceBudget && event.Type != "budget.usage_observed")) {
+		return deriveAttention(ctx, tx, event)
+	}
+	// A row lock cannot serialize the first observations of a missing resource.
+	// Use the same transaction-scoped identity lock before testing existence so
+	// concurrent first deliveries cannot overwrite a newer source sequence.
+	identity := event.ProjectID + "\x1f" + string(event.SubjectType) + "\x1f" + event.SubjectID
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, identity); err != nil {
+		return err
 	}
 	var currentRaw []byte
 	var currentVersion, currentSequence int64
@@ -27,9 +43,18 @@ func applyEventProjection(ctx context.Context, tx pgx.Tx, event domain.Event) er
 		return err
 	}
 	if event.SourceSequence > 0 && currentSource == event.SourceSystem && currentSequence >= event.SourceSequence {
-		return deriveAttention(ctx, tx, event)
+		return nil
 	}
-	document, err := reduceResource(currentRaw, currentVersion, event)
+	var document json.RawMessage
+	if sourceProject {
+		var canonicalName string
+		if err := tx.QueryRow(ctx, `SELECT name FROM projects WHERE id=$1`, event.ProjectID).Scan(&canonicalName); err != nil {
+			return err
+		}
+		document, err = reduceProjectObservation(currentRaw, currentVersion, event, canonicalName)
+	} else {
+		document, err = reduceResource(currentRaw, currentVersion, event)
+	}
 	if err != nil {
 		return err
 	}
@@ -42,26 +67,65 @@ func applyEventProjection(ctx context.Context, tx pgx.Tx, event domain.Event) er
 		return err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO resources(project_id,kind,id,version,document,created_at,updated_at,source_system,source_sequence)
-		VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),NULLIF($9,0))
+		VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),NULLIF($9::bigint,0))
 		ON CONFLICT(project_id,kind,id) DO UPDATE SET version=excluded.version,document=excluded.document,
-		updated_at=excluded.updated_at,source_system=excluded.source_system,source_sequence=excluded.source_sequence`,
+		updated_at=excluded.updated_at,source_system=COALESCE(excluded.source_system,resources.source_system),
+		source_sequence=CASE WHEN excluded.source_system IS NULL THEN resources.source_sequence ELSE excluded.source_sequence END`,
 		event.ProjectID, event.SubjectType, event.SubjectID, base.Version, document, base.CreatedAt, base.UpdatedAt, event.SourceSystem, event.SourceSequence)
 	if err != nil {
 		return err
 	}
+	if domain.IsTaskObservationSource(event.SourceSystem) && event.Type == "task.observed" && event.SubjectType == domain.ResourceTask {
+		var prior domain.Task
+		if len(currentRaw) > 0 {
+			if err := json.Unmarshal(currentRaw, &prior); err != nil {
+				return err
+			}
+		}
+		return reconcileSourceTaskAttention(ctx, tx, event, prior.SourceStatus)
+	}
 	return deriveAttention(ctx, tx, event)
 }
 
-func reduceResource(current json.RawMessage, currentVersion int64, event domain.Event) (json.RawMessage, error) {
-	if event.SubjectType == domain.ResourceBudget && event.Type == "budget.usage_observed" {
-		return reduceBudgetUsage(current, event)
+// commandResource is reserved for stored server-authored command events.
+// Private ingestion requires a source_system and clears supplied command IDs.
+func commandResource(event domain.Event) json.RawMessage {
+	if event.SourceSystem != "" || event.CommandID == "" {
+		return nil
 	}
 	var payload struct {
 		Resource json.RawMessage `json:"resource"`
 	}
-	if json.Unmarshal(event.Payload, &payload) == nil && len(payload.Resource) > 0 {
-		return payload.Resource, nil
+	if json.Unmarshal(event.Payload, &payload) != nil {
+		return nil
 	}
+	return payload.Resource
+}
+
+func reduceResource(current json.RawMessage, currentVersion int64, event domain.Event) (json.RawMessage, error) {
+	if resource := commandResource(event); len(resource) > 0 {
+		if _, err := domain.DecodeResource(event.SubjectType, resource); err != nil {
+			return nil, err
+		}
+		var base domain.Base
+		if err := json.Unmarshal(resource, &base); err != nil {
+			return nil, err
+		}
+		if base.ID != event.SubjectID || base.ProjectID != event.ProjectID || base.Validate() != nil {
+			return nil, errors.New("command replay resource identity mismatch")
+		}
+		return resource, nil
+	}
+	if (event.SourceSystem == "codex" || event.SourceSystem == "claude" || event.SourceSystem == "hermes") && (event.Type == "agent.observed" || event.Type == "session.observed" || event.Type == "run.observed") {
+		return reduceRuntimeObservation(current, currentVersion, event)
+	}
+	if event.SubjectType == domain.ResourceBudget && event.Type == "budget.usage_observed" {
+		return reduceBudgetUsage(current, event)
+	}
+	if domain.IsTaskObservationSource(event.SourceSystem) && event.Type == "task.observed" && event.SubjectType == domain.ResourceTask {
+		return reduceTaskObservation(current, currentVersion, event)
+	}
+
 	document := map[string]any{}
 	if len(current) > 0 {
 		if err := json.Unmarshal(current, &document); err != nil {
@@ -84,11 +148,184 @@ func reduceResource(current json.RawMessage, currentVersion int64, event domain.
 	case domain.ResourceSession:
 		document["status"] = statusFromEvent(event.Type, "active")
 	case domain.ResourceTask:
-		document["status"] = statusFromEvent(event.Type, "working")
+		document["source_status"] = statusFromEvent(event.Type, "working")
+		if _, ok := document["status"]; !ok {
+			document["status"] = "inbox"
+		}
 	case domain.ResourceBudget:
 		document["status"] = "observed"
 	}
 	return json.Marshal(document)
+}
+
+func reduceRuntimeObservation(current json.RawMessage, version int64, event domain.Event) (json.RawMessage, error) {
+	base := domain.NewBase(event.SubjectID, event.ProjectID, event.OccurredAt)
+	if len(current) > 0 {
+		var owned struct {
+			Source domain.Source `json:"source"`
+		}
+		if json.Unmarshal(current, &owned) != nil {
+			return nil, errors.New("invalid runtime projection")
+		}
+		if owned.Source.System != "" && owned.Source.System != event.SourceSystem {
+			return nil, app.ErrDenied
+		}
+	}
+	if len(current) > 0 {
+		if err := json.Unmarshal(current, &base); err != nil {
+			return nil, err
+		}
+		base.Version = version + 1
+		base.UpdatedAt = event.OccurredAt
+	}
+	switch event.Type {
+	case "agent.observed":
+		var input domain.AgentObservation
+		if err := json.Unmarshal(event.Payload, &input); err != nil {
+			return nil, err
+		}
+		var agent domain.Agent
+		if len(current) > 0 {
+			if err := json.Unmarshal(current, &agent); err != nil {
+				return nil, err
+			}
+		}
+		if input.AgentID != event.SubjectID {
+			return nil, app.ErrDenied
+		}
+		agent.Base = base
+		agent.DisplayName = input.DisplayName
+		agent.Kind = event.SourceSystem
+		agent.Status = input.Status
+		if agent.Capabilities == nil {
+			agent.Capabilities = []string{}
+		}
+		agent.Source = domain.Source{System: event.SourceSystem, ExternalID: input.InstanceID}
+		at := input.ObservedAt.UTC()
+		expires := at.Add(5 * time.Minute)
+		if input.Status == "disconnected" {
+			expires = at
+		}
+		agent.ObservedAt = &at
+		agent.PresenceExpiresAt = &expires
+		return json.Marshal(agent)
+	case "session.observed":
+		var input domain.SessionObservation
+		if err := json.Unmarshal(event.Payload, &input); err != nil {
+			return nil, err
+		}
+		var session domain.Session
+		if len(current) > 0 {
+			if err := json.Unmarshal(current, &session); err != nil {
+				return nil, err
+			}
+			if session.AgentID != "" && session.AgentID != input.AgentID {
+				return nil, app.ErrDenied
+			}
+		}
+		session.Base = base
+		session.AgentID = input.AgentID
+		session.Status = input.Status
+		session.Source = domain.Source{System: event.SourceSystem, ExternalID: input.SessionID}
+		at := input.ObservedAt.UTC()
+		session.LastReconciledAt = &at
+		return json.Marshal(session)
+	default:
+		var input domain.RunObservation
+		if err := json.Unmarshal(event.Payload, &input); err != nil {
+			return nil, err
+		}
+		var run domain.Run
+		if len(current) > 0 {
+			if err := json.Unmarshal(current, &run); err != nil {
+				return nil, err
+			}
+			if run.AgentID != "" && run.AgentID != input.AgentID {
+				return nil, app.ErrDenied
+			}
+		}
+		run.Base = base
+		run.AgentID = input.AgentID
+		run.Status = input.Status
+		run.Summary = input.Summary
+		run.TaskID = input.TaskID
+		if input.SessionID != "" {
+			run.SessionID = domain.ObservedRuntimeID(event.ProjectID, event.SourceSystem, input.AgentID, "session", input.SessionID)
+		}
+		if run.Capabilities == nil {
+			run.Capabilities = []string{}
+		}
+		run.Source = domain.Source{System: event.SourceSystem, ExternalID: input.RunID}
+		return json.Marshal(run)
+	}
+}
+
+func reduceProjectObservation(current json.RawMessage, currentVersion int64, event domain.Event, canonicalName string) (json.RawMessage, error) {
+	var observation domain.ProjectObservation
+	if err := json.Unmarshal(event.Payload, &observation); err != nil {
+		return nil, err
+	}
+	if event.SubjectID != domain.ObservedProjectIDForSource(event.ProjectID, event.SourceSystem) || !domain.IsTaskObservationSource(event.SourceSystem) || observation.ExternalID == "" {
+		return nil, app.Invalid("project observation identity mismatch")
+	}
+	var project domain.Project
+	if len(current) == 0 {
+		project = domain.Project{Base: domain.NewBase(event.SubjectID, event.ProjectID, event.OccurredAt), Name: canonicalName, Slug: event.ProjectID, Status: "observed"}
+	} else {
+		if err := json.Unmarshal(current, &project); err != nil {
+			return nil, err
+		}
+		legacySentry := event.SourceSystem == "sentry" && project.Source.System == ""
+		if (!legacySentry && project.Source.System != event.SourceSystem) || (project.Source.ExternalID != "" && project.Source.ExternalID != observation.ExternalID) {
+			return nil, app.Invalid("project observation cannot claim another source's identity")
+		}
+		project.Version = currentVersion + 1
+		project.UpdatedAt = event.OccurredAt
+	}
+	project.Source = domain.Source{System: event.SourceSystem, ExternalID: observation.ExternalID}
+	project.SourceStatus = observation.Status
+	observedAt := observation.CollectedAt.UTC()
+	project.SourceObservedAt = &observedAt
+	project.SourceObservation = &observation
+	if observation.ScanStatus == "complete" {
+		project.SourceLastSuccessfulCollectionAt = &observedAt
+	}
+	return json.Marshal(project)
+}
+
+func reduceTaskObservation(current json.RawMessage, currentVersion int64, event domain.Event) (json.RawMessage, error) {
+	var observation domain.TaskObservation
+	if err := json.Unmarshal(event.Payload, &observation); err != nil {
+		return nil, err
+	}
+	if observation.ExternalID == "" || event.SubjectID != domain.ObservedTaskIDForSource(event.ProjectID, event.SourceSystem, observation.ExternalID) || !domain.IsTaskObservationSource(event.SourceSystem) {
+		return nil, errors.New("task observation identity mismatch")
+	}
+	var task domain.Task
+	if len(current) == 0 {
+		task = domain.Task{
+			Base:  domain.NewBase(event.SubjectID, event.ProjectID, event.OccurredAt),
+			Title: observation.Title, Description: observation.Description, Status: "inbox", Priority: "normal",
+			Dependencies: []string{}, Source: domain.Source{System: event.SourceSystem, ExternalID: observation.ExternalID, ExternalURL: observation.ExternalURL},
+		}
+		for _, dependency := range observation.Dependencies {
+			task.Dependencies = append(task.Dependencies, domain.ObservedTaskIDForSource(event.ProjectID, event.SourceSystem, dependency))
+		}
+	} else {
+		if err := json.Unmarshal(current, &task); err != nil {
+			return nil, err
+		}
+		if task.Source.System != event.SourceSystem || task.Source.ExternalID != observation.ExternalID {
+			return nil, errors.New("task observation cannot claim another source's task")
+		}
+		task.Version = currentVersion + 1
+		task.UpdatedAt = event.OccurredAt
+	}
+	task.SourceStatus = observation.Status
+	observedAt := event.OccurredAt.UTC()
+	task.SourceObservedAt = &observedAt
+	task.SourceObservation = &observation
+	return json.Marshal(task)
 }
 
 func reduceBudgetUsage(current json.RawMessage, event domain.Event) (json.RawMessage, error) {
@@ -214,6 +451,76 @@ func deriveAttention(ctx context.Context, tx pgx.Tx, event domain.Event) error {
 		attention.Version, attention.UpdatedAt = prior.Version+1, now
 	}
 	return upsertProjection(ctx, tx, domain.ResourceAttention, attention.Base, attention)
+}
+
+const sourceTaskBlocked = "source.task.blocked"
+
+func reconcileSourceTaskAttention(ctx context.Context, tx pgx.Tx, event domain.Event, previousStatus string) error {
+	var observation domain.TaskObservation
+	if err := json.Unmarshal(event.Payload, &observation); err != nil {
+		return err
+	}
+	fingerprint := stableID(event.ProjectID, sourceTaskBlocked, string(domain.ResourceTask), event.SubjectID)
+	attentionID := "attn_" + fingerprint
+	raw, err := resourceForUpdate(ctx, tx, event.ProjectID, domain.ResourceAttention, attentionID)
+	if err != nil {
+		return err
+	}
+	var current *domain.Attention
+	if len(raw) > 0 {
+		current = &domain.Attention{}
+		if err := json.Unmarshal(raw, current); err != nil {
+			return err
+		}
+	}
+	next, changed := reduceSourceTaskAttention(current, event.ProjectID, event.SubjectID, observation, previousStatus, event.OccurredAt)
+	if !changed {
+		return nil
+	}
+	return upsertProjection(ctx, tx, domain.ResourceAttention, next.Base, next)
+}
+
+// Source attention has a separate deterministic identity and kind. A source can
+// resolve only this derived item, leaving human attention and task status alone.
+func reduceSourceTaskAttention(current *domain.Attention, projectID, taskID string, observation domain.TaskObservation, previousStatus string, at time.Time) (domain.Attention, bool) {
+	fingerprint := stableID(projectID, sourceTaskBlocked, string(domain.ResourceTask), taskID)
+	id := "attn_" + fingerprint
+	if current != nil && (current.ID != id || current.ProjectID != projectID || current.Kind != sourceTaskBlocked ||
+		current.ResourceType != string(domain.ResourceTask) || current.ResourceID != taskID) {
+		return *current, false
+	}
+	blocked := domain.SourceTaskBlocked(observation.Status)
+	if !blocked {
+		if current == nil || current.Status == "resolved" {
+			return domain.Attention{}, false
+		}
+		next := *current
+		next.Status, next.ResolvedAt = "resolved", &at
+		next.Version++
+		next.UpdatedAt = at
+		return next, true
+	}
+	title := "Source reports blocked: " + observation.Title
+	if current == nil {
+		return domain.Attention{
+			Base: domain.NewBase(id, projectID, at), Kind: sourceTaskBlocked, Severity: "normal",
+			Title: title, Detail: observation.Description, ResourceType: string(domain.ResourceTask), ResourceID: taskID, Status: "open",
+		}, true
+	}
+	// A human may have resolved this item while the source was still blocked.
+	// Only a new observed nonblocked-to-blocked episode reopens that decision.
+	if current.Status == "resolved" && domain.SourceTaskBlocked(previousStatus) {
+		return *current, false
+	}
+	if current.Title == title && current.Detail == observation.Description && current.Status != "resolved" {
+		return *current, false
+	}
+	next := *current
+	next.Title, next.Detail, next.Status = title, observation.Description, "open"
+	next.ResolvedAt, next.AcknowledgedAt = nil, nil
+	next.Version++
+	next.UpdatedAt = at
+	return next, true
 }
 
 func resourceForUpdate(ctx context.Context, tx pgx.Tx, projectID string, kind domain.ResourceType, id string) ([]byte, error) {

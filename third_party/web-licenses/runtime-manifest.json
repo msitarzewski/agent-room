@@ -1,0 +1,685 @@
+{
+  "bundle": "spatial-runtime-LICENSES.txt",
+  "sha256": "a2531c2ac8b6bec85413c90547bab01574a88d72a0a3192223cbfb60daf80297",
+  "packages": {
+    "node_modules/@babel/runtime": {
+      "version": "7.29.7",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/@babel/runtime/LICENSE",
+          "sha256": "117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76"
+        }
+      ]
+    },
+    "node_modules/@bufbuild/protobuf": {
+      "version": "2.16.0",
+      "declared_license": "(Apache-2.0 AND BSD-3-Clause)",
+      "reviewed_license": "(Apache-2.0 AND BSD-3-Clause)",
+      "files": [
+        {
+          "source": "https://raw.githubusercontent.com/bufbuild/protobuf-es/b3b232f7f466eda27c66e8f63c82f930578b6cc6/LICENSE",
+          "sha256": "c04b4216f1cd4c5a4f7fb2f2a1b0ae70d847e9e0cac7c9dee9bf8cc03177c449"
+        },
+        {
+          "source": "https://raw.githubusercontent.com/protocolbuffers/protobuf/v33.1/LICENSE",
+          "sha256": "6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d"
+        }
+      ]
+    },
+    "node_modules/@emotion/is-prop-valid": {
+      "version": "1.4.0",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/@emotion/is-prop-valid/LICENSE",
+          "sha256": "6e8d23763cf7cb707ad8f6677aa502ebeca1dda447e6d6e57f6549c1625b9c4a"
+        }
+      ]
+    },
+    "node_modules/@emotion/memoize": {
+      "version": "0.9.0",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/@emotion/memoize/LICENSE",
+          "sha256": "6e8d23763cf7cb707ad8f6677aa502ebeca1dda447e6d6e57f6549c1625b9c4a"
+        }
+      ]
+    },
+    "node_modules/@fortawesome/fontawesome-common-types": {
+      "version": "6.6.0",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/@fortawesome/fontawesome-common-types/LICENSE.txt",
+          "sha256": "9b914eae88817d63b576eab5aafde7068c7a1abae125d7cdfb034f1da43a9afc"
+        }
+      ]
+    },
+    "node_modules/@fortawesome/fontawesome-svg-core": {
+      "version": "6.6.0",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/@fortawesome/fontawesome-svg-core/LICENSE.txt",
+          "sha256": "9b914eae88817d63b576eab5aafde7068c7a1abae125d7cdfb034f1da43a9afc"
+        }
+      ]
+    },
+    "node_modules/@fortawesome/free-solid-svg-icons": {
+      "version": "6.6.0",
+      "declared_license": "(CC-BY-4.0 AND MIT)",
+      "reviewed_license": "(CC-BY-4.0 AND MIT)",
+      "files": [
+        {
+          "source": "installed:node_modules/@fortawesome/free-solid-svg-icons/LICENSE.txt",
+          "sha256": "9b914eae88817d63b576eab5aafde7068c7a1abae125d7cdfb034f1da43a9afc"
+        }
+      ]
+    },
+    "node_modules/@fortawesome/react-fontawesome": {
+      "version": "0.2.2",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/@fortawesome/react-fontawesome/LICENSE.txt",
+          "sha256": "aaeca2af41f9d13e49205099914902115ca197cdae49f7d2b31bc5d6aa2bbd83"
+        }
+      ]
+    },
+    "node_modules/@iwer/devui": {
+      "version": "1.1.2",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "Installed iwer/LICENSE; shared Meta repository MIT grant referenced by this package README",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ]
+    },
+    "node_modules/@iwer/devui/node_modules/three": {
+      "version": "0.165.0",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/@iwer/devui/node_modules/three/LICENSE",
+          "sha256": "4c40a1ef62450b857c3b2aaf294936304cd552d965fbcd9d32d4c5bcf4ba4454"
+        }
+      ]
+    },
+    "node_modules/@iwer/sem": {
+      "version": "0.2.5",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "Installed iwer/LICENSE; shared Meta repository MIT grant referenced by this package README",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ]
+    },
+    "node_modules/@iwer/sem/node_modules/three": {
+      "version": "0.165.0",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/@iwer/sem/node_modules/three/LICENSE",
+          "sha256": "4c40a1ef62450b857c3b2aaf294936304cd552d965fbcd9d32d4c5bcf4ba4454"
+        }
+      ]
+    },
+    "node_modules/@pmndrs/handle": {
+      "version": "6.6.32",
+      "declared_license": "SEE LICENSE IN LICENSE",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/@pmndrs/handle/LICENSE",
+          "sha256": "3343b2b5561e039178e9c0d54a5574d6c1bd75ca14bf952d62e28b9db6f3e57b"
+        }
+      ]
+    },
+    "node_modules/@pmndrs/handle/node_modules/zustand": {
+      "version": "4.5.7",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/@pmndrs/handle/node_modules/zustand/LICENSE",
+          "sha256": "c1e6e266563517467b1bf874817d23e426f3149252bd7d42758cd697514b8417"
+        }
+      ]
+    },
+    "node_modules/@pmndrs/pointer-events": {
+      "version": "6.6.32",
+      "declared_license": "SEE LICENSE IN LICENSE",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/@pmndrs/pointer-events/LICENSE",
+          "sha256": "fa82aa0a64aa9ae858bf8a535534510e47cea250a757c12f5b0ad0d9859b346c"
+        }
+      ]
+    },
+    "node_modules/@pmndrs/xr": {
+      "version": "6.6.32",
+      "declared_license": "SEE LICENSE IN LICENSE",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/@pmndrs/xr/LICENSE",
+          "sha256": "fa82aa0a64aa9ae858bf8a535534510e47cea250a757c12f5b0ad0d9859b346c"
+        }
+      ]
+    },
+    "node_modules/@pmndrs/xr/node_modules/zustand": {
+      "version": "4.5.7",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/@pmndrs/xr/node_modules/zustand/LICENSE",
+          "sha256": "c1e6e266563517467b1bf874817d23e426f3149252bd7d42758cd697514b8417"
+        }
+      ]
+    },
+    "node_modules/@react-three/fiber": {
+      "version": "9.8.1",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "https://raw.githubusercontent.com/pmndrs/react-three-fiber/53ec672ac4a7189711766b87ece18889abbb32d4/LICENSE",
+          "sha256": "9c35b5de7b7493a707fffe4eb23bd2f7f449153c1911f7c6eefb4e591fd5349a"
+        }
+      ]
+    },
+    "node_modules/@react-three/fiber/node_modules/scheduler": {
+      "version": "0.28.0",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/@react-three/fiber/node_modules/scheduler/LICENSE",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ]
+    },
+    "node_modules/@react-three/xr": {
+      "version": "6.6.31",
+      "declared_license": "SEE LICENSE IN LICENSE",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/@react-three/xr/LICENSE",
+          "sha256": "3343b2b5561e039178e9c0d54a5574d6c1bd75ca14bf952d62e28b9db6f3e57b"
+        }
+      ]
+    },
+    "node_modules/@react-three/xr/node_modules/zustand": {
+      "version": "4.5.7",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/@react-three/xr/node_modules/zustand/LICENSE",
+          "sha256": "c1e6e266563517467b1bf874817d23e426f3149252bd7d42758cd697514b8417"
+        }
+      ]
+    },
+    "node_modules/@types/react": {
+      "version": "19.2.17",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/@types/react/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ]
+    },
+    "node_modules/@types/react-reconciler": {
+      "version": "0.28.9",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/@types/react-reconciler/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ]
+    },
+    "node_modules/@types/stylis": {
+      "version": "4.2.7",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/@types/stylis/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ]
+    },
+    "node_modules/@types/webxr": {
+      "version": "0.5.24",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/@types/webxr/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ]
+    },
+    "node_modules/base64-js": {
+      "version": "1.5.1",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/base64-js/LICENSE",
+          "sha256": "5b37224c080cdcc97c871ada971c224e9926370fe74f11b539aa1cf9f3b1aca1"
+        }
+      ]
+    },
+    "node_modules/buffer": {
+      "version": "6.0.3",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/buffer/LICENSE",
+          "sha256": "06bafa45fdad2579ba0e43b0c9b2c6290287c99c4203c300254a462b38a307f6"
+        }
+      ]
+    },
+    "node_modules/camelize": {
+      "version": "1.0.1",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/camelize/LICENSE",
+          "sha256": "435a6722c786b0a56fbe7387028f1d9d3f3a2d0fb615bb8fee118727c3f59b7b"
+        }
+      ]
+    },
+    "node_modules/case-anything": {
+      "version": "2.1.13",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/case-anything/LICENSE",
+          "sha256": "90ccec25ab1d18b0398b8ce1b8431ff7e8b04524c5de31076b4674810a781afc"
+        }
+      ]
+    },
+    "node_modules/css-color-keywords": {
+      "version": "1.0.0",
+      "declared_license": "ISC",
+      "reviewed_license": "ISC",
+      "files": [
+        {
+          "source": "installed:node_modules/css-color-keywords/LICENSE",
+          "sha256": "17a548211b4a0cfaa8991068a39d30b0e7ef5c199321bb1c3484509529a8df05"
+        }
+      ]
+    },
+    "node_modules/css-to-react-native": {
+      "version": "3.2.0",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/css-to-react-native/LICENSE.md",
+          "sha256": "9200b800b2460900fe3bff06010726f3a29079511e80245f43a24ef89c0e9d38"
+        }
+      ]
+    },
+    "node_modules/csstype": {
+      "version": "3.2.3",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/csstype/LICENSE",
+          "sha256": "11d55bd4541c75ee7879547ac49089c489163dae49551389713c3d026cab383e"
+        }
+      ]
+    },
+    "node_modules/detect-libc": {
+      "version": "1.0.3",
+      "declared_license": "Apache-2.0",
+      "reviewed_license": "Apache-2.0",
+      "files": [
+        {
+          "source": "installed:node_modules/detect-libc/LICENSE",
+          "sha256": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1"
+        }
+      ]
+    },
+    "node_modules/dprint-node": {
+      "version": "1.0.8",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/dprint-node/LICENSE",
+          "sha256": "8084152e3e16bc7f2c35c2a40cdf67fa9cc317c10c3f98837f0c356115d2472b"
+        }
+      ]
+    },
+    "node_modules/gl-matrix": {
+      "version": "3.4.4",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/gl-matrix/LICENSE.md",
+          "sha256": "af62d31a0cdc1bf95d5e19428c3e0de368b727d9d5b6b6cdb466f8a52e68ad06"
+        }
+      ]
+    },
+    "node_modules/ieee754": {
+      "version": "1.2.1",
+      "declared_license": "BSD-3-Clause",
+      "reviewed_license": "BSD-3-Clause",
+      "files": [
+        {
+          "source": "installed:node_modules/ieee754/LICENSE",
+          "sha256": "18d45466ba3253deae04667e267a91ea8de8548f18c1125264d1c9db28194cc1"
+        }
+      ]
+    },
+    "node_modules/its-fine": {
+      "version": "2.1.1",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/its-fine/LICENSE",
+          "sha256": "643123eeb38f154d93cb8323e1289a648d3f343b411a9340453c010e325d0c82"
+        }
+      ]
+    },
+    "node_modules/iwer": {
+      "version": "2.6.0",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/iwer/LICENSE",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ]
+    },
+    "node_modules/js-tokens": {
+      "version": "4.0.0",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/js-tokens/LICENSE",
+          "sha256": "2213d91c606205c71eb051a199478cdc2adde945893404d7f1421436dd6d5cc1"
+        }
+      ]
+    },
+    "node_modules/loose-envify": {
+      "version": "1.4.0",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/loose-envify/LICENSE",
+          "sha256": "4eb7543b08d955a6d23fcc224601d43ff566e775be918805e26210d7f6eb4893"
+        }
+      ]
+    },
+    "node_modules/meshline": {
+      "version": "3.3.1",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/meshline/LICENSE",
+          "sha256": "60616aab1af71f2603d9d4ab3c29b5d80cc43cd9a62e2e8b3fa68c1c5597103f"
+        }
+      ]
+    },
+    "node_modules/object-assign": {
+      "version": "4.1.1",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/object-assign/license",
+          "sha256": "6fb9754611c20f6649f68805e8c990e83261f29316e29de9e6cedae607b8634c"
+        }
+      ]
+    },
+    "node_modules/postcss-value-parser": {
+      "version": "4.2.0",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/postcss-value-parser/LICENSE",
+          "sha256": "3687447039151857a6ba378db062172c7f33d4aa70a615c87a43a9c50e990485"
+        }
+      ]
+    },
+    "node_modules/prop-types": {
+      "version": "15.8.1",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/prop-types/LICENSE",
+          "sha256": "f657f99d3fb9647db92628e96007aabb46e5f04f33e49999075aab8e250ca7ce"
+        }
+      ]
+    },
+    "node_modules/prop-types/node_modules/react-is": {
+      "version": "16.13.1",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/prop-types/node_modules/react-is/LICENSE",
+          "sha256": "52412d7bc7ce4157ea628bbaacb8829e0a9cb3c58f57f99176126bc8cf2bfc85"
+        }
+      ]
+    },
+    "node_modules/react": {
+      "version": "19.2.8",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/react/LICENSE",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ]
+    },
+    "node_modules/react-dom": {
+      "version": "19.2.8",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/react-dom/LICENSE",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ]
+    },
+    "node_modules/react-use-measure": {
+      "version": "2.1.7",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/react-use-measure/LICENSE",
+          "sha256": "1f9038eff8dbd6505a26f9d6830cc6da2b87ab1a9305d1100884986e9c11a31a"
+        }
+      ]
+    },
+    "node_modules/scheduler": {
+      "version": "0.27.0",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/scheduler/LICENSE",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ]
+    },
+    "node_modules/styled-components": {
+      "version": "6.6.0",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/styled-components/LICENSE",
+          "sha256": "5b893305a717230e5b0024ff5ca3eec1dc05ba600c9b140730488d97ce56f1e6"
+        }
+      ]
+    },
+    "node_modules/stylis": {
+      "version": "4.3.6",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/stylis/LICENSE",
+          "sha256": "88c579c6ee44b41137a21321190d177982e5b17d4fa1b83a4a2e3ea325a8fc9a"
+        }
+      ]
+    },
+    "node_modules/suspend-react": {
+      "version": "0.1.3",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/suspend-react/LICENSE",
+          "sha256": "997e79b828d8b85d6f18730c8dbf58074811360a199506bd84e1263e17c227a2"
+        }
+      ]
+    },
+    "node_modules/three": {
+      "version": "0.186.1",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/three/LICENSE",
+          "sha256": "8b378ebe60e2fe500158cb0ac71cb5e8b7d92953c2abcc63a0eb90499653b5bc"
+        }
+      ]
+    },
+    "node_modules/ts-poet": {
+      "version": "6.12.0",
+      "declared_license": "Apache-2.0",
+      "reviewed_license": "Apache-2.0",
+      "files": [
+        {
+          "source": "installed:node_modules/ts-poet/LICENSE.txt",
+          "sha256": "bd9df84b6904dfb10da00376fbb057f9927074ed967522ee8f8ec9a8f53c5020"
+        }
+      ]
+    },
+    "node_modules/ts-proto": {
+      "version": "2.15.3",
+      "declared_license": "ISC",
+      "reviewed_license": "ISC",
+      "files": [
+        {
+          "source": "installed:node_modules/ts-proto/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ]
+    },
+    "node_modules/ts-proto-descriptors": {
+      "version": "2.1.0",
+      "declared_license": "ISC",
+      "reviewed_license": "ISC",
+      "files": [
+        {
+          "source": "https://raw.githubusercontent.com/stephenh/ts-proto/377a52c5c7ec14e990f0a1ceb5946e389e380577/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        },
+        {
+          "source": "https://raw.githubusercontent.com/protocolbuffers/protobuf/v33.1/LICENSE",
+          "sha256": "6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d"
+        }
+      ]
+    },
+    "node_modules/tunnel-rat": {
+      "version": "0.1.2",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/tunnel-rat/LICENSE",
+          "sha256": "cd14add33d47bcecae9fed5559224ae135c5ec41e1d3a126601f5fbd82291834"
+        }
+      ]
+    },
+    "node_modules/tunnel-rat/node_modules/zustand": {
+      "version": "4.5.7",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/tunnel-rat/node_modules/zustand/LICENSE",
+          "sha256": "c1e6e266563517467b1bf874817d23e426f3149252bd7d42758cd697514b8417"
+        }
+      ]
+    },
+    "node_modules/use-sync-external-store": {
+      "version": "1.7.0",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/use-sync-external-store/LICENSE",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ]
+    },
+    "node_modules/webxr-layers-polyfill": {
+      "version": "1.1.0",
+      "declared_license": "Apache-2.0",
+      "reviewed_license": "Apache-2.0",
+      "files": [
+        {
+          "source": "installed:node_modules/webxr-layers-polyfill/LICENSE",
+          "sha256": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd"
+        }
+      ]
+    },
+    "node_modules/zustand": {
+      "version": "5.0.15",
+      "declared_license": "MIT",
+      "reviewed_license": "MIT",
+      "files": [
+        {
+          "source": "installed:node_modules/zustand/LICENSE",
+          "sha256": "c1e6e266563517467b1bf874817d23e426f3149252bd7d42758cd697514b8417"
+        }
+      ]
+    }
+  }
+}

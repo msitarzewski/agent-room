@@ -35,3 +35,30 @@ func TestCodex0145Fixture(t *testing.T) {
 		t.Fatal("agent message text must not be copied into coordination telemetry")
 	}
 }
+
+func TestCodexDropsPrivateMessagesErrorsAndUnknownUsage(t *testing.T) {
+	input := `{"type":"thread.started","thread_id":"native-thread"}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"fixture-secret-prompt","command":"fixture-secret-command"},"usage":{"input_tokens":9,"private":"fixture-secret-usage"},"error":{"message":"fixture-secret-error","credential":"fixture-secret-token"}}
+`
+	context := adapters.Context{ProjectID: "p", ActorID: "actor", AgentID: "actor", RunID: "actual-run", SourceSequence: 100}
+	events, err := DecodeJSONL(strings.NewReader(input), context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if strings.Contains(string(event.Payload), "fixture-secret") {
+			t.Fatal("private native content reached telemetry")
+		}
+	}
+	if events[1].SourceSequence != 102 || !strings.Contains(string(events[1].Payload), `"input_tokens":9`) || !strings.Contains(string(events[1].Payload), `"thread_id":"native-thread"`) {
+		t.Fatalf("normalized metadata=%+v", events[1])
+	}
+	context.RunID = "different-actual-run"
+	next, err := DecodeJSONL(strings.NewReader(input), context)
+	if err != nil || next[1].SourceEventID == events[1].SourceEventID {
+		t.Fatal("different runs collided on native line number")
+	}
+	if _, err := DecodeJSONL(strings.NewReader(`{"type":"turn.started"}`), adapters.Context{ProjectID: "p", ActorID: "actor"}); err == nil {
+		t.Fatal("missing native run ID became fabricated identity")
+	}
+}

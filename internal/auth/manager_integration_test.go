@@ -318,6 +318,34 @@ func TestManagerDatabaseSecurityBoundaries(t *testing.T) {
 		}
 	})
 
+	t.Run("publisher token scopes remain exact across multiple projects", func(t *testing.T) {
+		created, err := CreateServiceTokenWithMetadata(ctx, repository.Pool(), "sentry-publisher", "Sentry publisher", "source:sentry", []string{"auth-project", "other-project"}, []string{"event:ingest", "source:sentry"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/ingest", nil)
+		request.Header.Set("Authorization", "Bearer "+created.Token)
+		for _, project := range []string{"auth-project", "other-project"} {
+			identity, err := manager.ResolveServiceToken(ctx, request, project)
+			if err != nil || !identity.Actor.Can("event:ingest") || !identity.Actor.Can("source:sentry") || identity.Actor.Can("resource:write") || identity.Actor.Can("project:all") {
+				t.Fatalf("scope=%s identity=%+v err=%v", project, identity, err)
+			}
+		}
+		if _, err := manager.ResolveServiceToken(ctx, request, "new-project"); !errors.Is(err, app.ErrDenied) {
+			t.Fatalf("unprovisioned project permitted: %v", err)
+		}
+		if _, err := CreateServiceTokenWithMetadata(ctx, repository.Pool(), "duplicate-projects", "Invalid", "source:sentry", []string{"auth-project", "auth-project"}, []string{"event:ingest"}, nil); err == nil {
+			t.Fatal("duplicate scopes accepted")
+		}
+		// Old wildcard records must also fail closed at resolution, not just issuance.
+		if _, err := repository.Pool().Exec(ctx, `UPDATE service_tokens SET project_ids=ARRAY['*']::text[] WHERE id=$1`, created.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := manager.ResolveServiceToken(ctx, request, "auth-project"); !errors.Is(err, app.ErrDenied) {
+			t.Fatalf("legacy wildcard permitted: %v", err)
+		}
+	})
+
 	t.Run("OIDC state PKCE browser and nonce binding", func(t *testing.T) {
 		brokenProvider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "unavailable", http.StatusServiceUnavailable)

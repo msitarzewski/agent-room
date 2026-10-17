@@ -30,27 +30,50 @@ func DecodeJSONL(reader io.Reader, adapterContext adapters.Context) ([]domain.Ev
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), 4<<20)
 	var events []domain.Event
+	threadID := adapterContext.SessionID
 	for line := 1; scanner.Scan(); line++ {
 		var record record
 		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
-			return nil, fmt.Errorf("codex JSONL line %d: %w", line, err)
+			return nil, fmt.Errorf("invalid codex JSONL record at line %d", line)
+		}
+		if record.ThreadID != "" {
+			threadID = adapters.MetadataToken(record.ThreadID, 512)
+			if threadID == "" {
+				return nil, fmt.Errorf("invalid native codex thread identifier")
+			}
+		}
+		record.ThreadID = threadID
+		if record.TurnID != "" {
+			record.TurnID = adapters.MetadataToken(record.TurnID, 512)
+			if record.TurnID == "" {
+				return nil, fmt.Errorf("invalid native codex turn identifier")
+			}
 		}
 		eventType, subjectType, subjectID := mapRecord(record, adapterContext)
 		if eventType == "" {
 			continue
 		}
+		if adapters.MetadataToken(subjectID, 512) == "" {
+			return nil, fmt.Errorf("codex record requires an explicit native session or run identity")
+		}
 		var item itemSummary
 		_ = json.Unmarshal(record.Item, &item)
+		item.ID = adapters.MetadataToken(item.ID, 512)
+		item.Type = adapters.MetadataToken(item.Type, 64)
 		event, err := adapterContext.Event(eventType, subjectType, subjectID, map[string]any{
 			"source": "codex_jsonl", "source_type": record.Type, "thread_id": record.ThreadID,
-			"turn_id": record.TurnID, "item": item, "error": record.Error, "usage": record.Usage,
+			"turn_id": adapters.MetadataToken(record.TurnID, 512), "agent_id": adapterContext.AgentID,
+			"item": item, "has_error": len(record.Error) > 0, "usage": adapters.UsageCounts(record.Usage),
 		}, record.Timestamp)
 		if err != nil {
 			return nil, err
 		}
 		event.SourceSystem = "codex"
-		event.SourceSequence = int64(line)
-		event.SourceEventID = fmt.Sprintf("%s:%s:%s:%d", record.ThreadID, record.TurnID, item.ID, line)
+		event.SourceSequence, err = adapters.SourceSequence(adapterContext.SourceSequence, int64(line))
+		if err != nil {
+			return nil, err
+		}
+		event.SourceEventID = adapters.StableSourceID(adapterContext.NativeEventID, adapterContext.ProjectID, adapterContext.AgentID, record.ThreadID, subjectID, record.Type, item.ID, fmt.Sprint(event.SourceSequence))
 		events = append(events, event)
 	}
 	if err := scanner.Err(); err != nil {
@@ -84,5 +107,5 @@ func first(values ...string) string {
 			return value
 		}
 	}
-	return "unknown"
+	return ""
 }

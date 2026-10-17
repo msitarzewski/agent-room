@@ -13,11 +13,47 @@ import { useAuth } from "../auth/AuthContext";
 
 interface StreamContextValue {
   status: StreamStatus;
+  /** Occurrence time of the latest observed project event, retained across reconnects. */
   lastMessageAt: string | null;
+  connectedAt: string | null;
+  /** Local receipt time of any frame, including heartbeat messages. */
+  lastReceivedAt: string | null;
   reconnect: () => void;
 }
 
 const StreamContext = createContext<StreamContextValue | null>(null);
+
+export const STREAM_EVENT = "agentroom:stream";
+export const STREAM_REFRESH_DELAY = 80;
+
+/** The socket adds project scope even to lifecycle and resync messages. */
+export function subscribeProjectChanges(
+  projectId: string,
+  onChange: () => void,
+  onDenied: () => void,
+): () => void {
+  let timer: number | undefined;
+  const receive = (event: Event) => {
+    const message = (event as CustomEvent<StreamMessage>).detail;
+    if (!message || message.project_id !== projectId || message.type === "heartbeat") return;
+    if (message.type === "authorization_denied") {
+      window.clearTimeout(timer);
+      timer = undefined;
+      onDenied();
+      return;
+    }
+    if (timer !== undefined) return;
+    timer = window.setTimeout(() => {
+      timer = undefined;
+      onChange();
+    }, STREAM_REFRESH_DELAY);
+  };
+  window.addEventListener(STREAM_EVENT, receive);
+  return () => {
+    window.clearTimeout(timer);
+    window.removeEventListener(STREAM_EVENT, receive);
+  };
+}
 
 function streamUrl(projectId: string, cursor: string | null): string {
   const url = new URL("/api/v1/stream", window.location.origin);
@@ -31,10 +67,13 @@ export function StreamProvider({ children }: { children: ReactNode }) {
   const { projectId, session } = useAuth();
   const [status, setStatus] = useState<StreamStatus>("disconnected");
   const [lastMessageAt, setLastMessageAt] = useState<string | null>(null);
+  const [connectedAt, setConnectedAt] = useState<string | null>(null);
+  const [lastReceivedAt, setLastReceivedAt] = useState<string | null>(null);
   const [generation, setGeneration] = useState(0);
   const socketRef = useRef<WebSocket | null>(null);
   const retryRef = useRef(0);
   const timerRef = useRef<number | null>(null);
+  const scopeRef = useRef({ projectId, session });
 
   const reconnect = useCallback(() => {
     retryRef.current = 0;
@@ -43,42 +82,72 @@ export function StreamProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const sameScope = scopeRef.current.projectId === projectId && scopeRef.current.session === session;
+    scopeRef.current = { projectId, session };
+    setConnectedAt(null);
+    setLastReceivedAt(null);
+    if (!sameScope || !session || !projectId) setLastMessageAt(null);
     if (!session || !projectId) {
       setStatus("disconnected");
       return;
     }
     let disposed = false;
+    retryRef.current = 0;
     const cursorKey = `agent-room:cursor:${projectId}`;
+
+    const publish = (message: StreamMessage) => {
+      window.dispatchEvent(new CustomEvent(STREAM_EVENT, {
+        detail: { ...message, project_id: projectId },
+      }));
+    };
 
     const connect = () => {
       if (disposed) return;
+      timerRef.current = null;
+      setConnectedAt(null);
+      setLastReceivedAt(null);
       setStatus(retryRef.current === 0 ? "connecting" : "reconnecting");
       const socket = new WebSocket(streamUrl(projectId, sessionStorage.getItem(cursorKey)));
       socketRef.current = socket;
 
       socket.addEventListener("open", () => {
+        if (disposed || socketRef.current !== socket) return;
         retryRef.current = 0;
+        const openedAt = new Date().toISOString();
+        setConnectedAt(openedAt);
         setStatus("connected");
+        publish({ type: "stream_connected", cursor: 0, occurred_at: openedAt });
       });
       socket.addEventListener("message", (event) => {
+        if (disposed || socketRef.current !== socket) return;
+        setLastReceivedAt(new Date().toISOString());
         try {
           const message = JSON.parse(String(event.data)) as StreamMessage;
+          if (typeof message.type !== "string") throw new Error("Invalid stream message.");
           if (message.type === "heartbeat") return;
           if (message.type === "resync_required") {
             sessionStorage.removeItem(cursorKey);
           } else if (message.cursor) {
-            sessionStorage.setItem(cursorKey, String(message.cursor));
+            const previous = Number(sessionStorage.getItem(cursorKey) ?? 0);
+            if (message.cursor > previous) sessionStorage.setItem(cursorKey, String(message.cursor));
           }
-          setLastMessageAt(message.occurred_at);
-          window.dispatchEvent(new CustomEvent("agentroom:stream", { detail: message }));
+          if (!["resync_required", "stream_connected", "authorization_denied"].includes(message.type)) setLastMessageAt((previous) => {
+            if (typeof message.occurred_at !== "string" || Number.isNaN(Date.parse(message.occurred_at))) return previous;
+            return !previous || Date.parse(message.occurred_at) > Date.parse(previous) ? message.occurred_at : previous;
+          });
+          publish(message);
         } catch {
           setStatus("error");
         }
       });
       socket.addEventListener("close", (event) => {
-        if (disposed) return;
+        if (disposed || socketRef.current !== socket) return;
+        setConnectedAt(null);
         if (event.code === 4401 || event.code === 4403) {
+          setLastMessageAt(null);
+          setLastReceivedAt(null);
           setStatus("error");
+          publish({ type: "authorization_denied", cursor: 0, occurred_at: new Date().toISOString() });
           return;
         }
         setStatus("reconnecting");
@@ -87,6 +156,7 @@ export function StreamProvider({ children }: { children: ReactNode }) {
         timerRef.current = window.setTimeout(connect, delay);
       });
       socket.addEventListener("error", () => {
+        if (disposed || socketRef.current !== socket) return;
         setStatus("error");
       });
     };
@@ -95,14 +165,15 @@ export function StreamProvider({ children }: { children: ReactNode }) {
     return () => {
       disposed = true;
       if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+      timerRef.current = null;
       socketRef.current?.close(1000, "Project changed");
       socketRef.current = null;
     };
   }, [generation, projectId, session]);
 
   const value = useMemo(
-    () => ({ status, lastMessageAt, reconnect }),
-    [status, lastMessageAt, reconnect],
+    () => ({ status, lastMessageAt, connectedAt, lastReceivedAt, reconnect }),
+    [status, lastMessageAt, connectedAt, lastReceivedAt, reconnect],
   );
   return <StreamContext.Provider value={value}>{children}</StreamContext.Provider>;
 }

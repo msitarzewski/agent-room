@@ -13,7 +13,7 @@ go test -race \
   -covermode=atomic \
   -coverpkg=./internal/... \
   -coverprofile="${temporary}/unit.out" \
-  ./internal/... ./tests/security
+  ./cmd/... ./internal/... ./tests/security
 go test -race -tags=integration \
   -covermode=atomic \
   -coverpkg=./internal/... \

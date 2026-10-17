@@ -215,7 +215,7 @@ func (m *Manager) ResolveServiceToken(ctx context.Context, request *http.Request
 	identity.ID, identity.Actor.ID, identity.ProjectIDs, identity.Capabilities = row.ID, row.ActorID, row.ProjectIds, row.Capabilities
 	allowed := false
 	for _, candidate := range identity.ProjectIDs {
-		if candidate == projectID || candidate == "*" {
+		if candidate == projectID {
 			allowed = true
 			break
 		}

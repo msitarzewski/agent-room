@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"time"
 
 	"github.com/msitarzewski/agent-room/internal/adapters"
@@ -25,8 +26,8 @@ type streamRecord struct {
 	Tools             []string        `json:"tools"`
 	Usage             json.RawMessage `json:"usage"`
 	RateLimitInfo     json.RawMessage `json:"rate_limit_info"`
-	CostUSD           float64         `json:"total_cost_usd"`
-	DurationMS        int64           `json:"duration_ms"`
+	CostUSD           *float64        `json:"total_cost_usd"`
+	DurationMS        *int64          `json:"duration_ms"`
 }
 
 type HookPayload struct {
@@ -43,38 +44,78 @@ func DecodeStreamJSON(reader io.Reader, adapterContext adapters.Context) ([]doma
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), 4<<20)
 	var events []domain.Event
+	sessionID := adapterContext.SessionID
 	for line := 1; scanner.Scan(); line++ {
 		var record streamRecord
 		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
-			return nil, fmt.Errorf("claude stream-json line %d: %w", line, err)
+			return nil, fmt.Errorf("invalid claude stream-json record at line %d", line)
 		}
+		if record.SessionID != "" {
+			sessionID = adapters.MetadataToken(record.SessionID, 512)
+			if sessionID == "" {
+				return nil, fmt.Errorf("invalid native claude session identifier")
+			}
+		}
+		record.SessionID = sessionID
 		eventType, subjectType := mapStreamType(record)
 		if eventType == "" {
 			continue
 		}
-		subject := record.SessionID
-		if subject == "" {
+		subject := sessionID
+		if subjectType == domain.ResourceRun || subject == "" {
 			subject = adapterContext.RunID
 		}
-		event, err := adapterContext.Event(eventType, subjectType, subject, map[string]any{
-			"source": "claude_stream_json", "source_type": record.Type, "subtype": record.Subtype,
-			"session_id": record.SessionID, "claude_code_version": record.ClaudeCodeVersion,
-			"model": record.Model, "tools": record.Tools, "is_error": record.IsError,
-			"usage": record.Usage, "rate_limit_info": record.RateLimitInfo,
-			"total_cost_usd": record.CostUSD, "duration_ms": record.DurationMS,
-		}, record.Timestamp)
+		if adapters.MetadataToken(subject, 512) == "" {
+			return nil, fmt.Errorf("claude record requires an explicit native session or run identity")
+		}
+		tools := []string{}
+		for _, tool := range record.Tools {
+			if token := adapters.MetadataToken(tool, 128); token != "" && len(tools) < 100 {
+				tools = append(tools, token)
+			}
+		}
+		var rateLimit struct {
+			Status   string `json:"status"`
+			ResetsAt *int64 `json:"resets_at,omitempty"`
+		}
+		_ = json.Unmarshal(record.RateLimitInfo, &rateLimit)
+		if rateLimit.Status != "allowed" && rateLimit.Status != "allowed_warning" && rateLimit.Status != "rejected" {
+			rateLimit.Status = "unknown"
+		}
+		if rateLimit.ResetsAt != nil && (*rateLimit.ResetsAt < 0 || *rateLimit.ResetsAt > 4102444800) {
+			rateLimit.ResetsAt = nil
+		}
+		metadata := map[string]any{
+			"source": "claude_stream_json", "source_type": record.Type, "subtype": adapters.MetadataToken(record.Subtype, 64),
+			"session_id": sessionID, "agent_id": adapterContext.AgentID, "claude_code_version": adapters.MetadataToken(record.ClaudeCodeVersion, 64),
+			"model": adapters.MetadataToken(record.Model, 128), "tools": tools, "is_error": record.IsError,
+			"usage": adapters.UsageCounts(record.Usage), "rate_limit_info": rateLimit,
+		}
+		if record.CostUSD != nil && !math.IsNaN(*record.CostUSD) && !math.IsInf(*record.CostUSD, 0) && *record.CostUSD >= 0 && *record.CostUSD <= 1_000_000 {
+			metadata["total_cost_usd"] = *record.CostUSD
+		}
+		if record.DurationMS != nil && *record.DurationMS >= 0 && *record.DurationMS <= 7*24*60*60*1000 {
+			metadata["duration_ms"] = *record.DurationMS
+		}
+		event, err := adapterContext.Event(eventType, subjectType, subject, metadata, record.Timestamp)
 		if err != nil {
 			return nil, err
 		}
 		event.SourceSystem = "claude"
-		event.SourceSequence = int64(line)
-		event.SourceEventID = fmt.Sprintf("%s:%s:%s:%d", record.SessionID, record.Type, record.Subtype, line)
+		event.SourceSequence, err = adapters.SourceSequence(adapterContext.SourceSequence, int64(line))
+		if err != nil {
+			return nil, err
+		}
+		event.SourceEventID = adapters.StableSourceID(adapterContext.NativeEventID, adapterContext.ProjectID, adapterContext.AgentID, sessionID, subject, record.Type, record.Subtype, fmt.Sprint(event.SourceSequence))
 		events = append(events, event)
 	}
 	return events, scanner.Err()
 }
 
 func DecodeHook(payload HookPayload, adapterContext adapters.Context) (domain.Event, error) {
+	if adapterContext.NativeEventID == "" || adapterContext.SourceSequence <= 0 || adapters.MetadataToken(payload.SessionID, 512) == "" {
+		return domain.Event{}, fmt.Errorf("claude hook requires a native invocation ID, durable sequence, and session ID")
+	}
 	eventType := map[string]string{
 		"SessionStart": "session.started", "SessionEnd": "session.completed",
 		"PreToolUse": "tool.started", "PostToolUse": "tool.completed",
@@ -83,9 +124,12 @@ func DecodeHook(payload HookPayload, adapterContext adapters.Context) (domain.Ev
 	if eventType == "" {
 		eventType = "claude.hook.observed"
 	}
-	event, err := adapterContext.Event(eventType, domain.ResourceSession, payload.SessionID, payload, time.Time{})
+	event, err := adapterContext.Event(eventType, domain.ResourceSession, payload.SessionID, map[string]any{
+		"source": "claude_hook", "event_name": adapters.MetadataToken(payload.HookEventName, 64), "session_id": adapters.MetadataToken(payload.SessionID, 512),
+		"agent_id": adapterContext.AgentID, "tool_name": adapters.MetadataToken(payload.ToolName, 128),
+	}, time.Time{})
 	event.SourceSystem = "claude"
-	event.SourceEventID = payload.SessionID + ":" + payload.HookEventName + ":" + payload.ToolName
+	event.SourceEventID = adapters.StableSourceID(adapterContext.ProjectID, payload.SessionID, adapterContext.NativeEventID)
 	return event, err
 }
 

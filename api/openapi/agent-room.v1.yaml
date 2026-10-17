@@ -100,6 +100,22 @@ paths:
           description: Available projects and project-scoped capabilities
           content: {application/json: {schema: {$ref: "#/components/schemas/ProjectSummaryPage"}}}
         "401": {$ref: "#/components/responses/Unauthorized"}
+  /workspace:
+    get:
+      operationId: getWorkspaceSnapshot
+      summary: Get a complete consistent project workspace
+      description: Reads every workspace resource, event watermark, and source receipt timestamp from a single repeatable-read transaction. Requires read access to every included resource kind; partial snapshots are denied. Arrays are always present and unpaginated.
+      tags: [Coordination]
+      parameters:
+        - {$ref: "#/components/parameters/Project"}
+      responses:
+        "200":
+          description: Complete project workspace snapshot
+          content: {application/json: {schema: {$ref: "#/components/schemas/WorkspaceSnapshot"}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
   /overview:
     get:
       operationId: getProjectOverview
@@ -168,6 +184,57 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "503": {$ref: "#/components/responses/ServiceUnavailable"}
+  /requests:
+    get:
+      operationId: listCoordinationRequests
+      summary: List explicit participant requests
+      description: coordination:read sees only owned or incoming requests; resource:read sees all requests in this authorized project. Also available on the private service-token listener.
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/Cursor"}, {$ref: "#/components/parameters/Limit"}]
+      responses:
+        "200": {description: Request page, content: {application/json: {schema: {$ref: "#/components/schemas/CoordinationRequestPage"}}}}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      operationId: createCoordinationRequest
+      summary: Ask a named participant for help, context, handoff or review
+      description: Requires coordination:create or resource:write. Owner and status are server-authored. Handoffs and reviews do not transfer ownership, execute work, accept completion or approve actions. Private listener uses exact-project bearer tokens without browser CSRF.
+      tags: [Commands]
+      parameters: [{$ref: "#/components/parameters/Project"}, {$ref: "#/components/parameters/CSRF"}, {$ref: "#/components/parameters/IdempotencyKey"}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/CreateCoordinationRequest"}}}}
+      responses:
+        "201": {description: Request created or replayed, content: {application/json: {schema: {$ref: "#/components/schemas/CoordinationRequest"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /requests/{id}:
+    get:
+      operationId: getCoordinationRequest
+      summary: Get an authorized participant request
+      tags: [Resources]
+      parameters: [{$ref: "#/components/parameters/ID"}, {$ref: "#/components/parameters/Project"}]
+      responses:
+        "200": {description: Request, content: {application/json: {schema: {$ref: "#/components/schemas/CoordinationRequest"}}}}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /requests/{id}/{action}:
+    post:
+      operationId: actCoordinationRequest
+      summary: Respond to, resolve or cancel a request
+      description: Named recipient may respond once; owner may resolve or cancel. Requires coordination:respond/resolve/cancel respectively or resource:write operator override. Human recipients require an authenticated human even for overrides. Actor attribution always records the actual participant. Closed requests cannot reopen. Existing version, idempotency and audit rules apply.
+      tags: [Commands]
+      parameters:
+        - {$ref: "#/components/parameters/ID"}
+        - {$ref: "#/components/parameters/Project"}
+        - {$ref: "#/components/parameters/CSRF"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+        - {$ref: "#/components/parameters/IfMatch"}
+        - {name: action, in: path, required: true, schema: {type: string, enum: [respond, resolve, cancel]}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/CoordinationAction"}}}}
+      responses:
+        "200": {description: Updated or replayed request, content: {application/json: {schema: {$ref: "#/components/schemas/CoordinationRequest"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "428": {$ref: "#/components/responses/PreconditionRequired"}
   /agents:
     get:
       operationId: listAgents
@@ -594,7 +661,7 @@ paths:
     post:
       operationId: ingestAdapterEvents
       summary: Ingest authenticated runtime events
-      description: Adapter-only endpoint served by the private listener. Event identifiers and actor attribution are replaced by canonical server values.
+      description: Available only on the private adapter listener. Payloads cannot contain resource replacements. Sentry and GitHub use typed task.observed or project.observed and a positive source_sequence; project observations require operator-preprovisioned projects and preserve canonical names, memberships and tasks; collection time is separate from delivery receipt; Narrow codex/claude/hermes source tokens accept only typed agent.observed/session.observed/run.observed; legacy event names require explicit source:admin authority; Task IDs are scoped by project and source from external_id, with legacy Sentry IDs preserved. Each source has an independent project report and freshness watermark. Source completion never accepts supervised completion. Later observations preserve supervisory fields. Blocked source work derives source.task.blocked attention; a newer nonblocked observation resolves only that source-owned item. Human resolution suppresses the same blocked episode until the source unblocks and blocks again. Event identifiers and actor attribution are replaced by canonical server values.
       tags: [Adapter]
       security:
         - serviceToken: []
@@ -875,12 +942,178 @@ components:
       required: [items]
       properties:
         items: {type: array, items: {$ref: "#/components/schemas/ProjectSummary"}}
+    WorkspaceSnapshot:
+      type: object
+      additionalProperties: false
+      required: [project_id, cursor, generated_at, resources, sources]
+      properties:
+        project_id: {type: string}
+        cursor: {type: integer, format: int64, minimum: 0}
+        generated_at: {type: string, format: date-time}
+        resources:
+          type: object
+          additionalProperties: false
+          required: [tasks, agents, runs, attention, evidence, artifacts, claims, approvals, requests]
+          properties:
+            tasks: {type: array, items: {$ref: "#/components/schemas/Task"}}
+            agents: {type: array, items: {$ref: "#/components/schemas/Agent"}}
+            runs: {type: array, items: {$ref: "#/components/schemas/Run"}}
+            attention: {type: array, items: {$ref: "#/components/schemas/Attention"}}
+            evidence: {type: array, items: {$ref: "#/components/schemas/Evidence"}}
+            artifacts: {type: array, items: {$ref: "#/components/schemas/Artifact"}}
+            claims: {type: array, items: {$ref: "#/components/schemas/Claim"}}
+            approvals: {type: array, items: {$ref: "#/components/schemas/Approval"}}
+            requests: {type: array, items: {$ref: "#/components/schemas/CoordinationRequest"}}
+        sources:
+          type: array
+          items: {$ref: "#/components/schemas/SourceFreshness"}
+    CoordinationRecipient:
+      type: object
+      additionalProperties: false
+      required: [type, id]
+      properties:
+        type: {type: string, enum: [agent, human]}
+        id: {type: string, minLength: 1, maxLength: 512}
+    CreateCoordinationRequest:
+      type: object
+      additionalProperties: false
+      required: [id, kind, title, body, recipient]
+      properties:
+        id: {type: string, minLength: 1, maxLength: 512}
+        kind: {type: string, enum: [help, context, handoff, review]}
+        title: {type: string, minLength: 1, maxLength: 4096}
+        body: {type: string, minLength: 1, maxLength: 32768}
+        recipient: {$ref: "#/components/schemas/CoordinationRecipient"}
+        task_id: {type: string}
+        evidence_ids: {type: array, maxItems: 100, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
+        escalation_reason: {type: string, maxLength: 4096, description: Required and nonblank for a named human recipient; forbidden for agent recipients.}
+      allOf:
+        - if: {properties: {recipient: {properties: {type: {const: human}}, required: [type]}}, required: [recipient]}
+          then: {required: [escalation_reason], properties: {escalation_reason: {type: string, minLength: 1, pattern: "\\S"}}}
+          else: {not: {properties: {escalation_reason: {}}, required: [escalation_reason]}}
+    CoordinationAction:
+      type: object
+      additionalProperties: false
+      properties:
+        body: {type: string, maxLength: 32768, description: Required and nonempty for respond; forbidden for resolve/cancel.}
+        evidence_ids: {type: array, maxItems: 100, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
+        note: {type: string, maxLength: 4096, description: Close note for resolve/cancel; forbidden for respond.}
+    CoordinationRequest:
+      allOf:
+        - {$ref: "#/components/schemas/ResourceBase"}
+        - type: object
+          required: [kind, title, body, owner_id, owner_type, recipient, evidence_ids, status]
+          properties:
+            kind: {type: string, enum: [help, context, handoff, review]}
+            title: {type: string}
+            body: {type: string}
+            owner_id: {type: string}
+            owner_type: {type: string, enum: [agent, human]}
+            recipient: {$ref: "#/components/schemas/CoordinationRecipient"}
+            task_id: {type: string}
+            evidence_ids: {type: array, items: {type: string}}
+            status: {type: string, enum: [open, responded, resolved, cancelled]}
+            escalation_reason: {type: string}
+            response:
+              type: object
+              required: [actor_id, body, evidence_ids, responded_at]
+              properties:
+                actor_id: {type: string}
+                body: {type: string}
+                evidence_ids: {type: array, items: {type: string}}
+                responded_at: {type: string, format: date-time}
+            resolution:
+              type: object
+              required: [actor_id, closed_at]
+              properties:
+                actor_id: {type: string}
+                note: {type: string}
+                closed_at: {type: string, format: date-time}
+    CoordinationRequestPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/CoordinationRequest"}}
+        next_cursor: {type: string}
+    CoordinationSummary:
+      type: object
+      required: [counts, items, complete, truncated]
+      properties:
+        complete: {type: boolean, description: Whether the actor may read every coordination input kind and all project requests; source freshness is reported separately.}
+        truncated: {type: boolean}
+        counts:
+          type: object
+          required: [running_work, agent_presence, unfinished_tasks, source_unfinished_tasks, blocked_tasks, canonical_blocked_tasks, source_blocked_tasks, requests, reviews, human_escalations, human_approvals, open_attention]
+          properties:
+            running_work: {type: integer, minimum: 0}
+            agent_presence: {type: integer, minimum: 0}
+            unfinished_tasks: {type: integer, minimum: 0}
+            source_unfinished_tasks: {type: integer, minimum: 0, description: Recognized Sentry Upcoming/Working/Blocked and GitHub open/draft/review/blocked context; never proof of a running worker.}
+            blocked_tasks: {type: integer, minimum: 0}
+            canonical_blocked_tasks: {type: integer, minimum: 0}
+            source_blocked_tasks: {type: integer, minimum: 0}
+            requests: {type: integer, minimum: 0}
+            reviews: {type: integer, minimum: 0}
+            human_escalations: {type: integer, minimum: 0}
+            human_approvals: {type: integer, minimum: 0}
+            open_attention: {type: integer, minimum: 0}
+        items: {type: array, maxItems: 24, items: {$ref: "#/components/schemas/CoordinationItem"}}
+    CoordinationItem:
+      type: object
+      required: [kind, resource_type, id, title, status, updated_at, human_escalation]
+      properties:
+        kind: {type: string, enum: [run, agent, task, blocker, request, review, human_approval, attention]}
+        resource_type: {type: string}
+        id: {type: string}
+        title: {type: string}
+        status: {type: string}
+        updated_at: {type: string, format: date-time}
+        human_escalation: {type: boolean}
+        owner_id: {type: string}
+        detail: {type: string, maxLength: 2048}
+        owner_name: {type: string, maxLength: 256}
+        recipient_name: {type: string, maxLength: 256}
+        request_kind: {type: string, enum: [help, context, handoff, review]}
+        target_type: {type: string}
+        target_id: {type: string}
+        recipient: {$ref: "#/components/schemas/CoordinationRecipient"}
+        task_id: {type: string}
+        evidence_ids: {type: array, items: {type: string}}
+        source_system: {type: string}
+    ProjectObservation:
+      type: object
+      additionalProperties: false
+      required: [external_id, name, path, status, collected_at, scan_status, task_count]
+      properties:
+        external_id: {type: string, minLength: 1, maxLength: 1024}
+        name: {type: string, minLength: 1, maxLength: 4096, description: Source-reported name; canonical project name is preserved.}
+        path: {type: string, minLength: 1, maxLength: 4096}
+        status: {type: string, minLength: 1, maxLength: 128}
+        reason: {type: string, maxLength: 4096}
+        collected_at: {type: string, format: date-time, description: Actual collection time; must equal occurred_at when both are supplied.}
+        scan_status: {type: string, enum: [complete, partial, unreadable]}
+        task_count: {type: integer, minimum: 0, description: Positive task records observed in this scan; unreadable scans do not establish an empty project.}
+        scan_error: {type: string, maxLength: 4096}
+    SourceFreshness:
+      type: object
+      additionalProperties: false
+      required: [system, last_seen, last_received_at, last_collected_at, last_successful_collection_at, scan_status]
+      properties:
+        system: {type: string}
+        last_seen: {type: string, format: date-time, description: Backward-compatible alias of last_received_at.}
+        last_received_at: {type: string, format: date-time, description: Most recent event receipt time in this project.}
+        last_collected_at: {type: [string, "null"], format: date-time, description: Last accepted project collection; legacy task-only sources use event occurrence time.}
+        last_successful_collection_at: {type: [string, "null"], format: date-time, description: Last accepted complete project collection.}
+        scan_status: {type: [string, "null"], enum: [complete, partial, unreadable, null]}
+        project_observation: {$ref: "#/components/schemas/ProjectObservation"}
     ProjectOverview:
       type: object
-      required: [project_id, counts, event_cursor, generated_at]
+      required: [project_id, counts, event_cursor, generated_at, sources, coordination]
       properties:
         project_id: {type: string}
         counts: {type: object, additionalProperties: {type: integer, format: int64, minimum: 0}}
+        sources: {type: array, items: {$ref: "#/components/schemas/SourceFreshness"}}
+        coordination: {$ref: "#/components/schemas/CoordinationSummary"}
         event_cursor: {type: integer, format: int64, minimum: 0}
         generated_at: {type: string, format: date-time}
     BriefAcknowledgement:
@@ -963,6 +1196,8 @@ components:
             kind: {type: string}
             status: {type: string}
             capabilities: {type: array, items: {type: string}}
+            observed_at: {type: string, format: date-time}
+            presence_expires_at: {type: string, format: date-time}
             source: {$ref: "#/components/schemas/Source"}
     Run:
       allOf:
@@ -1008,7 +1243,21 @@ components:
             review_state: {type: string}
             approval_state: {type: string}
             blocked_reason: {type: string}
+            source_status: {type: string, description: Source-reported status; does not accept or change supervised task status.}
+            source_observed_at: {type: string, format: date-time}
+            source_observation: {$ref: "#/components/schemas/TaskObservation"}
             source: {$ref: "#/components/schemas/Source"}
+    TaskObservation:
+      type: object
+      additionalProperties: false
+      required: [external_id, title, status]
+      properties:
+        external_id: {type: string, minLength: 1, maxLength: 1024, description: Stable task identity within the source project.}
+        title: {type: string, minLength: 1, maxLength: 4096}
+        description: {type: string}
+        status: {type: string, minLength: 1, maxLength: 128}
+        external_url: {type: string, format: uri, pattern: "^https?://"}
+        dependencies: {type: array, maxItems: 1000, items: {type: string, minLength: 1, maxLength: 1024}, description: Stable external task IDs within the same project.}
     TaskTransition:
       allOf:
         - {$ref: "#/components/schemas/ResourceBase"}
@@ -1173,7 +1422,16 @@ components:
         - {$ref: "#/components/schemas/ResourceBase"}
         - type: object
           required: [organization_id, name, slug, status]
-          properties: {organization_id: {type: string}, name: {type: string}, slug: {type: string}, status: {type: string}}
+          properties:
+            organization_id: {type: string}
+            name: {type: string}
+            slug: {type: string}
+            status: {type: string}
+            source: {$ref: "#/components/schemas/Source"}
+            source_status: {type: string}
+            source_observed_at: {type: string, format: date-time}
+            source_observation: {$ref: "#/components/schemas/ProjectObservation"}
+            source_last_successful_collection_at: {type: string, format: date-time}
     Host:
       allOf:
         - {$ref: "#/components/schemas/ResourceBase"}
@@ -1259,22 +1517,90 @@ components:
         source_event_id: {type: string}
         source_sequence: {type: integer, format: int64}
         payload: {}
+    AgentObservation:
+      type: object
+      additionalProperties: false
+      required: [agent_id, instance_id, display_name, status, observed_at]
+      properties:
+        agent_id: {type: string, minLength: 1, maxLength: 512}
+        instance_id: {type: string, minLength: 1, maxLength: 512}
+        display_name: {type: string, minLength: 1, maxLength: 256}
+        status: {type: string, enum: [active, idle, blocked, disconnected]}
+        observed_at: {type: string, format: date-time}
+    SessionObservation:
+      type: object
+      additionalProperties: false
+      required: [agent_id, session_id, status, observed_at]
+      properties:
+        agent_id: {type: string, minLength: 1, maxLength: 512}
+        session_id: {type: string, minLength: 1, maxLength: 512}
+        status: {type: string, enum: [active, idle, closed]}
+        observed_at: {type: string, format: date-time}
+    RunObservation:
+      type: object
+      additionalProperties: false
+      required: [agent_id, run_id, status, observed_at]
+      properties:
+        agent_id: {type: string, minLength: 1, maxLength: 512}
+        run_id: {type: string, minLength: 1, maxLength: 512}
+        status: {type: string, enum: [running, idle, blocked, completed, failed, cancelled]}
+        observed_at: {type: string, format: date-time}
+        session_id: {type: string, maxLength: 512}
+        task_id: {type: string, maxLength: 512}
+        summary: {type: string, maxLength: 4096}
     IngestEvent:
       type: object
-      required: [project_id, type, subject_type, subject_id, source_system, payload]
+      required: [project_id, type, subject_type, subject_id, source_system, source_event_id, payload]
       properties:
         project_id: {type: string}
         type: {type: string, pattern: "^[a-z][a-z0-9_.-]{0,127}$"}
-        subject_type: {type: string}
+        subject_type: {type: string, not: {const: coordination_request}}
         subject_id: {type: string, minLength: 1}
         correlation_id: {type: string}
         causation_id: {type: string}
         occurred_at: {type: string, format: date-time}
         schema_version: {type: integer, enum: [0, 1]}
         source_system: {type: string, pattern: "^[a-z][a-z0-9_.-]{0,63}$"}
-        source_event_id: {type: string}
-        source_sequence: {type: integer, format: int64}
-        payload: {}
+        source_event_id: {type: string, minLength: 1, maxLength: 512}
+        source_sequence: {type: integer, format: int64, minimum: 0}
+        payload: {type: object, not: {properties: {resource: {}}, required: [resource]}}
+      allOf:
+        - if: {properties: {source_system: {enum: [sentry, github]}}, required: [source_system]}
+          then:
+            required: [source_sequence]
+            properties:
+              source_sequence: {type: integer, minimum: 1}
+            oneOf:
+              - properties:
+                  type: {const: task.observed}
+                  subject_type: {const: task}
+                  payload: {$ref: "#/components/schemas/TaskObservation"}
+              - properties:
+                  type: {const: project.observed}
+                  subject_type: {const: project}
+                  payload: {$ref: "#/components/schemas/ProjectObservation"}
+        - if:
+            properties:
+              source_system: {enum: [codex, claude, hermes]}
+              type: {enum: [agent.observed, session.observed, run.observed]}
+            required: [source_system, type]
+          then:
+            required: [source_sequence]
+            properties:
+              source_sequence: {type: integer, minimum: 1}
+            oneOf:
+              - properties:
+                  type: {const: agent.observed}
+                  subject_type: {const: agent}
+                  payload: {$ref: "#/components/schemas/AgentObservation"}
+              - properties:
+                  type: {const: session.observed}
+                  subject_type: {const: session}
+                  payload: {$ref: "#/components/schemas/SessionObservation"}
+              - properties:
+                  type: {const: run.observed}
+                  subject_type: {const: run}
+                  payload: {$ref: "#/components/schemas/RunObservation"}
     Problem:
       type: object
       required: [type, title, status, detail, code]

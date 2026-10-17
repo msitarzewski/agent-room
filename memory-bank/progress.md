@@ -1,11 +1,46 @@
 # Progress
 
-**Last updated:** 2026-07-28
+**Last updated:** 2026-10-15
 
 ## Current Phase
 
-Founding release implemented. Simplified production activation is approved and
-being applied.
+2026-10-15 UX follow-up: necessary information now occupies separate desktop
+and immersive spaces, with long recorded context fully available through
+wrapping/paging. 140 frontend tests and 30 Chromium/WebKit browser checks pass;
+actual authenticated 99-project HTTPS checks cover wide/narrow/200%-text layout.
+The clean `5ef2b30` frontend is installed with rollback copies and verified
+through HTTPS; native binaries remain `14b5c43` and source services are unchanged.
+See [information layout follow-up](releases/agent-coordination-workspace.md#information-layout-follow-up--2026-10-15).
+
+2026-10-15 product clarification: agents are the primary participants; Michael
+is mostly a passenger. The approved coordination iteration now implements typed
+requests, ownership, reviews, handoffs, and explicit runtime self-reporting, with
+human escalations separate. Actual coding agents exercised native-session
+reporting, MCP ownership/evidence, and peer request/response/resolution. The
+99-project desktop/XR portfolio uses four semantic regions and twelve-project
+pages. Full isolated gates and actual Chromium/WebKit HTTPS acceptance pass.
+Automatic provider hooks and worker execution are still absent. See
+`decisions.md#2026-10-15-agents-are-the-primary-participants`.
+Read [Agent coordination workspace](releases/agent-coordination-workspace.md)
+for the complete verification and remaining device/promotion checks.
+
+First spatial workspace release candidate is complete locally on
+`feat/spatial-workspace`. The observatory, authorized snapshots, typed Sentry
+observations, accessible inspection, safe controls, and WebXR implementation
+are built and locally verified. The Mac staging deployment is running over
+Tailscale HTTPS with OIDC, persistent databases, supervised service operation,
+and verified live updates in Chromium/WebKit. Physical Vision Pro acceptance
+and remote production promotion remain separate.
+[Release progress](releases/spatial-workspace.md) is tracked by Sentry.
+
+Spatial checkpoint `95f166b` and continuous-feed implementation `880b5e1` are
+committed. Michael explicitly approved full portfolio setup on 2026-10-15:
+99 projects are now provisioned with full operator project permissions and an
+exact-scoped, source-ingestion-only publisher. Durable delivery and live
+Chromium/WebKit portfolio checks pass, with no backlog or quarantine. Source
+collection, delivery receipt, and connection health have separate labels. The
+earlier automatic-review scope rejection is resolved by that approval. Read the
+[continuous-feed release](releases/continuous-sentry-observations.md).
 
 ## Completed Foundations
 
@@ -81,19 +116,31 @@ being applied.
 
 ### Milestone 10: Vision Pro
 
-**Status:** Not started
+**Status:** Local deployment verified; Michael reports immersive mode works (2026-10-15); remaining device acceptance pending
+
+The first observatory reuses the existing control plane and MiradorXR's technical
+patterns. It adds desktop WebGPU/WebGL fallback and dedicated WebGL WebXR, with
+shared selection, natural-input contracts, and in-world task/evidence inspection.
+No headset frame-rate or comfort measurement has been claimed.
 
 ## Immediate Next Work
 
-1. Publish and merge the approved ingress simplification.
-2. Complete the OIDC provider/client registration and production activation.
-3. Configure Pip's least-privilege Hermes hooks, Agent Room service token, and
+1. Accept the interface on the actual Vision Pro build, then choose a release
+   identifier for signed promotion.
+2. Improve the brief's routine-scan counting and wording at
+   `web/src/pages/AttentionPage.tsx:127`; distinguish source checks from meaningful
+   work updates. Full portfolio provisioning is now complete.
+3. Verify the operator-designated remote machine's platform and deployment
+   configuration before signed promotion; the current Mac deployment is staging
+   for headset testing. The actual host identifier stays in the private runtime
+   record. The July status does not prove current remote activation.
+4. Configure Pip's least-privilege Hermes hooks, Agent Room service token, and
    MCP tools.
-4. Provision and test the encrypted off-host backup destination.
+5. Provision and test the encrypted off-host backup destination.
 
 ## Current Blockers
 
 - repository protection and private vulnerability-reporting configuration
-- OIDC client registration and secret
+- remote identity configuration verification; local OIDC is already operational
 - encrypted backup destination and retention
 - Hermes production credential and live hook/MCP configuration

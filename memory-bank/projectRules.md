@@ -1,16 +1,16 @@
 # Project Rules
 
-**Last updated:** 2026-07-28
+**Last updated:** 2026-10-15
 
 These rules supplement `AGENTS.md` with Agent Room-specific product and architecture constraints.
 
 ## Product Rules
 
-1. Build for supervision of two to ten coding agents before expanding markets.
-2. Prefer attention items and decisions over activity feeds.
+1. Build for coordination among two to ten coding agents, with the human mostly observing.
+2. Route routine requests to responsible agents; surface human decisions as exceptions.
 3. Treat evidence as part of completion, not an optional attachment.
 4. Keep the browser experience valuable without voice or spatial hardware.
-5. Validate each milestone by supervisory work eliminated.
+5. Validate each milestone by coordination friction or human intervention eliminated.
 6. Separate chat participation from action authority.
 
 ## Architecture Rules

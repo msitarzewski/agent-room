@@ -105,3 +105,45 @@ func TestDecodeEveryResourceTypeAndRejectsInvalidInput(t *testing.T) {
 		t.Fatal("invalid JSON decoded")
 	}
 }
+
+func TestSourceObservationIdentitiesPreserveSentryAndIsolateGitHub(t *testing.T) {
+	const legacy = "sentry_task_0b2f41d69cb1d54fea831c504ebaaada"
+	if got := ObservedTaskID("project", "native"); got != legacy {
+		t.Fatalf("legacy Sentry identity changed=%s", got)
+	}
+	if ObservedTaskIDForSource("project", "sentry", "native") != legacy {
+		t.Fatal("source helper changed legacy Sentry identity")
+	}
+	github := ObservedTaskIDForSource("project", "github", "native")
+	if github == legacy || github == ObservedTaskIDForSource("other-project", "github", "native") || github != ObservedTaskIDForSource("project", "github", "native") {
+		t.Fatal("GitHub task identity is not stable/project/source scoped")
+	}
+	if ObservedProjectIDForSource("project", "sentry") != "project" {
+		t.Fatal("legacy Sentry project identity changed")
+	}
+	githubProject := ObservedProjectIDForSource("project", "github")
+	if githubProject == "project" || githubProject == ObservedProjectIDForSource("other-project", "github") || githubProject != ObservedProjectIDForSource("project", "github") {
+		t.Fatal("source project reports are not isolated")
+	}
+	for _, source := range []string{"sentry", "github"} {
+		if !IsTaskObservationSource(source) {
+			t.Fatalf("supported source rejected=%s", source)
+		}
+	}
+	for _, source := range []string{"", "codex", "claude", "hermes", "future-source"} {
+		if IsTaskObservationSource(source) {
+			t.Fatalf("unapproved source generalized=%s", source)
+		}
+	}
+	for _, test := range []struct {
+		system, status              string
+		unfinished, review, blocked bool
+	}{
+		{"sentry", "Upcoming", true, false, false}, {"sentry", "Done", false, false, false}, {"sentry", "Unknown", false, false, false},
+		{"github", "open", true, false, false}, {"github", "draft", true, false, false}, {"github", " REVIEW_REQUESTED ", true, true, false}, {"github", "review", true, true, false}, {"github", " Blocked ", true, false, true}, {"github", "closed", false, false, false}, {"github", "merged", false, false, false}, {"github", "unknown", false, false, false}, {"other", "open", false, false, false},
+	} {
+		if SourceTaskUnfinished(test.system, test.status) != test.unfinished || SourceTaskReview(test.system, test.status) != test.review || SourceTaskBlocked(test.status) != test.blocked {
+			t.Fatalf("status classification=%+v", test)
+		}
+	}
+}
