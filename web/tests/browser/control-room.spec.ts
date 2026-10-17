@@ -298,7 +298,13 @@ test("inspects a real coordination request and confirms a versioned idempotent r
   await expect(page.getByRole("button", { name: /Need provider context · context · responded/ })).toBeVisible();
 });
 
-test("keeps necessary workspace information separate with long content and enlarged text", async ({ page }, testInfo) => {
+for (const viewport of [
+  { width: 1440, height: 1000, font: "100%" },
+  { width: 760, height: 640, font: "100%" },
+  { width: 390, height: 844, font: "100%" },
+  { width: 390, height: 844, font: "200%" },
+]) {
+test(`keeps necessary workspace information separate at ${viewport.width}px and ${viewport.font} text`, async ({ page }, testInfo) => {
   await boot(page);
   const longIdentity = `Participant_${"LongNativeIdentity".repeat(16)}`;
   const longText = `${"Evidence and context remain available while coordinating this task. ".repeat(24)} End of complete evidence.`;
@@ -314,12 +320,6 @@ test("keeps necessary workspace information separate with long content and enlar
     evidence: [{ ...(data["/api/v1/evidence"]![0] as Record<string, unknown>), summary: longText }], artifacts: [], claims: [], approvals: [], requests: [request],
   }, sources: [] } }));
 
-  for (const viewport of [
-    { width: 1440, height: 1000, font: "100%" },
-    { width: 760, height: 640, font: "100%" },
-    { width: 390, height: 844, font: "100%" },
-    { width: 390, height: 844, font: "200%" },
-  ]) {
     await page.setViewportSize(viewport);
     await page.goto("/workspace?project=project_alpha&task=task_1");
     await page.evaluate((font) => { document.documentElement.style.fontSize = font; }, viewport.font);
@@ -375,8 +375,8 @@ test("keeps necessary workspace information separate with long content and enlar
     await page.getByRole("button", { name: "Keep reviewing request" }).click();
     await expect(trigger).toBeFocused();
     if (viewport.font === "200%") await page.locator(".observatory-world").screenshot({ path: testInfo.outputPath("necessary-information-enlarged.png") });
-  }
 });
+}
 
 test("unfolds the observatory into task evidence and a real dependency", async ({ page }, testInfo) => {
   await boot(page);

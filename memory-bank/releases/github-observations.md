@@ -63,8 +63,8 @@ checkpoint `5094f3d` is published; final consolidated checkpoint is pending.
 - 53 collector tests pass: 30 GitHub and all 23 existing Sentry regressions.
 - Backend vet/race/SQL/API gate passes: 84.9% overall; critical app 91.6%,
   artifacts 90.8%, auth 90.2%, HTTP 92.0%, runner 91.6%.
-- Frontend 140 tests and 30 native Chromium/WebKit checks pass. A final focused
-  pair verifies the Linux Firefox portability correction described below.
+- Frontend 140 tests and 36 native Chromium/WebKit checks pass. The four dense
+  viewport scenarios run independently with the normal per-test deadline.
 - Type/lint/strict API, Staticcheck/Gosec, Semgrep, source secret inventory,
   runtime redistribution/license, npm advisory and completeness gates pass.
   Go vulnerability analysis finds no reachable vulnerability; module advisories
@@ -95,7 +95,9 @@ Initial PR CI passed backend, real daemon OIDC browser, security and CodeQL.
 Linux Firefox correctly used the supported accessible workspace, exposing a
 new overlap test that assumed a graphics renderer. The corrected test checks
 separate necessary information and reachable decisions in either supported
-mode; it does not change application behavior. Final rerun and merge are pending.
+mode. Separate viewport cases avoid combining four renderer startups into a
+single 30-second deadline on software-rendered Linux Chromium. These changes do
+not change application behavior. Final rerun and merge are pending.
 
 The locally active native candidate has explicit dirty-build provenance; the
 verified web assets remain `5ef2b30`. Private build/deployment records distinguish

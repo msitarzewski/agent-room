@@ -20,14 +20,15 @@ hardening and the final collector/docs are awaiting their consolidated commit.
 
 Implementation and local acceptance pass: 53 collector tests (30 GitHub, 23
 Sentry), backend vet/race/SQL/API coverage 84.9% with all critical packages above
-90%, frontend 140 tests/30 native browser checks, type/lint/API, static/security,
+90%, frontend 140 tests/36 native browser checks, type/lint/API, static/security,
 license/advisory/secret/completeness gates. Independent review's identity,
 partial-data, pagination, freshness and CI-attempt findings are fixed and tested.
 Initial CI passed backend, real OIDC browser, security and CodeQL; Linux Firefox
 revealed the earlier layout test's incorrect graphics-only assumption. That test
 now verifies either graphical or accessible layout with the same information
-and control requirements; focused Chromium/WebKit checks pass. Final CI rerun
-and merge remain required.
+and control requirements. Four viewport scenarios run independently, keeping
+the normal per-test deadline on software-rendered Linux; the full 36 native
+Chromium/WebKit checks pass. Final CI rerun and merge remain required.
 
 Native backend candidate is active with dirty-build provenance, retaining the
 verified frontend `5ef2b30`. `local.agentroom-github` now polls this public repo

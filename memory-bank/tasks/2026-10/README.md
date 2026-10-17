@@ -15,10 +15,11 @@
 - Local source is supervised: seven real PR records, source/CI inspection,
   independent Sentry freshness, and unchanged canonical fields on 230 prior
   tasks. Both publishers have empty healthy queues at the recorded check.
-  53 collector tests, backend 84.9%, frontend 140/30 and security gates pass.
+  53 collector tests, backend 84.9%, frontend 140/36 and security gates pass.
 - PR [#7](https://github.com/msitarzewski/agent-room/pull/7) awaits final CI and
   merge. Corrected an older layout test's graphics-only assumption exposed by
-  Linux Firefox; accessible-mode layout is now verified too.
+  Linux Firefox; accessible-mode layout is now verified too. Each dense viewport
+  scenario retains an independent normal test deadline on software rendering.
 - See [GitHub observations](../../releases/github-observations.md).
 
 ### 2026-10-15: [COMPLETED] Necessary information without overlapping UX
