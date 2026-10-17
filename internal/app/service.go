@@ -1006,9 +1006,9 @@ func (s *Service) Ingest(ctx context.Context, actor Actor, events []domain.Event
 				}
 			}
 		}
-		if event.SourceSystem == "sentry" {
+		if domain.IsTaskObservationSource(event.SourceSystem) {
 			if event.SourceSequence <= 0 {
-				return Invalid("sentry ingestion requires a positive source_sequence")
+				return Invalid("source task/project observations require a positive source_sequence")
 			}
 			switch {
 			case event.Type == "task.observed" && event.SubjectType == domain.ResourceTask:
@@ -1034,7 +1034,7 @@ func (s *Service) Ingest(ctx context.Context, actor Actor, events []domain.Event
 						return Invalid("task observation contains an invalid dependency")
 					}
 				}
-				event.SubjectID = domain.ObservedTaskID(event.ProjectID, observation.ExternalID)
+				event.SubjectID = domain.ObservedTaskIDForSource(event.ProjectID, event.SourceSystem, observation.ExternalID)
 			case event.Type == "project.observed" && event.SubjectType == domain.ResourceProject:
 				var observation domain.ProjectObservation
 				decoder := json.NewDecoder(bytes.NewReader(event.Payload))
@@ -1049,6 +1049,12 @@ func (s *Service) Ingest(ctx context.Context, actor Actor, events []domain.Event
 					len(observation.Reason) > 4096 || len(observation.ScanError) > 4096 || observation.TaskCount < 0 || observation.CollectedAt.IsZero() {
 					return Invalid("project observation requires bounded identity, metadata, collection time, and nonnegative task_count")
 				}
+				if event.SourceSystem == "github" {
+					parsed, err := url.Parse(observation.Path)
+					if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
+						return Invalid("GitHub project path must be an HTTP or HTTPS repository URL without credentials")
+					}
+				}
 				if raw, ok := payload["task_count"]; !ok || string(raw) == "null" {
 					return Invalid("project task_count is required")
 				}
@@ -1059,9 +1065,9 @@ func (s *Service) Ingest(ctx context.Context, actor Actor, events []domain.Event
 					return Invalid("project occurred_at must equal collected_at")
 				}
 				event.OccurredAt = observation.CollectedAt
-				event.SubjectID = event.ProjectID
+				event.SubjectID = domain.ObservedProjectIDForSource(event.ProjectID, event.SourceSystem)
 			default:
-				return Invalid("sentry ingestion requires typed task.observed or project.observed")
+				return Invalid("source ingestion requires typed task.observed or project.observed")
 			}
 		}
 		// External event identifiers and attribution are untrusted. The original

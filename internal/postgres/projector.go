@@ -15,7 +15,7 @@ import (
 )
 
 func applyEventProjection(ctx context.Context, tx pgx.Tx, event domain.Event) error {
-	sourceProject := event.SourceSystem == "sentry" && event.Type == "project.observed" && event.SubjectType == domain.ResourceProject
+	sourceProject := domain.IsTaskObservationSource(event.SourceSystem) && event.Type == "project.observed" && event.SubjectType == domain.ResourceProject
 	if event.SubjectID == "" || (!projectable(event.SubjectType) && !sourceProject && len(commandResource(event)) == 0) {
 		return nil
 	}
@@ -75,7 +75,7 @@ func applyEventProjection(ctx context.Context, tx pgx.Tx, event domain.Event) er
 	if err != nil {
 		return err
 	}
-	if event.SourceSystem == "sentry" && event.Type == "task.observed" && event.SubjectType == domain.ResourceTask {
+	if domain.IsTaskObservationSource(event.SourceSystem) && event.Type == "task.observed" && event.SubjectType == domain.ResourceTask {
 		var prior domain.Task
 		if len(currentRaw) > 0 {
 			if err := json.Unmarshal(currentRaw, &prior); err != nil {
@@ -122,7 +122,7 @@ func reduceResource(current json.RawMessage, currentVersion int64, event domain.
 	if event.SubjectType == domain.ResourceBudget && event.Type == "budget.usage_observed" {
 		return reduceBudgetUsage(current, event)
 	}
-	if event.SourceSystem == "sentry" && event.Type == "task.observed" && event.SubjectType == domain.ResourceTask {
+	if domain.IsTaskObservationSource(event.SourceSystem) && event.Type == "task.observed" && event.SubjectType == domain.ResourceTask {
 		return reduceTaskObservation(current, currentVersion, event)
 	}
 
@@ -265,23 +265,23 @@ func reduceProjectObservation(current json.RawMessage, currentVersion int64, eve
 	if err := json.Unmarshal(event.Payload, &observation); err != nil {
 		return nil, err
 	}
-	if event.SubjectID != event.ProjectID || observation.ExternalID == "" {
+	if event.SubjectID != domain.ObservedProjectIDForSource(event.ProjectID, event.SourceSystem) || !domain.IsTaskObservationSource(event.SourceSystem) || observation.ExternalID == "" {
 		return nil, app.Invalid("project observation identity mismatch")
 	}
 	var project domain.Project
 	if len(current) == 0 {
-		project = domain.Project{Base: domain.NewBase(event.ProjectID, event.ProjectID, event.OccurredAt), Name: canonicalName, Slug: event.ProjectID, Status: "observed"}
+		project = domain.Project{Base: domain.NewBase(event.SubjectID, event.ProjectID, event.OccurredAt), Name: canonicalName, Slug: event.ProjectID, Status: "observed"}
 	} else {
 		if err := json.Unmarshal(current, &project); err != nil {
 			return nil, err
 		}
-		if (project.Source.System != "" && project.Source.System != "sentry") || (project.Source.ExternalID != "" && project.Source.ExternalID != observation.ExternalID) {
+		if (project.Source.System != "" && project.Source.System != event.SourceSystem) || (project.Source.ExternalID != "" && project.Source.ExternalID != observation.ExternalID) {
 			return nil, app.Invalid("project observation cannot claim another source's identity")
 		}
 		project.Version = currentVersion + 1
 		project.UpdatedAt = event.OccurredAt
 	}
-	project.Source = domain.Source{System: "sentry", ExternalID: observation.ExternalID}
+	project.Source = domain.Source{System: event.SourceSystem, ExternalID: observation.ExternalID}
 	project.SourceStatus = observation.Status
 	observedAt := observation.CollectedAt.UTC()
 	project.SourceObservedAt = &observedAt
@@ -297,7 +297,7 @@ func reduceTaskObservation(current json.RawMessage, currentVersion int64, event 
 	if err := json.Unmarshal(event.Payload, &observation); err != nil {
 		return nil, err
 	}
-	if observation.ExternalID == "" || event.SubjectID != domain.ObservedTaskID(event.ProjectID, observation.ExternalID) {
+	if observation.ExternalID == "" || event.SubjectID != domain.ObservedTaskIDForSource(event.ProjectID, event.SourceSystem, observation.ExternalID) || !domain.IsTaskObservationSource(event.SourceSystem) {
 		return nil, errors.New("task observation identity mismatch")
 	}
 	var task domain.Task
@@ -305,16 +305,16 @@ func reduceTaskObservation(current json.RawMessage, currentVersion int64, event 
 		task = domain.Task{
 			Base:  domain.NewBase(event.SubjectID, event.ProjectID, event.OccurredAt),
 			Title: observation.Title, Description: observation.Description, Status: "inbox", Priority: "normal",
-			Dependencies: []string{}, Source: domain.Source{System: "sentry", ExternalID: observation.ExternalID, ExternalURL: observation.ExternalURL},
+			Dependencies: []string{}, Source: domain.Source{System: event.SourceSystem, ExternalID: observation.ExternalID, ExternalURL: observation.ExternalURL},
 		}
 		for _, dependency := range observation.Dependencies {
-			task.Dependencies = append(task.Dependencies, domain.ObservedTaskID(event.ProjectID, dependency))
+			task.Dependencies = append(task.Dependencies, domain.ObservedTaskIDForSource(event.ProjectID, event.SourceSystem, dependency))
 		}
 	} else {
 		if err := json.Unmarshal(current, &task); err != nil {
 			return nil, err
 		}
-		if task.Source.System != "sentry" || task.Source.ExternalID != observation.ExternalID {
+		if task.Source.System != event.SourceSystem || task.Source.ExternalID != observation.ExternalID {
 			return nil, errors.New("task observation cannot claim another source's task")
 		}
 		task.Version = currentVersion + 1
@@ -488,7 +488,7 @@ func reduceSourceTaskAttention(current *domain.Attention, projectID, taskID stri
 		current.ResourceType != string(domain.ResourceTask) || current.ResourceID != taskID) {
 		return *current, false
 	}
-	blocked := strings.EqualFold(strings.TrimSpace(observation.Status), "blocked")
+	blocked := domain.SourceTaskBlocked(observation.Status)
 	if !blocked {
 		if current == nil || current.Status == "resolved" {
 			return domain.Attention{}, false
@@ -508,7 +508,7 @@ func reduceSourceTaskAttention(current *domain.Attention, projectID, taskID stri
 	}
 	// A human may have resolved this item while the source was still blocked.
 	// Only a new observed nonblocked-to-blocked episode reopens that decision.
-	if current.Status == "resolved" && strings.EqualFold(strings.TrimSpace(previousStatus), "blocked") {
+	if current.Status == "resolved" && domain.SourceTaskBlocked(previousStatus) {
 		return *current, false
 	}
 	if current.Title == title && current.Detail == observation.Description && current.Status != "resolved" {

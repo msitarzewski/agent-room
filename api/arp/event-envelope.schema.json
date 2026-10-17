@@ -24,7 +24,7 @@
     "payload": {}
   },
   "allOf": [{
-    "if": {"properties": {"source_system": {"const": "sentry"}},"required": ["source_system"]},
+    "if": {"properties": {"source_system": {"enum": ["sentry","github"]}},"required": ["source_system"]},
     "then": {
       "required": ["source_event_id","source_sequence"],
       "properties": {"source_sequence": {"type": "integer","minimum": 1}},

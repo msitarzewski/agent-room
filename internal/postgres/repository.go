@@ -654,9 +654,9 @@ func projectSources(ctx context.Context, tx pgx.Tx, projectID string) ([]app.Wor
 		(p.document->>'source_last_successful_collection_at')::timestamptz,
 		p.document->'source_observation'
 		FROM events e JOIN event_outbox o ON o.event_id=e.id
-		LEFT JOIN resources p ON p.project_id=e.project_id AND p.kind='project' AND p.id=e.project_id AND p.source_system=e.source_system
+		LEFT JOIN resources p ON p.project_id=e.project_id AND p.kind='project' AND p.id=CASE WHEN e.source_system='github' THEN $2 ELSE e.project_id END AND p.source_system=e.source_system
 		WHERE e.project_id=$1 AND e.source_system IS NOT NULL
-		GROUP BY e.source_system,p.document ORDER BY e.source_system`, projectID)
+		GROUP BY e.source_system,p.document ORDER BY e.source_system`, projectID, domain.ObservedProjectIDForSource(projectID, "github"))
 	if err != nil {
 		return nil, err
 	}
@@ -865,12 +865,10 @@ func summarizeCoordination(documents map[domain.ResourceType][]json.RawMessage, 
 				if err := json.Unmarshal(raw, &task); err != nil {
 					return result, err
 				}
-				canonicalBlocked, sourceBlocked := task.Status == "blocked", strings.EqualFold(strings.TrimSpace(task.SourceStatus), "blocked")
-				if task.Source.System == "sentry" {
-					switch strings.ToLower(strings.TrimSpace(task.SourceStatus)) {
-					case "upcoming", "working", "blocked":
-						result.Counts.SourceUnfinishedTasks++
-					}
+				canonicalBlocked, sourceBlocked := task.Status == "blocked", domain.SourceTaskBlocked(task.SourceStatus)
+				sourceReview := domain.SourceTaskReview(task.Source.System, task.SourceStatus)
+				if domain.SourceTaskUnfinished(task.Source.System, task.SourceStatus) {
+					result.Counts.SourceUnfinishedTasks++
 				}
 				unfinished := task.Status != "completed" && task.Status != "archived" && task.Status != "cancelled"
 				// An unclaimed imported inbox card is source context, not an active worker.
@@ -896,7 +894,7 @@ func summarizeCoordination(documents map[domain.ResourceType][]json.RawMessage, 
 					if sourceBlocked && !canonicalBlocked && task.SourceObservation != nil {
 						item.Detail = task.SourceObservation.Description
 					}
-				} else if task.Status == "review" {
+				} else if task.Status == "review" || sourceReview {
 					item.Kind = "review"
 					result.Counts.Reviews++
 				} else if !unfinished {
@@ -906,6 +904,13 @@ func summarizeCoordination(documents map[domain.ResourceType][]json.RawMessage, 
 				if sourceBlocked && !canonicalBlocked {
 					item.Title = "Source reports blocked: " + task.Title
 					item.Status = "source_blocked"
+				}
+				if sourceReview && !canonicalBlocked && !sourceBlocked && task.Status != "review" {
+					item.Title = "Source requests review: " + task.Title
+					item.Status = "source_review"
+					if task.SourceObservation != nil {
+						item.Detail = task.SourceObservation.Description
+					}
 				}
 			case domain.ResourceCoordinationRequest:
 				if !app.CoordinationVisible(actor, raw) {

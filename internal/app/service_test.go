@@ -976,3 +976,70 @@ func TestCoordinationAuditRedactionPreservesStoredHistory(t *testing.T) {
 		t.Fatal("stored history rewritten by read")
 	}
 }
+
+func TestGitHubIngestionIsTypedSourceOnlyAndPreservesSentryIDs(t *testing.T) {
+	ctx := context.Background()
+	at := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
+	repo := newMemoryRepository()
+	service := NewServiceWithDependencies(repo, nil, testClock{at}, &testIDs{})
+	github := actor("github-monitor", "event:ingest", "source:github")
+	valid := domain.Event{ProjectID: "project", SubjectType: domain.ResourceTask, SubjectID: "forged", Type: "task.observed", SourceSystem: "github", SourceEventID: "github-task", SourceSequence: 1, Payload: json.RawMessage(`{"external_id":"repo:42:pull:7","title":"Actual PR metadata","description":"Recorded CI failure","status":"blocked","external_url":"https://github.com/owner/repo/pull/7","dependencies":["repo:42:issue:3"]}`)}
+	for _, test := range []struct {
+		kind  domain.ResourceType
+		event string
+	}{{domain.ResourceTask, "task.completed"}, {domain.ResourceApproval, "approval.approved"}, {domain.ResourceRun, "run.observed"}, {domain.ResourceAgent, "agent.observed"}, {domain.ResourceHuman, "human.updated"}, {domain.ResourceCoordinationRequest, "coordination_request.created"}} {
+		event := valid
+		event.SubjectType = test.kind
+		event.Type = test.event
+		if err := service.Ingest(ctx, github, []domain.Event{event}); err == nil {
+			t.Fatalf("GitHub control mutation accepted=%s", test.event)
+		}
+		if err := service.Ingest(ctx, actor("privileged-source", "event:ingest", "source:admin"), []domain.Event{event}); err == nil {
+			t.Fatalf("source admin bypassed GitHub type restriction=%s", test.event)
+		}
+	}
+	for name, change := range map[string]func(*domain.Event){"sequence": func(e *domain.Event) { e.SourceSequence = 0 }, "replacement": func(e *domain.Event) { e.Payload = json.RawMessage(`{"resource":{"status":"completed"}}`) }, "privileged field": func(e *domain.Event) {
+		e.Payload = json.RawMessage(`{"external_id":"id","title":"Title","status":"closed","owner_id":"human"}`)
+	}, "unsafe URL": func(e *domain.Event) {
+		e.Payload = json.RawMessage(`{"external_id":"id","title":"Title","status":"closed","external_url":"javascript:alert(1)"}`)
+	}, "wrong source": func(e *domain.Event) { e.SourceSystem = "sentry" }} {
+		t.Run(name, func(t *testing.T) {
+			e := valid
+			change(&e)
+			if err := service.Ingest(ctx, github, []domain.Event{e}); err == nil {
+				t.Fatal("invalid source observation accepted")
+			}
+		})
+	}
+	valid.ActorID = "forged"
+	valid.CommandID = "forged-command"
+	if err := service.Ingest(ctx, github, []domain.Event{valid}); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.events) != 1 || repo.events[0].SubjectID != domain.ObservedTaskIDForSource("project", "github", "repo:42:pull:7") || repo.events[0].ActorID != github.ID || repo.events[0].CommandID != "" {
+		t.Fatalf("GitHub identity/attribution=%+v", repo.events)
+	}
+	observation := domain.ProjectObservation{ExternalID: "repo:42", Name: "owner/repo", Path: "https://github.com/owner/repo", Status: "active", CollectedAt: at, ScanStatus: "complete", TaskCount: 1}
+	payload, _ := json.Marshal(observation)
+	project := domain.Event{ProjectID: "project", SubjectType: domain.ResourceProject, SubjectID: "project", Type: "project.observed", SourceSystem: "github", SourceEventID: "github-project", SourceSequence: 1, Payload: payload}
+	if err := service.Ingest(ctx, github, []domain.Event{project}); err != nil {
+		t.Fatal(err)
+	}
+	if repo.events[1].SubjectID != domain.ObservedProjectIDForSource("project", "github") || repo.events[1].SubjectID == "project" {
+		t.Fatalf("GitHub project claimed Sentry report=%+v", repo.events[1])
+	}
+	observation.Path = "file:///source/project"
+	project.Payload, _ = json.Marshal(observation)
+	if err := service.Ingest(ctx, github, []domain.Event{project}); err == nil {
+		t.Fatal("unsafe GitHub repository path accepted")
+	}
+	legacy := valid
+	legacy.SourceSystem = "sentry"
+	legacy.SourceEventID = "sentry-same-native"
+	if err := service.Ingest(ctx, actor("sentry", "event:ingest", "source:sentry"), []domain.Event{legacy}); err != nil {
+		t.Fatal(err)
+	}
+	if repo.events[2].SubjectID != domain.ObservedTaskID("project", "repo:42:pull:7") || repo.events[2].SubjectID == repo.events[0].SubjectID {
+		t.Fatal("Sentry task identity changed or collided")
+	}
+}

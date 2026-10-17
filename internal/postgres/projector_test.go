@@ -313,3 +313,77 @@ func TestCoordinationSummaryFailureAttentionWithoutBlockedTask(t *testing.T) {
 		t.Fatalf("duplicate blocker preview=%+v err=%v", summary, err)
 	}
 }
+
+func TestGitHubObservationsPreserveHumanFieldsAndSourceIsolation(t *testing.T) {
+	at := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
+	external := "repo:42:pull:7"
+	event := domain.Event{ProjectID: "project", SubjectType: domain.ResourceTask, SubjectID: domain.ObservedTaskIDForSource("project", "github", external), SourceSystem: "github", Type: "task.observed", OccurredAt: at, Payload: json.RawMessage(`{"external_id":"repo:42:pull:7","title":"PR title","status":"blocked","description":"Observed check failed","dependencies":["repo:42:issue:3"]}`)}
+	raw, err := reduceResource(nil, 0, event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var task domain.Task
+	if err := json.Unmarshal(raw, &task); err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != "inbox" || task.Source.System != "github" || task.SourceStatus != "blocked" || task.Dependencies[0] != domain.ObservedTaskIDForSource("project", "github", "repo:42:issue:3") {
+		t.Fatalf("GitHub projection=%+v", task)
+	}
+	task.Title, task.Description, task.OwnerID, task.Status, task.Priority = "Human title", "Human body", "human", "review", "critical"
+	task.Dependencies = []string{"human-dependency"}
+	raw, _ = json.Marshal(task)
+	event.Payload = json.RawMessage(`{"external_id":"repo:42:pull:7","title":"Latest PR title","status":"merged","description":"Observed merged state"}`)
+	event.OccurredAt = at.Add(time.Minute)
+	next, err := reduceResource(raw, 1, event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var updated domain.Task
+	_ = json.Unmarshal(next, &updated)
+	if updated.Title != task.Title || updated.Description != task.Description || updated.OwnerID != task.OwnerID || updated.Status != task.Status || updated.Priority != task.Priority || updated.Dependencies[0] != task.Dependencies[0] || updated.SourceStatus != "merged" || updated.SourceObservation.Title != "Latest PR title" {
+		t.Fatalf("GitHub overwrote human fields=%+v", updated)
+	}
+	forged := event
+	forged.SubjectID = domain.ObservedTaskID("project", external)
+	if _, err := reduceResource(nil, 0, forged); err == nil {
+		t.Fatal("GitHub claimed legacy Sentry task")
+	}
+	projectObservation := domain.ProjectObservation{ExternalID: "repo:42", Name: "owner/repo", Path: "https://github.com/owner/repo", Status: "active", CollectedAt: at, ScanStatus: "complete", TaskCount: 1}
+	payload, _ := json.Marshal(projectObservation)
+	project := domain.Event{ProjectID: "project", SubjectType: domain.ResourceProject, SubjectID: domain.ObservedProjectIDForSource("project", "github"), SourceSystem: "github", Type: "project.observed", OccurredAt: at, Payload: payload}
+	raw, err = reduceProjectObservation(nil, 0, project, "Canonical human project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report domain.Project
+	_ = json.Unmarshal(raw, &report)
+	if report.ID == "project" || report.Name != "Canonical human project" || report.Source.System != "github" || report.SourceObservation.Name != "owner/repo" {
+		t.Fatalf("GitHub report identity=%+v", report)
+	}
+	project.SubjectID = "project"
+	if _, err := reduceProjectObservation(nil, 0, project, "Canonical human project"); err == nil {
+		t.Fatal("GitHub claimed Sentry project report")
+	}
+}
+
+func TestGitHubReviewAndClosedHistoryDoNotImplySupervisedWork(t *testing.T) {
+	at := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
+	documents := map[domain.ResourceType][]json.RawMessage{}
+	for index, status := range []string{"review", "review_requested", "open", "draft", "closed", "merged", "unknown", "blocked"} {
+		task := domain.Task{Base: domain.NewBase(fmt.Sprintf("github-%d", index), "project", at), Title: "Actual provider record", Status: "inbox", Source: domain.Source{System: "github"}, SourceStatus: status, SourceObservation: &domain.TaskObservation{Description: "Recorded review or CI context"}}
+		raw, _ := json.Marshal(task)
+		documents[domain.ResourceTask] = append(documents[domain.ResourceTask], raw)
+	}
+	summary, err := summarizeCoordination(documents, app.Actor{Capabilities: map[string]struct{}{"resource:read": {}}}, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Counts.SourceUnfinishedTasks != 5 || summary.Counts.UnfinishedTasks != 0 || summary.Counts.Reviews != 2 || summary.Counts.SourceBlockedTasks != 1 || summary.Counts.HumanEscalations != 0 || summary.Counts.RunningWork != 0 || summary.Counts.AgentPresence != 0 {
+		t.Fatalf("source context falsely changed supervision/liveness=%+v", summary)
+	}
+	for _, item := range summary.Items {
+		if item.Kind == "review" && (item.Status != "source_review" || item.Detail == "" || item.HumanEscalation) {
+			t.Fatalf("source review attribution=%+v", item)
+		}
+	}
+}

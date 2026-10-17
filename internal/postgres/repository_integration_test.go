@@ -1115,6 +1115,193 @@ func TestRepositoryCommandEventProjectionRoundTrip(t *testing.T) {
 		}
 	})
 
+	t.Run("GitHub and Sentry keep independent task identities reports freshness and replay", func(t *testing.T) {
+		const project = "github-shared-project"
+		const external = "repo:42:pull:7"
+		if _, err := repo.EnsureProject(ctx, project, "Canonical shared project"); err != nil {
+			t.Fatal(err)
+		}
+		at := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
+		providers := map[string]app.Actor{"sentry": {ID: "sentry-readonly", Capabilities: map[string]struct{}{"event:ingest": {}, "source:sentry": {}}}, "github": {ID: "github-readonly", Capabilities: map[string]struct{}{"event:ingest": {}, "source:github": {}}}}
+		publishProject := func(system string, sequence int64, id string, observation domain.ProjectObservation) error {
+			raw, _ := json.Marshal(observation)
+			return service.Ingest(ctx, providers[system], []domain.Event{{ProjectID: project, SubjectType: domain.ResourceProject, SubjectID: "forged", Type: "project.observed", SourceSystem: system, SourceEventID: id, SourceSequence: sequence, Payload: raw}})
+		}
+		publishTask := func(system string, sequence int64, id, status, title string) error {
+			raw, _ := json.Marshal(domain.TaskObservation{ExternalID: external, Title: title, Description: "Recorded source detail", Status: status, ExternalURL: "https://github.com/owner/repo/pull/7"})
+			return service.Ingest(ctx, providers[system], []domain.Event{{ProjectID: project, SubjectType: domain.ResourceTask, SubjectID: domain.ObservedTaskID(project, external), Type: "task.observed", SourceSystem: system, SourceEventID: id, SourceSequence: sequence, OccurredAt: at, Payload: raw}})
+		}
+		githubReport := domain.ProjectObservation{ExternalID: "repo:42", Name: "owner/repo", Path: "https://github.com/owner/repo", Status: "active", CollectedAt: at, ScanStatus: "complete", TaskCount: 1}
+		sentryReport := domain.ProjectObservation{ExternalID: "host:/source/project", Name: "Sentry name", Path: "/source/project", Status: "Active", CollectedAt: at.Add(-time.Hour), ScanStatus: "complete", TaskCount: 1}
+		if err := publishProject("sentry", 5, "project-scan", sentryReport); err != nil {
+			t.Fatal(err)
+		}
+		if err := publishProject("github", 5, "project-scan", githubReport); err != nil {
+			t.Fatal(err)
+		}
+		if err := publishTask("sentry", 5, "task-scan", "Blocked", "Sentry task"); err != nil {
+			t.Fatal(err)
+		}
+		if err := publishTask("github", 5, "task-scan", "blocked", "GitHub PR"); err != nil {
+			t.Fatal(err)
+		}
+		githubID, sentryID := domain.ObservedTaskIDForSource(project, "github", external), domain.ObservedTaskID(project, external)
+		if githubID == sentryID {
+			t.Fatal("source task identities collided")
+		}
+		if _, err := service.TransitionTask(ctx, actor, project, githubID, "ready", "", "github-human-ready", 1, ""); err != nil {
+			t.Fatal(err)
+		}
+		human := app.Actor{ID: "human-owner", Human: true, Capabilities: map[string]struct{}{"task:claim": {}}}
+		if _, err := service.ClaimTask(ctx, human, project, githubID, "github-human-owner", 2, ""); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := service.Create(ctx, actor, domain.ResourceAttention, project, "github-human-attention", domain.Attention{Base: domain.Base{ID: "github-human-note"}, Kind: "manual.review", Title: "Human-owned attention", Status: "open", ResourceType: "task", ResourceID: githubID}, ""); err != nil {
+			t.Fatal(err)
+		}
+		if err := publishTask("github", 6, "task-merged", "merged", "Renamed latest PR title"); err != nil {
+			t.Fatal(err)
+		}
+		if err := publishTask("github", 4, "task-stale", "blocked", "Stale PR title"); err != nil {
+			t.Fatal(err)
+		}
+		partial := githubReport
+		partial.CollectedAt = at.Add(10 * time.Minute)
+		partial.ScanStatus = "partial"
+		partial.ScanError = "One check result unavailable; prior records retained"
+		if err := publishProject("github", 6, "project-partial", partial); err != nil {
+			t.Fatal(err)
+		}
+		stale := githubReport
+		stale.CollectedAt = at.Add(20 * time.Minute)
+		if err := publishProject("github", 4, "project-stale", stale); err != nil {
+			t.Fatal(err)
+		}
+		// A different project-state row carrying the same source marker must not
+		// duplicate or replace that source's canonical observation report.
+		noise := domain.Project{Base: domain.NewBase("unrelated-github-project-record", project, at.Add(30*time.Minute)), Source: domain.Source{System: "github", ExternalID: "wrong"}, SourceObservation: &domain.ProjectObservation{ExternalID: "wrong", CollectedAt: at.Add(30 * time.Minute), ScanStatus: "complete"}}
+		noiseRaw, _ := json.Marshal(noise)
+		if _, err := repo.Pool().Exec(ctx, `INSERT INTO resources(project_id,kind,id,version,document,created_at,updated_at,source_system,source_sequence) VALUES($1,'project',$2,1,$3,$4,$4,'github',999)`, project, noise.ID, noiseRaw, noise.CreatedAt); err != nil {
+			t.Fatal(err)
+		}
+		check := func() {
+			t.Helper()
+			snapshot, err := repo.Workspace(ctx, project)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(snapshot.Resources.Tasks) != 2 || len(snapshot.Sources) != 2 {
+				t.Fatalf("source resources duplicated or omitted=%+v", snapshot)
+			}
+			sources := map[string]app.WorkspaceSource{}
+			for _, source := range snapshot.Sources {
+				if _, duplicate := sources[source.System]; duplicate {
+					t.Fatal("duplicate freshness source")
+				}
+				sources[source.System] = source
+			}
+			gh, sen := sources["github"], sources["sentry"]
+			if gh.ProjectObservation == nil || gh.ProjectObservation.ExternalID != "repo:42" || gh.LastCollectedAt == nil || !gh.LastCollectedAt.Equal(partial.CollectedAt) || gh.LastSuccessfulCollectionAt == nil || !gh.LastSuccessfulCollectionAt.Equal(githubReport.CollectedAt) || gh.ScanStatus == nil || *gh.ScanStatus != "partial" {
+				t.Fatalf("GitHub freshness/report overwritten=%+v", gh)
+			}
+			if sen.ProjectObservation == nil || sen.ProjectObservation.ExternalID != sentryReport.ExternalID || sen.LastCollectedAt == nil || !sen.LastCollectedAt.Equal(sentryReport.CollectedAt) || sen.ScanStatus == nil || *sen.ScanStatus != "complete" {
+				t.Fatalf("Sentry report overwritten=%+v", sen)
+			}
+			for system, want := range map[string]string{"sentry": project, "github": domain.ObservedProjectIDForSource(project, "github")} {
+				raw, err := repo.Get(ctx, project, domain.ResourceProject, want)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var report domain.Project
+				_ = json.Unmarshal(raw, &report)
+				if report.Source.System != system || report.Name != "Canonical shared project" {
+					t.Fatalf("report identity=%+v", report)
+				}
+			}
+			for _, raw := range snapshot.Resources.Tasks {
+				var task domain.Task
+				_ = json.Unmarshal(raw, &task)
+				switch task.Source.System {
+				case "github":
+					if task.ID != githubID || task.Status != "ready" || task.OwnerID != human.ID || task.Title != "GitHub PR" || task.SourceStatus != "merged" || task.SourceObservation.Title != "Renamed latest PR title" {
+						t.Fatalf("GitHub source overwrote control state or accepted stale=%+v", task)
+					}
+				case "sentry":
+					if task.ID != sentryID || task.Status != "inbox" || task.SourceStatus != "Blocked" || task.Title != "Sentry task" {
+						t.Fatalf("Sentry state changed=%+v", task)
+					}
+				default:
+					t.Fatalf("unexpected source=%+v", task)
+				}
+			}
+			attention := map[string]domain.Attention{}
+			for _, raw := range snapshot.Resources.Attention {
+				var item domain.Attention
+				_ = json.Unmarshal(raw, &item)
+				attention[item.ResourceID+":"+item.Kind] = item
+			}
+			if attention[githubID+":source.task.blocked"].Status != "resolved" || attention[sentryID+":source.task.blocked"].Status != "open" || attention[githubID+":manual.review"].Status != "open" {
+				t.Fatalf("source attention crossed authority=%+v", attention)
+			}
+			overview, err := repo.Overview(ctx, project)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(overview["sources"].([]app.WorkspaceSource)) != 2 {
+				t.Fatal("overview omitted source")
+			}
+			summary := overview["coordination"].(app.CoordinationSummary)
+			if summary.Counts.SourceBlockedTasks != 1 || summary.Counts.SourceUnfinishedTasks != 1 || summary.Counts.HumanEscalations != 0 || summary.Counts.RunningWork != 0 {
+				t.Fatalf("source history became active worker/human escalation=%+v", summary)
+			}
+			var name string
+			if err := repo.Pool().QueryRow(ctx, `SELECT name FROM projects WHERE id=$1`, project).Scan(&name); err != nil || name != "Canonical shared project" {
+				t.Fatalf("source renamed canonical project=%s err=%v", name, err)
+			}
+		}
+		check()
+		before, err := repo.Workspace(ctx, project)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := publishTask("github", 5, "task-scan", "blocked", "GitHub PR"); err != nil {
+			t.Fatal(err)
+		}
+		after, err := repo.Workspace(ctx, project)
+		if err != nil || after.Cursor != before.Cursor {
+			t.Fatalf("immutable retry advanced cursor before=%d after=%d err=%v", before.Cursor, after.Cursor, err)
+		}
+		if err := repo.RebuildProjections(ctx); err != nil {
+			t.Fatal(err)
+		}
+		check()
+		// The new source is not permitted to send runtime, approval or command events.
+		for _, target := range []struct {
+			kind  domain.ResourceType
+			event string
+		}{{domain.ResourceTask, "task.completed"}, {domain.ResourceApproval, "approval.approved"}, {domain.ResourceRun, "run.started"}, {domain.ResourceCoordinationRequest, "coordination_request.created"}} {
+			err := service.Ingest(ctx, providers["github"], []domain.Event{{ProjectID: project, SubjectType: target.kind, SubjectID: githubID, Type: target.event, SourceSystem: "github", SourceEventID: "forged-" + target.event, SourceSequence: 100, Payload: json.RawMessage(`{}`)}})
+			if err == nil {
+				t.Fatalf("GitHub command forgery accepted=%s", target.event)
+			}
+		}
+		wrong := githubReport
+		wrong.ExternalID = "repo:another"
+		if err := publishProject("github", 7, "project-takeover", wrong); err == nil {
+			t.Fatal("different native repository claimed GitHub report")
+		}
+		check()
+		other, err := repo.Workspace(ctx, "project-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, source := range other.Sources {
+			if source.System == "github" {
+				t.Fatal("GitHub report leaked across project")
+			}
+		}
+	})
+
 }
 
 type integrationController struct {

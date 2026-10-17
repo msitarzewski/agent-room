@@ -218,6 +218,51 @@ func ObservedTaskID(projectID, externalID string) string {
 	return "sentry_task_" + hex.EncodeToString(digest[:16])
 }
 
+// Task and project reports share contracts only for these explicitly supported
+// read-only sources. Runtime observations have a different authority boundary.
+func IsTaskObservationSource(system string) bool { return system == "sentry" || system == "github" }
+
+// ObservedTaskIDForSource preserves all existing Sentry identities and prevents
+// another provider's native IDs from claiming those tasks.
+func ObservedTaskIDForSource(projectID, system, externalID string) string {
+	if system == "sentry" {
+		return ObservedTaskID(projectID, externalID)
+	}
+	digest := sha256.Sum256([]byte(projectID + "\x00" + system + "\x00" + externalID))
+	return system + "_task_" + hex.EncodeToString(digest[:16])
+}
+
+// Sentry's original report uses the canonical project ID. Additional providers
+// receive separate source-report identities without renaming that legacy row.
+func ObservedProjectIDForSource(projectID, system string) string {
+	if system == "sentry" {
+		return projectID
+	}
+	digest := sha256.Sum256([]byte(projectID + "\x00" + system))
+	return system + "_project_" + hex.EncodeToString(digest[:16])
+}
+
+func SourceTaskBlocked(status string) bool {
+	return strings.EqualFold(strings.TrimSpace(status), "blocked")
+}
+
+func SourceTaskReview(system, status string) bool {
+	status = strings.ToLower(strings.TrimSpace(status))
+	return system == "github" && (status == "review" || status == "review_requested")
+}
+
+func SourceTaskUnfinished(system, status string) bool {
+	status = strings.ToLower(strings.TrimSpace(status))
+	switch system {
+	case "sentry":
+		return status == "upcoming" || status == "working" || status == "blocked"
+	case "github":
+		return status == "open" || status == "draft" || status == "blocked" || status == "review" || status == "review_requested"
+	default:
+		return false
+	}
+}
+
 type TaskTransition struct {
 	Base
 	TaskID    string `json:"task_id"`
