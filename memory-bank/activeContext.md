@@ -1,14 +1,59 @@
 # Active Context
 
-**Last updated:** 2026-10-15
+**Last updated:** 2026-10-17
 
-**State:** DOCS
+**State:** QA
 
-**Substate:** IDLE
+**Substate:** RUNNING
 
-**Task status:** INFORMATION LAYOUT — COMPLETE LOCALLY
+**Task status:** GITHUB OBSERVATIONS — LOCALLY VERIFIED, MERGE QA
 
 ## Current Task
+
+2026-10-17: Michael approved implementing the read-only GitHub monitor, making
+it work locally and merging it, then returning to desktop/spatial interface
+work. Branch `feat/github-observations` includes the preceding verified,
+unmerged spatial/coordination foundation. Development PR
+[#7](https://github.com/msitarzewski/agent-room/pull/7) is in draft while final
+checks complete. Backend checkpoint `5094f3d` is published; reviewed namespace
+hardening and the final collector/docs are awaiting their consolidated commit.
+
+Implementation and local acceptance pass: 53 collector tests (30 GitHub, 23
+Sentry), backend vet/race/SQL/API coverage 84.9% with all critical packages above
+90%, frontend 140 tests/30 native browser checks, type/lint/API, static/security,
+license/advisory/secret/completeness gates. Independent review's identity,
+partial-data, pagination, freshness and CI-attempt findings are fixed and tested.
+Initial CI passed backend, real OIDC browser, security and CodeQL; Linux Firefox
+revealed the earlier layout test's incorrect graphics-only assumption. That test
+now verifies either graphical or accessible layout with the same information
+and control requirements; focused Chromium/WebKit checks pass. Final CI rerun
+and merge remain required.
+
+Native backend candidate is active with dirty-build provenance, retaining the
+verified frontend `5ef2b30`. `local.agentroom-github` now polls this public repo
+with outbound anonymous GETs every 900 seconds. Its separate Agent Room token
+has only event:ingest/source:github for this one project. Seven actual PR records
+were collected (no standalone issues currently exist); PR #7's real CI failure
+appeared as a source blocker in authenticated HTTPS inspection. No canonical
+completion, ownership, human decision or execution was inferred. All 230 prior
+canonical task records retain their checked fields. Sentry's 99-project
+publisher was reloaded with shared delivery; both queues have zero pending or
+quarantined records and no collection/transport error at the recorded checks.
+
+Runtime/config/credentials and detailed acceptance evidence remain ignored in
+`data/local/github/`; consistent pre-install database/native/web/config/Sentry
+queue snapshots are in `backups/pre-install` there. Exact candidate revision,
+activation phase and per-artifact provenance are in private deployment metadata.
+Root owns final CI/docs/Git merge and clean activation; backend/data/review
+workers are finished with their owned source frozen. Source services and remote
+host remain separate from agent execution or future interface redesign.
+
+Track [GitHub observations](releases/github-observations.md). Next complete
+final PR checks, merge, rebuild/activate clean merged provenance, verify merged
+PR source state, then resume the app's interface/spatial work. Physical device
+comfort/frame pacing and remote promotion remain unverified.
+
+## Previous Information Layout
 
 Michael's necessary-information overlap follow-up is implemented on
 `feat/spatial-workspace` and committed as `5ef2b30`, extending baseline

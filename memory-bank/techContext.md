@@ -1,6 +1,6 @@
 # Technical Context
 
-**Last updated:** 2026-10-15
+**Last updated:** 2026-10-17
 
 **Implementation status:** Founding, spatial, and agent coordination capabilities verified locally; device acceptance and signed remote promotion separate
 
@@ -17,6 +17,19 @@
 Do not record private addresses, credentials, domain names, or secret material in the Memory Bank.
 
 ## Confirmed Integration Surfaces
+
+### GitHub observations
+
+The read-only stdlib Python provider uses REST API version 2026-03-10 with fixed
+GitHub API GET endpoints, explicit repository/project bindings, conditional
+requests, bounded API budgets, durable checkpoints/retries and partial coverage.
+It shares private source delivery with Sentry through `adapters/source.py`.
+Local public-repository collection needs no GitHub credential. Optional read
+App/PAT files are externally renewed; no automatic token minting or development
+CLI credential discovery. Typed task/project observations have source-specific
+identity and independent freshness, preserving canonical decisions. Local
+acceptance passes; final merge/provenance is tracked in
+[GitHub observations](releases/github-observations.md).
 
 ### Explicit Runtime Observations
 

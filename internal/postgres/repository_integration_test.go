@@ -1291,6 +1291,32 @@ func TestRepositoryCommandEventProjectionRoundTrip(t *testing.T) {
 			t.Fatal("different native repository claimed GitHub report")
 		}
 		check()
+		// A predictable source-report namespace is not permission to adopt a
+		// human-authored resource already occupying that identity.
+		const collisionProject = "github-human-report-collision"
+		if _, err := repo.EnsureProject(ctx, collisionProject, "Human project"); err != nil {
+			t.Fatal(err)
+		}
+		reportID := domain.ObservedProjectIDForSource(collisionProject, "github")
+		if _, err := service.Create(ctx, actor, domain.ResourceProject, collisionProject, "human-report-create", domain.Project{Base: domain.Base{ID: reportID}, Name: "Human context", Slug: "human-context", Status: "supervised"}, ""); err != nil {
+			t.Fatal(err)
+		}
+		beforeCollision, err := repo.Get(ctx, collisionProject, domain.ResourceProject, reportID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, _ := json.Marshal(githubReport)
+		if err := service.Ingest(ctx, providers["github"], []domain.Event{{ProjectID: collisionProject, SubjectType: domain.ResourceProject, SubjectID: "untrusted", Type: "project.observed", SourceSystem: "github", SourceEventID: "human-report-collision", SourceSequence: 1, Payload: payload}}); err == nil {
+			t.Fatal("GitHub adopted human project-state resource")
+		}
+		afterCollision, err := repo.Get(ctx, collisionProject, domain.ResourceProject, reportID)
+		if err != nil || string(afterCollision) != string(beforeCollision) {
+			t.Fatalf("collision overwrote human resource=%s err=%v", afterCollision, err)
+		}
+		collisionSnapshot, err := repo.Workspace(ctx, collisionProject)
+		if err != nil || len(collisionSnapshot.Sources) != 0 {
+			t.Fatalf("denied collision created source report=%+v err=%v", collisionSnapshot, err)
+		}
 		other, err := repo.Workspace(ctx, "project-1")
 		if err != nil {
 			t.Fatal(err)

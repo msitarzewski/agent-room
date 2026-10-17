@@ -330,18 +330,25 @@ test("keeps necessary workspace information separate with long content and enlar
     const notice = page.locator(".workspace-scene__message");
     await expect(notice).toContainText("Dependency details unavailable: 1");
     await expect(notice).toContainText("dependency cycle: 1");
-    await expect(page.locator(".workspace-scene")).toHaveAttribute("data-renderer", /^(WebGPU|WebGL 2)$/, { timeout: 15_000 });
-    const boxes = await Promise.all(["toolbar", "message", "canvas", "hint"].map((name) => page.locator(`.workspace-scene__${name}`).boundingBox()));
+    await expect(page.locator(".workspace-scene")).toHaveAttribute("data-renderer", /^(WebGPU|WebGL 2|Accessible workspace)$/, { timeout: 15_000 });
+    const graphical = await page.locator(".workspace-scene").getAttribute("data-renderer") !== "Accessible workspace";
+    const surfaces = graphical ? ["toolbar", "message", "canvas", "hint"] : ["toolbar", "message", "fallback"];
+    const boxes = await Promise.all(surfaces.map((name) => page.locator(`.workspace-scene__${name}`).boundingBox()));
     for (const box of boxes) expect(box).not.toBeNull();
     for (let index = 0; index < boxes.length - 1; index++) expect(boxes[index]!.y + boxes[index]!.height).toBeLessThanOrEqual(boxes[index + 1]!.y + 1);
     expect(boxes[2]!.height).toBeGreaterThanOrEqual(300);
-    const recenter = page.getByRole("button", { name: "Recenter view" });
-    await recenter.scrollIntoViewIfNeeded();
-    expect(await recenter.evaluate((element) => {
-      const box = element.getBoundingClientRect();
-      const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
-      return hit === element || hit !== null && element.contains(hit);
-    })).toBe(true);
+    if (graphical) {
+      const recenter = page.getByRole("button", { name: "Recenter view" });
+      await recenter.scrollIntoViewIfNeeded();
+      expect(await recenter.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+        return hit === element || hit !== null && element.contains(hit);
+      })).toBe(true);
+    } else {
+      await expect(page.locator(".workspace-scene__fallback")).toContainText("Your data and evidence remain available.");
+      await expect(page.getByRole("button", { name: "Recenter view" })).toHaveCount(0);
+    }
     for (const selectors of [[".observatory-coordination > section:first-child", ".observatory-escalations"], [".observatory-world", ".observatory-inspector"]]) {
       const [a, b] = await Promise.all(selectors.map((selector) => page.locator(selector).boundingBox()));
       expect(a && b && (a.x + a.width <= b.x + 1 || b.x + b.width <= a.x + 1 || a.y + a.height <= b.y + 1 || b.y + b.height <= a.y + 1)).toBe(true);

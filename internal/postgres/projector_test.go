@@ -387,3 +387,30 @@ func TestGitHubReviewAndClosedHistoryDoNotImplySupervisedWork(t *testing.T) {
 		}
 	}
 }
+
+func TestGitHubProjectReportCannotAdoptHumanResourceButLegacySentryCan(t *testing.T) {
+	at := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
+	observation := domain.ProjectObservation{ExternalID: "native", Name: "Source name", Path: "https://github.com/owner/repo", Status: "active", CollectedAt: at, ScanStatus: "complete", TaskCount: 0}
+	payload, _ := json.Marshal(observation)
+	for _, system := range []string{"github", "sentry"} {
+		id := domain.ObservedProjectIDForSource("project", system)
+		human := domain.Project{Base: domain.NewBase(id, "project", at), Name: "Human project context", Slug: "human-context", OrganizationID: "human-organization", Status: "supervised"}
+		current, _ := json.Marshal(human)
+		event := domain.Event{ProjectID: "project", SubjectType: domain.ResourceProject, SubjectID: id, SourceSystem: system, Type: "project.observed", OccurredAt: at, Payload: payload}
+		raw, err := reduceProjectObservation(current, 1, event, "Canonical name")
+		if system == "github" {
+			if err == nil {
+				t.Fatalf("GitHub claimed unowned human resource=%s", raw)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("legacy Sentry adoption changed=%v", err)
+		}
+		var projected domain.Project
+		_ = json.Unmarshal(raw, &projected)
+		if projected.Name != human.Name || projected.Slug != human.Slug || projected.OrganizationID != human.OrganizationID || projected.Status != human.Status || projected.Source.System != "sentry" {
+			t.Fatalf("legacy Sentry changed human fields=%+v", projected)
+		}
+	}
+}

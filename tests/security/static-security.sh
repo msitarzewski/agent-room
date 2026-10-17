@@ -44,6 +44,7 @@ staticcheck -tags=integration ./cmd/... ./internal/... ./tests/security ./tests/
 govulncheck ./...
 tests/security/backend-quality.sh
 PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests/sentry -v
+PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests/github -v
 (
   cd web
   npm audit --audit-level=high

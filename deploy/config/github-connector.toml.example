@@ -1,0 +1,27 @@
+# Python 3.11+; outbound GitHub GETs only. Install from the complete checkout so
+# both providers can import adapters/source.py. No GitHub credential is needed
+# for a public repository. Never commit the private configuration or token files.
+[connector]
+instance_id = "workstation-github-source"
+state_dir = "/path/to/private/agentroom/github-state"
+ingest_url = "http://127.0.0.1:8082/api/v1/ingest"
+poll_seconds = 900
+timeout_seconds = 5
+batch_size = 50
+max_batch_bytes = 524288
+request_budget = 12
+max_pages = 10
+
+# Optional: a protected read-only GitHub App installation token or fine-grained
+# token for private repositories. Renew expiring tokens outside this collector.
+# github_token_file = "/path/to/private/agentroom/github-read-token"
+
+# Repeat for each explicitly provisioned repository/project mapping.
+# token_file is an Agent Room token with event:ingest and source:github only.
+# repository_id is optional initially; the first verified numeric ID is persisted.
+[[repositories]]
+owner = "OWNER"
+name = "REPOSITORY"
+project_id = "operator-provisioned-project-id"
+token_file = "/path/to/private/agentroom/github-source-token"
+# repository_id = 123456789

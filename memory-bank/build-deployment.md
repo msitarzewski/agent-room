@@ -2,7 +2,7 @@
 
 **Status:** Local tailnet deployment running; signed Linux production promotion separate
 
-**Last updated:** 2026-10-15
+**Last updated:** 2026-10-17
 
 ## Local Tailnet Deployment
 
@@ -148,6 +148,41 @@ delivery, then revoke the previous token using the CLI. No collector restart is
 needed to reload the token. Do not print or copy tokens into Memory Bank files.
 Stop only this publisher with `launchctl bootout` for its own label. Agent Room
 and Sentry remain independently supervised.
+
+## Local GitHub Publisher
+
+The read-only GitHub provider is supervised as `local.agentroom-github` and
+uses the existing private adapter listener. Private configuration/state/token,
+logs, backups and build evidence live in ignored `data/local/github/`.
+Directories are owner-only; token/config files are mode 0600. Its initial mapping
+covers this repository's existing Agent Room project, with only event:ingest
+and source:github on its Agent Room token. Public GitHub access is anonymous;
+no development GitHub credential is copied. Optional private GitHub read tokens
+must be explicitly configured and renewed externally. Actual source-token ID
+and expiry are in private `publisher-metadata.json` (90-day initial lifetime).
+
+```sh
+python3 -B adapters/github/agentroom_github.py \
+  --config data/local/github/connector.toml status
+launchctl print "gui/$(id -u)/local.agentroom-github"
+launchctl kickstart -k "gui/$(id -u)/local.agentroom-github"
+```
+
+The default local poll is 900 seconds with a bounded request budget. `status`
+is read-only. Do not run `once` concurrently with `watch`: one process owns the
+state lock. Restart only this publisher to request a fresh immediate pass.
+Preserve its state directory and repository binding through restarts/moves;
+never clear the queue to repair transport. GitHub report freshness is independent
+of Sentry's report in the same project. Existing source fields remain attributed
+and cannot accept canonical completion or change human authority.
+
+The pre-install snapshot includes native/web/configuration, both databases and
+a consistent Sentry queue. Stop this publisher before rolling back to a daemon
+without typed GitHub observation support, then restore the recorded artifacts.
+Keep its queue for deliberate recovery. No new public ingress route or tailnet
+mapping is needed. Final merged artifact provenance and activation phase are
+recorded under `github_observations` in private deployment metadata. See
+[GitHub observations](releases/github-observations.md).
 
 ## Local Participant Reporting
 

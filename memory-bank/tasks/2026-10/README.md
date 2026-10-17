@@ -2,6 +2,25 @@
 
 ## Planned Work
 
+### 2026-10-17: [IN-PROGRESS] Read-only GitHub observations
+
+- Michael approved implementing, verifying locally and merging the repository's
+  issue/PR/review/check monitor, then returning to desktop/spatial interface work.
+- QA / RUNNING on `feat/github-observations`, baseline `6535ab5`. Reuse durable
+  source delivery and typed observations; keep independent source identities,
+  freshness, human authority and scoped credentials. No GitHub write operations
+  in the deployed monitor; public monitoring starts without a GitHub credential.
+- Existing unmerged spatial/coordination foundation is a prerequisite in this
+  branch. Preserve private runtime and previous verified assets during QA.
+- Local source is supervised: seven real PR records, source/CI inspection,
+  independent Sentry freshness, and unchanged canonical fields on 230 prior
+  tasks. Both publishers have empty healthy queues at the recorded check.
+  53 collector tests, backend 84.9%, frontend 140/30 and security gates pass.
+- PR [#7](https://github.com/msitarzewski/agent-room/pull/7) awaits final CI and
+  merge. Corrected an older layout test's graphics-only assumption exposed by
+  Linux Firefox; accessible-mode layout is now verified too.
+- See [GitHub observations](../../releases/github-observations.md).
+
 ### 2026-10-15: [COMPLETED] Necessary information without overlapping UX
 
 - Michael requested ensuring necessary information does not overlap. State:

@@ -379,3 +379,18 @@ license texts, and SPDX SBOM with release archives.
 - dependency licenses remain an audited release input
 
 **Reference:** `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`
+
+## 2026-10-17: GitHub is an independent read-only observation source
+
+**Status:** Approved by Michael's instruction to get the monitor working and merged.
+
+Extend existing typed source observations, delivery and coordination views with
+GitHub issues/PRs/reviews/checks. Preserve Sentry identities and independent source
+freshness; GitHub facts never accept canonical completion or replace human-owned
+fields. Start with explicit outbound GET polling for the private local deployment;
+public repository access needs no GitHub credential. Optional protected token
+files are explicit. Source credentials receive only source ingestion for mapped
+projects. Development PR push/merge authority is separate from deployed monitor
+permissions. No automatic executor or new spatial interface is part of this scope.
+
+See [GitHub observations](releases/github-observations.md).

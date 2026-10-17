@@ -113,8 +113,10 @@ jobs:
         run: |
           set -Eeuo pipefail
           jq -e '.["$schema"] and .type == "object"' api/arp/event-envelope.schema.json >/dev/null
-      - name: Verify durable Sentry connector
-        run: PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests/sentry -v
+      - name: Verify durable source connectors
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests/sentry -v
+          PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests/github -v
       - name: Cross-build Linux binaries
         run: |
           set -Eeuo pipefail

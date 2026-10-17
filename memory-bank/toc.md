@@ -1,6 +1,6 @@
 # Agent Room Memory Bank
 
-**Last updated:** 2026-10-15
+**Last updated:** 2026-10-17
 
 This index routes future sessions to the smallest useful context set. `boot.md` remains the founding product specification; the Memory Bank records working context, accepted decisions, implementation patterns, and operational procedures derived from it.
 
@@ -12,6 +12,8 @@ This index routes future sessions to the smallest useful context set. `boot.md` 
 4. [tasks/2026-10/README.md](./tasks/2026-10/README.md) — current month
 
 ## Recent Task Records
+
+- [GitHub observations](./releases/github-observations.md) — approved read-only issue/PR/review/check source, implementation and merge acceptance
 
 - [Information layout follow-up](./releases/agent-coordination-workspace.md#information-layout-follow-up--2026-10-15) — deployed frontend `5ef2b30`, overlap/pagination/focus verification, clean-build provenance, and remaining device checks
 - [Agent coordination workspace](./releases/agent-coordination-workspace.md) — approved agent-first request workflow, grouped portfolio, and shared desktop/XR coordination

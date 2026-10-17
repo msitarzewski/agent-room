@@ -275,7 +275,8 @@ func reduceProjectObservation(current json.RawMessage, currentVersion int64, eve
 		if err := json.Unmarshal(current, &project); err != nil {
 			return nil, err
 		}
-		if (project.Source.System != "" && project.Source.System != event.SourceSystem) || (project.Source.ExternalID != "" && project.Source.ExternalID != observation.ExternalID) {
+		legacySentry := event.SourceSystem == "sentry" && project.Source.System == ""
+		if (!legacySentry && project.Source.System != event.SourceSystem) || (project.Source.ExternalID != "" && project.Source.ExternalID != observation.ExternalID) {
 			return nil, app.Invalid("project observation cannot claim another source's identity")
 		}
 		project.Version = currentVersion + 1

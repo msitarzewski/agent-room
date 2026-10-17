@@ -351,6 +351,51 @@ sudo deploy/rollback.sh \
   --public-url https://<public-host>
 ```
 
+## GitHub observations
+
+The independent [GitHub monitor](adapters/github/agentroom_github.py) reads
+issues, pull requests, reviews and current-head check/status results through
+GitHub's REST API. It performs outbound GET requests only. Public repositories
+need no GitHub credential; private repositories require an explicitly configured,
+owner-only read token file. Expiring GitHub App tokens must be refreshed outside
+the collector. It never reads the development CLI's credential or writes GitHub.
+
+Copy [the configuration example](deploy/config/github-connector.toml.example)
+to private storage and explicitly map each repository to an existing Agent Room
+project. Provision an Agent Room service token with only `event:ingest` and
+`source:github` for those project IDs. This publisher cannot create projects,
+change memberships, approve completion, or change task ownership.
+
+```sh
+python3 -B adapters/github/agentroom_github.py \
+  --config /path/to/private/github-connector.toml watch
+```
+
+Python 3.11+ and the complete checkout are required; delivery is shared with
+Sentry in `adapters/source.py`. `watch` polls every 900 seconds by default;
+`once` collects and sends a bounded batch; `status` reads persisted health.
+Exit 2 means delivery remains pending and exit 1 reports collection/delivery
+errors or quarantine. Keep state directories mode 0700 and token files mode
+0600. Preserve the durable state directory across restarts and host moves.
+
+Repository numeric identity is bound to its project on first verified access.
+Issues and PRs keep distinct stable identities across close/reopen and updates.
+Pagination, conditional requests, API request budgets, rate-limit backoff and
+partial coverage are explicit. Missing data never deletes tasks or establishes
+successful checks. Check results refer to the current PR head; branch-protection
+requirements and merge eligibility are not inferred. Observed failures or
+requested changes surface source blockers for agent triage; review signals do
+not accept a canonical completion claim or automatically escalate to a human.
+Closed and merged PRs are distinct source facts. Historical CI on closed PRs
+is not repeatedly refreshed.
+
+GitHub and Sentry have independent source report/freshness records in the same
+project, retaining canonical names and human-owned fields. The monitor uses the
+same private typed observation endpoint described below. When rolling back to
+a daemon without GitHub support, stop this publisher before restoring binaries;
+retain its queue for deliberate recovery. See the
+[GitHub release record](memory-bank/releases/github-observations.md).
+
 ## Sentry observations
 
 The independent [Sentry connector](adapters/sentry/agentroom_sentry.py) reuses
