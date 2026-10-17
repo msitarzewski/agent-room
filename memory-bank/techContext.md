@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-17
 
-**Implementation status:** Founding, spatial, and agent coordination capabilities verified locally; device acceptance and signed remote promotion separate
+**Implementation status:** Founding, spatial, agent coordination and GitHub observations merged and verified locally; device acceptance and signed remote promotion separate
 
 ## Known Environment
 
@@ -28,7 +28,7 @@ Local public-repository collection needs no GitHub credential. Optional read
 App/PAT files are externally renewed; no automatic token minting or development
 CLI credential discovery. Typed task/project observations have source-specific
 identity and independent freshness, preserving canonical decisions. Local
-acceptance passes; final merge/provenance is tracked in
+acceptance and clean merged activation pass; final provenance is tracked in
 [GitHub observations](releases/github-observations.md).
 
 ### Explicit Runtime Observations

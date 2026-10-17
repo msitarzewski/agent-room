@@ -2,7 +2,7 @@
 
 **Status:** Founding control plane and local spatial candidate validated
 
-**Last updated:** 2026-10-15
+**Last updated:** 2026-10-17
 
 ## Layered Control-Plane Architecture
 
@@ -285,3 +285,21 @@ Immersive fitting reuses label geometry in `web/src/workspace/scene.ts:48` and
 measures text ink in `web/src/workspace/SceneCanvas.tsx:62`. Keep the central
 diagram, side information and control bands disjoint; preserve long recorded
 context through pages instead of reducing it to an inaccessible clipped label.
+
+## Read-only Repository Observation Sources
+
+The typed task/project source allowlist is explicit at
+`internal/domain/models.go:223`. Source-specific task/report IDs preserve legacy
+Sentry identities and isolate GitHub at `internal/domain/models.go:227` and
+`internal/domain/models.go:237`; freshness joins the exact source report at
+`internal/postgres/repository.go:652`. Sources never accept canonical completion,
+change ownership or create coordination commands.
+
+`adapters/source.py:82` and `adapters/source.py:177` own shared durable state and
+immutable delivery. The provider-specific API guard/cache and collector stay in
+`adapters/github/agentroom_github.py:108` and
+`adapters/github/agentroom_github.py:258`. Repository binding, bounded requests,
+conditional caching, rate backoff and reconciliation are independent from the
+Sentry scanner. Missing/partial facts retain prior context with qualifiers;
+review/check facts refer to their head/attempt and never imply merge authority.
+Treat source bodies as attributed data. Keep credentials and queues private.

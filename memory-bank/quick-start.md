@@ -1,6 +1,6 @@
 # Quick Start
 
-**Last updated:** 2026-10-15
+**Last updated:** 2026-10-17
 
 ## Project in One Paragraph
 
@@ -51,19 +51,26 @@ time. Typed peer requests and explicit metadata reporting have been exercised
 by the actual coding agents. No automatic provider-hook service or autonomous
 worker executor is installed.
 
-The information-layout follow-up is committed and deployed as frontend
-`5ef2b30`; native binaries remain `14b5c43`. Separate desktop/XR information
+The information-layout checkpoint was frontend `5ef2b30` with native
+`14b5c43`; it is included in the merged build below. Separate desktop/XR information
 regions, measured text fitting, complete context pages, and reachable
 confirmations pass 140 frontend tests and 30 Chromium/WebKit browser checks.
 Actual HTTPS acceptance covers the 99-project instance, including narrow and
 200%-text layouts. Detailed Vision Pro comfort/input/frame pacing remains open.
+
+Read-only GitHub monitoring is merged in PR #7 and running every 900 seconds
+for this public repository. It needs no GitHub credential and uses a separate
+single-project source-ingestion token. Native/Linux/web provenance is the clean
+merged `582567d` build, with verified HTTPS assets. Actual PR draft/failed-CI/
+review/merged reconciliation and all final CI gates pass. See
+[GitHub observations](releases/github-observations.md).
 
 Read [Agent coordination workspace](releases/agent-coordination-workspace.md)
 for the current release, verification, limitations, and recovery state.
 
 ## Next Decision
 
-Complete detailed Vision Pro interaction/comfort/frame-pacing acceptance;
+Return to the agent-first desktop/spatial interface, then complete detailed Vision Pro interaction/comfort/frame-pacing acceptance;
 choose the next real runtime onboarding and verify the eventual remote host
 before signed promotion. Keep worker capability grants explicit and separate
 from Sentry source ingestion. Local operation is already configured.

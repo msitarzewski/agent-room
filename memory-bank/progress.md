@@ -1,8 +1,18 @@
 # Progress
 
-**Last updated:** 2026-10-15
+**Last updated:** 2026-10-17
 
 ## Current Phase
+
+2026-10-17: Read-only GitHub observation support is merged in PR #7 (`582567d`)
+and running locally with clean merged native/Linux/web provenance. Seven real
+PRs and current-head CI/review/merged states feed the existing workspace without
+changing canonical ownership or human decisions. GitHub and Sentry freshness
+remain independent; both supervised publishers are healthy at final checks.
+53 collector tests, frontend 140/36, backend 84.9% and all CI gates (including
+54 Linux browser checks and reproducible packaging) pass. Michael's next focus
+is the agent-first desktop/spatial interface. See
+[GitHub observations](releases/github-observations.md).
 
 2026-10-15 UX follow-up: necessary information now occupies separate desktop
 and immersive spaces, with long recorded context fully available through
@@ -125,8 +135,9 @@ No headset frame-rate or comfort measurement has been claimed.
 
 ## Immediate Next Work
 
-1. Accept the interface on the actual Vision Pro build, then choose a release
-   identifier for signed promotion.
+1. Return to the agent-first desktop/spatial interface with real GitHub/source
+   context. Accept dense information/input on the actual Vision Pro and measure
+   comfort/frame pacing before choosing an identifier for signed promotion.
 2. Improve the brief's routine-scan counting and wording at
    `web/src/pages/AttentionPage.tsx:127`; distinguish source checks from meaningful
    work updates. Full portfolio provisioning is now complete.

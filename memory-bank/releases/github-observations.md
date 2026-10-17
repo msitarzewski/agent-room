@@ -1,6 +1,6 @@
 # GitHub observations
 
-**Status:** Locally verified; final CI and merge in progress
+**Status:** Complete locally and merged
 **Last updated:** 2026-10-17
 
 ## Objective and authority
@@ -50,59 +50,79 @@ record cannot represent independent GitHub acceptance or source authority.
 - [x] Implement and test read-only GitHub collection and retry/reconciliation.
 - [x] Install scoped local source publisher and retain private rollback copies.
 - [x] Verify actual issue/PR/check observations and existing source isolation.
-- [ ] Pass appropriate backend, collector, frontend and security checks.
-- [ ] Merge the verified development PR and record deployed provenance.
+- [x] Pass appropriate backend, collector, frontend and security checks.
+- [x] Merge the verified development PR and record deployed provenance.
 
-## Verification and working state
+## Verification and operating state
 
-QA / RUNNING on `feat/github-observations`. PR
-[#7](https://github.com/msitarzewski/agent-room/pull/7) includes the unmerged
-spatial/coordination prerequisite and GitHub observation support. Backend
-checkpoint `5094f3d` is published; final consolidated checkpoint is pending.
+[PR #7](https://github.com/msitarzewski/agent-room/pull/7) merged on 2026-10-17
+as `582567d55717f85094950d3969c71831982b0d19`, after all exact-head checks passed.
+The merge includes the previously verified spatial/coordination prerequisite.
+The implementation/test checkpoints are `5094f3d`, `34c1ae7` and `68bea1e`.
 
 - 53 collector tests pass: 30 GitHub and all 23 existing Sentry regressions.
-- Backend vet/race/SQL/API gate passes: 84.9% overall; critical app 91.6%,
-  artifacts 90.8%, auth 90.2%, HTTP 92.0%, runner 91.6%.
-- Frontend 140 tests and 36 native Chromium/WebKit checks pass. The four dense
-  viewport scenarios run independently with the normal per-test deadline.
-- Type/lint/strict API, Staticcheck/Gosec, Semgrep, source secret inventory,
-  runtime redistribution/license, npm advisory and completeness gates pass.
-  Go vulnerability analysis finds no reachable vulnerability; module advisories
-  in unused code remain qualified by the existing call-analysis gate.
-- Independent review fixes/regressions cover fail-closed native repository
-  binding, report namespace ownership, partial-data retention, API backoff,
-  pagination/reconciliation, multi-repository fairness, current-head SHA,
-  carried-cycle freshness, bounded text and latest queued CI attempts.
-- Actual public API collection delivered seven existing PR records with complete
-  coverage and zero pending/quarantined deliveries. There are no standalone
-  issue records in this repository at this check; deterministic regressions
-  cover issue close/reopen and updates without fabricating production issues.
-- Authenticated HTTPS inspection verifies real PR #7, its observed failed CI,
-  current-head details, separate GitHub/Sentry freshness, and a connected live
-  stream with no application/API errors. All 230 preexisting canonical task
-  records retain the fields checked before ingestion. Public source bearer
-  reads are denied; the private adapter exposes no task-read route.
-- `local.agentroom-github` is supervised and polls every 900 seconds without a
-  GitHub credential. Its Agent Room credential has exactly event:ingest and
-  source:github for the mapped project. Static optional GitHub token files need
-  external renewal; automatic App installation-token minting is not implemented.
-- Existing Sentry publisher was reloaded with shared delivery: 99 projects,
-  zero backlog/quarantine and no collection/transport error at the recorded
-  check. Its own board/watcher/history/backups and source configuration remain
-  independently managed.
+- Backend vet/race/SQL/API gate: 84.9% overall; critical app 91.6%, artifacts
+  90.8%, auth 90.2%, HTTP 92.0%, runner 91.6%.
+- Frontend 140 tests, 36 native browser checks, and all 54 Linux
+  Chromium/Firefox/WebKit CI checks pass. Dense viewport cases independently
+  verify graphical/accessible layouts under the normal deadline. The CI fixes
+  change tests only, preserving application behavior and all layout assertions.
+- Type/lint/strict API, Staticcheck/Gosec, Semgrep, CodeQL, source/history secret
+  scans, redistribution/license, npm/OSV, completeness and source boundaries
+  pass. Go call analysis finds no reachable vulnerability; advisories in unused
+  module code remain explicitly qualified by that gate.
+- Real daemon OIDC browser, reproducible release package, fail-closed provenance
+  and deployment-configuration CI checks pass.
+- Independent review findings are fixed/regression-tested: repository binding,
+  report ownership, partial-data retention, backoff, pagination/reconciliation,
+  budget fairness, current-head/combined-status SHA, cycle freshness, bounded
+  context and newer queued CI attempts. No unresolved review findings remain.
+- Real public API collection delivered seven existing PR records. No standalone
+  issues exist at the recorded check; deterministic tests cover issue lifecycle
+  without fabricating production issues. Actual PR #7 exercised draft,
+  failed-CI source blocker, new-head review and merged state. Only source-owned
+  attention resolved; canonical task state remains inbox. All 230 preexisting
+  canonical task records retain their checked fields.
+- Authenticated HTTPS after activation verifies merged PR details, independent
+  GitHub/Sentry reports and a connected socket without application/API errors.
+  Public source-bearer reads are denied; the private adapter exposes no task-read
+  route. GitHub API requests are GET-only and the public deployment uses no
+  GitHub credential. Optional protected read-token files need external renewal;
+  automatic App token minting is outside this monitor. It collects review
+  decisions; individual review-comment threads/resolution are outside this scope.
+- Both supervised publishers are healthy at final checks: GitHub one project,
+  Sentry 99, zero pending/quarantined events and no collection/transport error.
+  Source ingestion never changes ownership, accepts completion or executes work.
 
-Initial PR CI passed backend, real daemon OIDC browser, security and CodeQL.
-Linux Firefox correctly used the supported accessible workspace, exposing a
-new overlap test that assumed a graphics renderer. The corrected test checks
-separate necessary information and reachable decisions in either supported
-mode. Separate viewport cases avoid combining four renderer startups into a
-single 30-second deadline on software-rendered Linux Chromium. These changes do
-not change application behavior. Final rerun and merge are pending.
+## Deployment and recovery
 
-The locally active native candidate has explicit dirty-build provenance; the
-verified web assets remain `5ef2b30`. Private build/deployment records distinguish
-artifacts. Current snapshots include both databases, native/web/configuration
-and a consistent Sentry queue under `data/local/github/backups/pre-install`.
-Stop the GitHub publisher before restoring an older daemon that lacks typed
-GitHub support; retain its durable queue. After merge, clean merged builds,
-activation, source merge-state reconciliation and final docs remain required.
+Clean native Darwin/arm64 and static Linux/amd64 daemon/CLI builds record the
+exact merged revision with vcs.modified=false. The pinned clean frontend build
+matches all nine verified installed files byte for byte. Native binaries and web
+provenance are activated locally; readiness is 204 and all nine files verify
+through HTTPS. Exact hashes and current phase are private in
+`data/local/github/logs/merged-build.json`, `data/local/github/final-state.json`
+and `data/local/deployment.json`. A subsequent documentation-only handoff may
+advance main without changing this verified deployed source revision.
+
+`local.agentroom-github` polls every 900 seconds with an exact single-project
+Agent Room token containing only event:ingest/source:github. Its GitHub API
+access is anonymous public read-only. Private config, credential metadata, queue,
+logs and evidence stay ignored in `data/local/github/`. Sentry was reloaded with
+shared delivery; its separate board/watcher/history/backups/configuration remain
+independently managed. No public route or tailnet mapping was added.
+
+Pre-install snapshots include both databases, native/web/configuration and a
+consistent Sentry queue under `backups/pre-install` in that private directory.
+`backups/after-acceptance` contains consistent copies of both source queues.
+Stop the GitHub publisher before restoring an older daemon without typed GitHub
+support. Preserve its durable instance/repository bindings and queue for recovery.
+The disposable integration-test database/container was removed.
+
+## Next work
+
+Return to the app's agent-first desktop/spatial interface as Michael requested.
+Use genuine review/check/issue context without making the human the dispatcher.
+Physical Vision Pro interaction/comfort/frame pacing, deliberate real runtime
+onboarding and verified pipx promotion remain separate. No autonomous executor,
+merge-eligibility inference or remote activation is claimed.

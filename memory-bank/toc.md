@@ -13,7 +13,7 @@ This index routes future sessions to the smallest useful context set. `boot.md` 
 
 ## Recent Task Records
 
-- [GitHub observations](./releases/github-observations.md) — approved read-only issue/PR/review/check source, implementation and merge acceptance
+- [GitHub observations](./releases/github-observations.md) — merged read-only issue/PR/review/check source, local operation and return-to-interface handoff
 
 - [Information layout follow-up](./releases/agent-coordination-workspace.md#information-layout-follow-up--2026-10-15) — deployed frontend `5ef2b30`, overlap/pagination/focus verification, clean-build provenance, and remaining device checks
 - [Agent coordination workspace](./releases/agent-coordination-workspace.md) — approved agent-first request workflow, grouped portfolio, and shared desktop/XR coordination

@@ -2,57 +2,65 @@
 
 **Last updated:** 2026-10-17
 
-**State:** QA
+**State:** DOCS
 
-**Substate:** RUNNING
+**Substate:** IDLE
 
-**Task status:** GITHUB OBSERVATIONS — LOCALLY VERIFIED, MERGE QA
+**Task status:** GITHUB OBSERVATIONS — MERGED AND RUNNING
 
 ## Current Task
 
-2026-10-17: Michael approved implementing the read-only GitHub monitor, making
-it work locally and merging it, then returning to desktop/spatial interface
-work. Branch `feat/github-observations` includes the preceding verified,
-unmerged spatial/coordination foundation. Development PR
-[#7](https://github.com/msitarzewski/agent-room/pull/7) is in draft while final
-checks complete. Backend checkpoint `5094f3d` is published; reviewed namespace
-hardening and the final collector/docs are awaiting their consolidated commit.
+2026-10-17: Michael's approved read-only GitHub monitor is working and merged.
+[PR #7](https://github.com/msitarzewski/agent-room/pull/7) merged as `582567d`.
+It includes the previously verified spatial/coordination foundation and source
+integration. Clean native Darwin/arm64 and static Linux/amd64 daemon/CLI builds
+record the exact merged revision with vcs.modified=false. The pinned clean web
+build matches all nine previously verified installed files byte for byte; web
+provenance is updated to the merged revision. Local readiness is 204 and all
+nine assets were verified over tailnet HTTPS. Exact hashes/provenance/activation
+phase are private in `data/local/github/logs/merged-build.json`,
+`data/local/github/final-state.json` and `data/local/deployment.json`.
 
-Implementation and local acceptance pass: 53 collector tests (30 GitHub, 23
-Sentry), backend vet/race/SQL/API coverage 84.9% with all critical packages above
-90%, frontend 140 tests/36 native browser checks, type/lint/API, static/security,
-license/advisory/secret/completeness gates. Independent review's identity,
-partial-data, pagination, freshness and CI-attempt findings are fixed and tested.
-Initial CI passed backend, real OIDC browser, security and CodeQL; Linux Firefox
-revealed the earlier layout test's incorrect graphics-only assumption. That test
-now verifies either graphical or accessible layout with the same information
-and control requirements. Four viewport scenarios run independently, keeping
-the normal per-test deadline on software-rendered Linux; the full 36 native
-Chromium/WebKit checks pass. Final CI rerun and merge remain required.
+`local.agentroom-github` watches this public repository every 900 seconds using
+outbound anonymous GitHub GETs. Its separate Agent Room token has only
+event:ingest/source:github for the existing project. Seven real PR records were
+observed; there are no standalone issues at the recorded check. Deterministic
+tests cover issue close/reopen. Actual PR #7 exercised draft, failed CI/source
+blocker, new-head review, then merged state. Its source blocker resolved while
+canonical task state stayed inbox. All 230 preexisting canonical task records
+retain their checked fields. GitHub/Sentry freshness remains independent.
 
-Native backend candidate is active with dirty-build provenance, retaining the
-verified frontend `5ef2b30`. `local.agentroom-github` now polls this public repo
-with outbound anonymous GETs every 900 seconds. Its separate Agent Room token
-has only event:ingest/source:github for this one project. Seven actual PR records
-were collected (no standalone issues currently exist); PR #7's real CI failure
-appeared as a source blocker in authenticated HTTPS inspection. No canonical
-completion, ownership, human decision or execution was inferred. All 230 prior
-canonical task records retain their checked fields. Sentry's 99-project
-publisher was reloaded with shared delivery; both queues have zero pending or
-quarantined records and no collection/transport error at the recorded checks.
+Final verification passes: 53 collector tests (30 GitHub, 23 Sentry), frontend
+140 tests, 36 native Chromium/WebKit checks and 54 Linux Chromium/Firefox/WebKit
+CI checks. Backend vet/race/SQL/API coverage is 84.9%, with all critical packages
+above 90%. CodeQL, static/security/advisory/license/secret/completeness/boundary,
+real OIDC browser, reproducible packaging and deployment checks pass. Authenticated
+HTTPS after clean activation shows the actual merged PR, source details and
+healthy socket with no application/API errors. Graphics/fallback layout cases
+run independently with the normal test deadline; no interface redesign occurred.
 
-Runtime/config/credentials and detailed acceptance evidence remain ignored in
-`data/local/github/`; consistent pre-install database/native/web/config/Sentry
-queue snapshots are in `backups/pre-install` there. Exact candidate revision,
-activation phase and per-artifact provenance are in private deployment metadata.
-Root owns final CI/docs/Git merge and clean activation; backend/data/review
-workers are finished with their owned source frozen. Source services and remote
-host remain separate from agent execution or future interface redesign.
+Both supervised publishers have zero backlog/quarantine and no collection or
+transport error at final checks: GitHub one project, Sentry 99. Sentry's own
+board/watcher/history/backups remain separate. Private pre-install snapshots
+include native/web/configuration, both databases and a consistent Sentry queue;
+post-acceptance consistent source queue copies are also retained. No runtime
+secret or host value is tracked. Source credentials cannot create coordination
+commands, accept completion, change ownership or execute workers.
 
-Track [GitHub observations](releases/github-observations.md). Next complete
-final PR checks, merge, rebuild/activate clean merged provenance, verify merged
-PR source state, then resume the app's interface/spatial work. Physical device
-comfort/frame pacing and remote promotion remain unverified.
+The final Memory Bank handoff is documentation only; it does not require a
+runtime rebuild. Deployed artifact provenance remains the clean merged `582567d`
+revision even if a later documentation commit advances main. See
+[GitHub observations](releases/github-observations.md).
+
+## Next: Return to the Interface
+
+Michael explicitly wants to return to this app's interface, including spatial,
+after the monitor. Keep agents primary and the human mostly a passenger. Use
+real source review/CI/issue context, ownership and requests to make necessary
+information understandable without overlapping panels or anonymous icon fields.
+Detailed Vision Pro interaction/comfort/frame pacing still needs device
+acceptance. Deliberate runtime onboarding and verified pipx promotion remain
+separate; no automatic executor or remote activation is claimed.
 
 ## Previous Information Layout
 

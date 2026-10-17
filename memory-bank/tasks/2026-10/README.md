@@ -2,24 +2,24 @@
 
 ## Planned Work
 
-### 2026-10-17: [IN-PROGRESS] Read-only GitHub observations
+### 2026-10-17: [COMPLETED] Read-only GitHub observations
 
-- Michael approved implementing, verifying locally and merging the repository's
-  issue/PR/review/check monitor, then returning to desktop/spatial interface work.
-- QA / RUNNING on `feat/github-observations`, baseline `6535ab5`. Reuse durable
-  source delivery and typed observations; keep independent source identities,
-  freshness, human authority and scoped credentials. No GitHub write operations
-  in the deployed monitor; public monitoring starts without a GitHub credential.
-- Existing unmerged spatial/coordination foundation is a prerequisite in this
-  branch. Preserve private runtime and previous verified assets during QA.
-- Local source is supervised: seven real PR records, source/CI inspection,
-  independent Sentry freshness, and unchanged canonical fields on 230 prior
-  tasks. Both publishers have empty healthy queues at the recorded check.
-  53 collector tests, backend 84.9%, frontend 140/36 and security gates pass.
-- PR [#7](https://github.com/msitarzewski/agent-room/pull/7) awaits final CI and
-  merge. Corrected an older layout test's graphics-only assumption exposed by
-  Linux Firefox; accessible-mode layout is now verified too. Each dense viewport
-  scenario retains an independent normal test deadline on software rendering.
+- [PR #7](https://github.com/msitarzewski/agent-room/pull/7) merged as `582567d`.
+  DOCS / IDLE: clean merged native/Linux/web builds and local activation pass.
+  All eight reported CI checks pass, including 54 Linux browser checks and
+  reproducible packaging. Local gates: 53 collector tests, frontend 140/36,
+  backend coverage 84.9% with every critical package above 90%, security and
+  source-boundary checks.
+- Supervised GET-only monitoring covers the public repository every 900 seconds
+  without a GitHub credential. Its Agent Room token is source-ingestion-only
+  for this project. Seven real PR records, actual draft/CI-failure/review/merge
+  reconciliation, independent freshness and authenticated HTTPS inspection pass.
+  All 230 preexisting canonical task records retain their checked fields.
+- Both publishers have zero backlog/quarantine and no collection/transport
+  error at final checks; Sentry still covers 99 approved projects independently.
+  Rollback/queue snapshots, secrets and exact provenance remain ignored.
+- Michael's next focus is the app interface, including spatial, with agents
+  primary and the human mostly a passenger. Device/remote acceptance is separate.
 - See [GitHub observations](../../releases/github-observations.md).
 
 ### 2026-10-15: [COMPLETED] Necessary information without overlapping UX
