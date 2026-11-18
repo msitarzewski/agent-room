@@ -1,6 +1,6 @@
 # Quick Start
 
-**Last updated:** 2026-10-17
+**Last updated:** 2026-11-17
 
 ## Project in One Paragraph
 
@@ -41,6 +41,23 @@ Do not confuse `host_agentroom` with `agent_pip`.
 - One verified artifact is promoted to `host_agentroom`.
 
 ## Current Status
+
+Credential update after the November 17 review: the Sentry publisher token has
+been replaced at Michael's request, valid through December 31, 2026 at
+23:59:59 Central. The same scoped ingestion permissions and accepted delivery
+were verified, and the expired predecessor revoked. The publisher has now
+caught up: pending/quarantined 0 and all 99 projects delivering successfully.
+The interactive cutover now performs remote privilege/hash preflight before
+local shutdown; its operator sudo prompt is the remaining execution boundary.
+
+Latest read-only review (2026-11-17): the app still runs on the workstation;
+the destination is staged but inactive. The local UI, login, 99-project access
+and live connection pass actual browser checks. Sentry collection works but
+delivery has failed 401 since its token expired November 14, with about 100,500
+observations preserved locally. GitHub monitoring remains disabled from the
+unfinished cutover. Renew source access and verify/drain delivery before
+resuming migration. See `activeContext.md#system-review--2026-11-17` for current
+evidence; implementation/release history below is not a current health report.
 
 The local native service runs behind tailnet HTTPS port 4445 with normal OIDC.
 Private URL/login values are in ignored `data/local/`; see the deployment runbook.

@@ -1,8 +1,52 @@
 # Progress
 
-**Last updated:** 2026-10-17
+**Last updated:** 2026-11-17
 
 ## Current Phase
+
+2026-11-17 migration continuation: local ingestion recovered completely,
+pending/quarantined queues are zero and all 99 projects have fresh successful
+delivery. Recovery preserved 101,973 immutable observations, backed up SQLite,
+and rescheduled only prior 401 retry timers. Cutover now verifies staged
+signature/hash, destination identity and operator sudo access before shutting
+down any local service. All 129 migration/collector tests and shell/static/
+completeness checks pass. The destination remains staged and inactive; the
+remaining step needs Michael's interactive Terminal/sudo, followed by actual
+remote/browser verification and explicit local retirement.
+
+2026-11-17 credential recovery: Michael approved a Sentry publisher replacement
+through December 31, 2026. The exact end-of-day Central expiry, original actor,
+99-project scope and ingestion-only capabilities are verified. The credential
+was atomically installed, a genuine queued observation accepted with 202, and
+the expired predecessor revoked. Publisher retry backoff is still in effect;
+the queued backlog is preserved and automatic drainage is not yet claimed.
+No service restart or remote activation occurred.
+
+2026-11-17: System review confirms the workstation app/login/live connection and
+99-project desktop walkthrough work, with no browser/server failures. All 120
+migration/collector tests and deployment/static/completeness checks pass. The
+destination is still only staged and the checkpoint remains in local fencing;
+remote activation never happened. GitHub remains disabled from that attempt.
+Sentry's source credential expired November 14, so collection continues but all
+99 projects' deliveries fail 401 and roughly 100,500 observations are preserved
+in its queue. Credential recovery, verified queue drainage and supervised
+cutover are the immediate operational work. No runtime or credential changes
+were made during this review. Migration code/docs are still uncommitted on the
+feature branch; public main remains `ee4a897`.
+
+2026-10-20: The approved shared-host migration kit is prepared and verified on
+`feat/shared-host-migration`; destination execution remains Michael-run per its
+canonical guide. Read-only SSH/platform checks pass. The signed clean `582567d`
+Linux/web release, private consistent snapshots, isolated two-database restore
+rehearsal and pinned Linux signature verification pass. 63 migration tests and
+53 collector tests, shell/static/completeness/secret checks pass. Local app and
+publishers still run. Subsequent checkpoint/read-only verification confirms
+destination provisioning/restoration is staged, PostgreSQL alone running and
+application activation/cutover pending. Noninteractive shell invocation now
+reports the terminal/sudo requirement clearly; two new regressions pass. Private
+host/credential data remains ignored. See
+[shared-host migration](build-deployment.md#shared-host-migration) for actual
+stage/cutover/check/explicit-retirement commands and recovery boundaries.
 
 2026-10-17: Read-only GitHub observation support is merged in PR #7 (`582567d`)
 and running locally with clean merged native/Linux/web provenance. Seven real

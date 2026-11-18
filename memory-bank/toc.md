@@ -1,6 +1,6 @@
 # Agent Room Memory Bank
 
-**Last updated:** 2026-10-17
+**Last updated:** 2026-11-17
 
 This index routes future sessions to the smallest useful context set. `boot.md` remains the founding product specification; the Memory Bank records working context, accepted decisions, implementation patterns, and operational procedures derived from it.
 
@@ -9,9 +9,12 @@ This index routes future sessions to the smallest useful context set. `boot.md` 
 1. [quick-start.md](./quick-start.md) — minimum project orientation
 2. [activeContext.md](./activeContext.md) — current state and pending decisions
 3. [progress.md](./progress.md) — roadmap and completion state
-4. [tasks/2026-10/README.md](./tasks/2026-10/README.md) — current month
+4. [tasks/2026-11/README.md](./tasks/2026-11/README.md) — current month
 
 ## Recent Task Records
+
+- [Shared-host migration](./build-deployment.md#shared-host-migration) — verified
+  operator-run kit; local hosting remains active until destination acceptance.
 
 - [GitHub observations](./releases/github-observations.md) — merged read-only issue/PR/review/check source, local operation and return-to-interface handoff
 

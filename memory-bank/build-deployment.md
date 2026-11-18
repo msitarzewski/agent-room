@@ -1,8 +1,30 @@
 # Build and Deployment
 
-**Status:** Local tailnet deployment running; signed Linux production promotion separate
+**Status:** Local app and source ingestion healthy; backlog drained; destination staged, interactive cutover pending
 
-**Last updated:** 2026-10-17
+**Last updated:** 2026-11-17
+
+## Current Operational Check — 2026-11-17
+
+After the review below, Michael authorized source credential renewal through
+December 31. The replacement is installed and expires 2026-12-31 23:59:59 Central;
+its exact 99-project ingestion scope/actor and absolute expiry were verified in
+the database. A genuine queued observation returned 202 and the old expired
+token was revoked. Subsequent recovery backed up the queue, rescheduled only
+401 retry timers under the collector lock, and reloaded the same publisher.
+All 101,973 immutable records were preserved and the backlog has now drained:
+pending 0, quarantined 0, all 99 projects delivering successfully. No queue reset
+or remote activation. The early remote privilege preflight described below now
+runs before any local shutdown; operator sudo input remains necessary.
+
+The system walkthrough passes local readiness, HTTPS, OIDC login, 99-project
+access and live connection. Remote staging never activated; local GitHub is
+still disabled and the migration remains in fencing. Sentry's ingestion token
+expired November 14: collection is current but per-project delivery is 401 and
+roughly 100,500 observations are durably queued. Renew the exact-scoped source
+credential and verify queue drainage before resuming cutover; do not reset the
+queue or checkpoint. The commands below describe the prepared migration flow,
+not proof that the destination is live. Actual review evidence stays ignored.
 
 ## Local Tailnet Deployment
 
@@ -141,7 +163,9 @@ sessions. Actual access changes rotate sessions as before. Publisher tokens
 use exact project IDs and only `event:ingest,source:sentry`; no wildcard,
 administration, database access, or resource replacement is granted.
 
-The local token has a 30-day lifetime; its actual expiry and ID are in
+The original local token used a 30-day lifetime and expired November 14. Its
+operator-approved replacement expires at the end of December 31, 2026 Central;
+the exact UTC expiry, local expiry and current ID are in
 `data/local/sentry/publisher-metadata.json`. Before expiry, create a replacement
 with the same exact scopes, atomically replace the mode-0600 token file, verify
 delivery, then revoke the previous token using the CLI. No collector restart is
@@ -202,6 +226,137 @@ Presence expires after five minutes. Report idle/closed at the end of actual
 work, and revoke temporary acceptance credentials when testing is complete.
 See `README.md#agent-coordination` for the command and
 `releases/agent-coordination-workspace.md` for acceptance evidence.
+
+## Shared-host Migration
+
+Michael approved moving the local instance to the operator-designated shared
+Linux host. Its canonical host guide requires additive, idempotent scripts that
+Michael executes. Read-only SSH verified Linux/amd64, Docker access, the site
+hardener and available proposed ports. Operator staging has now provisioned the
+site and restored both snapshots; the application is not activated. No destination
+change has been made by the assistant. Exact inventory, hostname, addresses, signing material, snapshots
+and checkpoint data stay under ignored `data/local/migration/`.
+
+This shared-host path is separate from the dedicated-host production installer
+below. Do not run `install-host.sh` or `configure-instance.sh` on the shared host:
+they manage native PostgreSQL and system-wide configuration. The selected move
+keeps access private over Tailscale; no edge/DNS/shared Caddyfile changes occur.
+
+### Prepared layout and authority
+
+- Immutable verified release under `/srv/www/agentroom/releases/<source-revision>`
+  with a `current` selector. Code belongs to the deployer and isolated site group.
+- Native app and GitHub collector supervised as exactly `agentroom-web` and
+  `agentroom-github`, running as `site_agentroom`; neither runs as the deployer.
+- PostgreSQL and persistent Dex use the app-only `agentroom-host` Compose project
+  and `agentroom-host-postgres` named volume. Other Docker projects and the host's
+  MySQL/native PostgreSQL configuration are outside this deployment.
+- App and identity provider retain loopback listeners. Only private Tailscale
+  HTTPS ports 4445/4446 are added, with ownership checks refusing occupied routes.
+  The adapter/admin/database ports remain loopback-only.
+- GitHub's owner-only queue/token/config live in
+  `/var/lib/agentroom-shared/github`, outside the recursively hardened code tree.
+  The source adapter checks runtime ownership and 0700/0600, so the site hardener
+  must not reset those private files to deployer ownership.
+- The canonical site hardener runs unmodified. Pre-adding the site group avoids
+  its Caddy restart branch. It still performs its documented graceful PHP-FPM
+  reload; this is an operator-visible shared-host side effect.
+
+`deploy/prepare-migration.py` snapshots both existing databases, artifacts and
+the GitHub SQLite queue using database-aware backup, preserving source identities
+and sequence numbers. It retains the existing Dex static subject, bcrypt hash,
+client ID/secret, identity database and app/session credentials. A changed login
+subject would create a different read-only account and lose the existing grants.
+Preparation verifies the signed release; the target re-verifies signature,
+provenance and full file inventory before provisioning. No development identity
+fixture is promoted and no release is rebuilt on the destination.
+Private baseline hashes cover local config, credentials, native binaries and
+collector code before preparation reads them. Snapshot export checks the same
+baseline before and after copying; a rotation or runtime change requires fresh
+preparation rather than combining new database state with stale credentials.
+
+### Operator execution
+
+The actual private bundle is `data/local/migration/bundle`. From this checkout,
+Michael runs the following commands in a normal interactive terminal; remote
+scoped provisioning prompts for sudo when necessary:
+
+Use an actual Terminal/iTerm window. The app's shell-command shortcut does not
+provide an interactive terminal; the helper rejects it before any SSH operation
+and now prints the specific terminal requirement. Staging is already complete;
+the next operator step is `cutover`.
+
+```sh
+python3 -B deploy/run-migration.py --bundle data/local/migration/bundle stage
+python3 -B deploy/run-migration.py --bundle data/local/migration/bundle cutover
+python3 -B deploy/run-migration.py --bundle data/local/migration/bundle check
+```
+
+`stage` uploads the private bundle, provisions only the app's own slice and
+rehearses database restoration. It does not activate the destination app or stop
+local hosting. Before any local shutdown, `cutover` uses the reviewed local
+shared-host helper inline over an operator SSH TTY to preflight the exact
+previously uploaded staged manifest, signature, host identity, private listeners
+and sudo access. It does not replace the staged helper or upload a new bundle
+for that check. A failed preflight leaves local services and checkpoint phase
+unchanged. Separate later SSH sessions may ask for sudo again; no password or
+cross-TTY privilege cache is stored.
+
+Once that preflight passes, `cutover` fences local app/GitHub/Sentry publishers, proves their
+processes/listeners stopped, takes a fresh final snapshot, re-provisions/restores
+that exact bundle, then activates and checks the destination. A rehearsal
+snapshot cannot activate. Activation intent is durable before the remote call;
+after uncertainty, the tool never silently reimports data or resumes the old app.
+Both initial and final snapshots and upload history are retained privately.
+After successful remote checks, tunnel and source resumption, the orchestrator
+preserves the old deployment record and writes `data/local/deployment.json` as an
+explicit pointer to `data/local/migration/orchestrator.json`, with remote active
+URL/provenance and local retirement state. This avoids treating the old local
+record as evidence that the app still runs on the workstation after a move.
+
+After successful remote checks, a supervised private SSH tunnel forwards the
+Mac's existing loopback adapter endpoint to the destination adapter. Only local
+Sentry resumes; its source token, path bindings and delivery queue remain local.
+Old app/GitHub hosting must stay disabled across Mac login. The tunnel must also
+autoload at login so Sentry cannot restart without a persistent transport.
+
+Open the new URL from the private bundle's `metadata.json`, sign in, verify the
+existing project grants and source freshness, and accept browser/immersive
+behavior on the actual device. Only then run:
+
+```sh
+python3 -B deploy/run-migration.py --bundle data/local/migration/bundle \
+  --confirm REMOTE_BROWSER_ACCEPTED retire
+```
+
+`retire` repeats remote checks and stops only the old local Dex/PostgreSQL and
+app-owned Serve routes. It keeps Sentry, its SSH tunnel, checkouts, private data
+and recovery snapshots. Remote GitHub/app availability no longer depends on the
+Mac; local Sentry freshness still ages while the Mac sleeps.
+
+After remote writes begin, returning to the old database is a recovery migration,
+not merely restarting the old binary. Preserve the destination's new data before
+any rollback. The shared-host move does not inherit the dedicated-host native
+pgBackRest setup; encrypted off-host backup destination/retention and a scheduled
+restore-tested backup job remain operational work before claiming full production
+backup acceptance. Current local snapshot rehearsal is not an off-host policy.
+
+### Verification and current boundary
+
+The migration suite has 76 tests, alongside the 53 existing source collector tests.
+ShellCheck, Bash syntax, deployment/static/completeness and source secret checks
+pass. Migration unit tests and shell validation are under `tests/deployment/` and
+`deploy/shared-host.sh validate`. A private isolated Docker rehearsal restored
+both real database dumps successfully and removed its disposable container/data.
+Final activation, host restart recovery, actual source delivery over the tunnel,
+device acceptance and retirement require the operator-run destination commands;
+do not describe this host as live until those checks actually pass.
+
+If cutover previously stopped during local fencing with `local writer remains
+loaded`, the helper now waits for asynchronous launchd teardown and captured PID
+exit instead of assuming `bootout` means immediate removal. A timeout still
+forbids final export. The current checkpoint can resume with the same `cutover`
+command; do not clear it or re-enable the old GitHub publisher.
 
 ## Production Topology
 
