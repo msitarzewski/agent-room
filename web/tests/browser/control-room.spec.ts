@@ -228,6 +228,52 @@ test("keyboard users can bypass navigation", async ({ page }) => {
   await expect(page.locator("#main-content")).toBeFocused();
 });
 
+test("navigates timeline history with the keyboard", async ({ page }) => {
+  await boot(page);
+  const event = data["/api/v1/events"]![0] as { cursor: number; id: string; subject_id: string; type: string };
+  const recent = Array.from({ length: 50 }, (_, index) => ({
+    ...event, cursor: event.cursor + 49 - index, id: `event_${index + 1}`, subject_id: `task_${index + 1}`,
+  }));
+  const completedCursors: Array<string | null> = [];
+  // Development StrictMode can abort a mount request before it receives a response.
+  page.on("requestfinished", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/v1/events") completedCursors.push(url.searchParams.get("cursor"));
+  });
+  await page.route("**/api/v1/events?*", (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    const older = { ...event, cursor: 7, type: "task.observed", id: "old-event", subject_id: "older-task" };
+    const showOlder = params.has("cursor") || params.get("event_type") === older.type;
+    return route.fulfill({ json: {
+      items: showOlder ? [older] : recent, next_cursor: showOlder ? null : event.cursor,
+      event_types: params.get("include_types") === "true" ? [event.type, older.type] : undefined,
+    } });
+  });
+  await page.getByRole("link", { name: /Timeline/ }).click();
+  const controls = page.getByRole("navigation", { name: "Timeline pages" });
+  const older = controls.getByRole("button", { name: "Older" });
+  const newer = controls.getByRole("button", { name: "Newer" });
+  await expect(newer).toBeDisabled();
+  await older.focus();
+  await older.press("Enter");
+  await expect(page.getByRole("heading", { name: "task · older-task" })).toBeVisible();
+  await expect(older).toBeDisabled();
+  await expect.poll(() => completedCursors).toEqual([null, String(event.cursor)]);
+  await newer.focus();
+  await newer.press("Enter");
+  await expect(page.getByRole("heading", { name: "task · task_1", exact: true })).toBeVisible();
+  await expect(newer).toBeDisabled();
+  const types = page.getByRole("combobox", { name: "Event type" });
+  await expect(types.locator("option:checked")).toHaveText("All event types");
+  await types.selectOption("task.observed");
+  await expect(page.getByRole("heading", { name: "task · older-task" })).toBeVisible();
+  await expect(older).toBeDisabled();
+  await expect(newer).toBeDisabled();
+  await types.selectOption({ label: "All event types" });
+  await expect(page.getByRole("heading", { name: "task · task_1", exact: true })).toBeVisible();
+  await expect(older).toBeEnabled();
+});
+
 test("keeps 99 project contexts calm, exposes the actual source blocker and restores grouped focus", async ({ page }, testInfo) => {
   await boot(page);
   const now = new Date().toISOString();

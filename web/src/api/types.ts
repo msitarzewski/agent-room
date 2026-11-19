@@ -255,6 +255,10 @@ export interface Page<T> {
   next_cursor?: string | number | null;
 }
 
+export interface EventPage extends Page<SemanticEvent> {
+  event_types?: string[];
+}
+
 export type PageCursor = string | number;
 
 export interface ProjectOverview {

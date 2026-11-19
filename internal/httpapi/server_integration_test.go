@@ -12,7 +12,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -255,6 +257,126 @@ func TestServerAndMCPIntegrationBoundaries(t *testing.T) {
 				}
 				time.Sleep(time.Millisecond)
 			}
+		}
+	})
+
+	t.Run("timeline pages start at newest and filter the full project history", func(t *testing.T) {
+		const project = "timeline-paging"
+		for _, key := range []string{project, "timeline-other"} {
+			if _, err := repository.EnsureProject(ctx, key, "Timeline paging"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		seed := func(project, id string) {
+			t.Helper()
+			_, err := service.Create(ctx, setupActor, domain.ResourceTask, project, "seed-"+id, domain.Task{Base: domain.Base{ID: id}, Title: "Timeline task", Status: "ready", Priority: "normal"}, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, id := range []string{"earliest", "task-mcp", "third", "fourth"} {
+			seed(project, id)
+		}
+		seed("timeline-other", "timeline-other-task")
+		seed(project, "timeline_%new")
+		getPage := func(parameters string) app.EventPage {
+			t.Helper()
+			resp := api(http.MethodGet, "/api/v1/events?project_id="+project+"&order=desc&"+parameters, nil, nil)
+			defer resp.Body.Close()
+			var page app.EventPage
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("%s status %d", parameters, resp.StatusCode)
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+				t.Fatal(err)
+			}
+			return page
+		}
+		newest := getPage("limit=2")
+		if len(newest.Items) != 2 || newest.Items[0].SubjectID != "timeline_%new" || newest.Items[1].SubjectID != "fourth" || newest.NextCursor != newest.Items[1].Cursor {
+			t.Fatalf("initial page: %+v", newest)
+		}
+		seed(project, "timeline-later")
+		older := getPage("limit=2&cursor=" + strconv.FormatInt(newest.NextCursor, 10))
+		if len(older.Items) != 2 || older.Items[0].SubjectID != "third" || older.Items[1].SubjectID != "task-mcp" || older.NextCursor != older.Items[1].Cursor {
+			t.Fatalf("older page: %+v", older)
+		}
+		for q, subject := range map[string]string{"TaSk-McP": "task-mcp", "_%": "timeline_%new", "TASK.CREATED": "timeline-later", "SeTuP": "timeline-later", "TaSk": "timeline-later"} {
+			page := getPage("limit=1&q=" + url.QueryEscape(q))
+			if len(page.Items) != 1 || page.Items[0].SubjectID != subject {
+				t.Fatalf("q=%q: %+v", q, page)
+			}
+		}
+		if page := getPage("q=timeline-other-task"); page.Items == nil || len(page.Items) != 0 || page.NextCursor != 0 {
+			t.Fatalf("project scope: %+v", page)
+		}
+		insert := func(project, id, eventType string, at time.Time, subject domain.ResourceType, payload string) int64 {
+			t.Helper()
+			var cursor int64
+			err := repository.Pool().QueryRow(ctx, `INSERT INTO events(id,project_id,event_type,subject_type,subject_id,actor_id,occurred_at,schema_version,payload)
+				VALUES($1,$2,$3,$4,$1,'importer',$5,1,$6) RETURNING cursor`, id, project, eventType, subject, at, payload).Scan(&cursor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return cursor
+		}
+		stamp := time.Date(2021, 5, 6, 7, 8, 9, 0, time.UTC)
+		const observed = "project.observed"
+		a := insert(project, "import-a", observed, stamp, domain.ResourceProject, "{}")
+		b := insert(project, "import-b", observed, stamp, domain.ResourceProject, "{}")
+		c := insert(project, "import-c", observed, stamp.Add(time.Hour), domain.ResourceProject, "{}")
+		d := insert(project, "import-backfill", observed, stamp.Add(-time.Hour), domain.ResourceProject, "{}")
+		foreign := insert("timeline-other", "import-foreign", "foreign.only", stamp, domain.ResourceProject, "{}")
+		private := insert(project, "private-request", "private.only", stamp, domain.ResourceCoordinationRequest, `{"resource":{"owner_type":"agent","owner_id":"elsewhere"}}`)
+		insert(project, "shared-request", "recipient.only", stamp, domain.ResourceCoordinationRequest, `{"resource":{"recipient":{"type":"agent","id":"reader"}}}`)
+		labels := []string{"private.only", observed, "recipient.only", "task.created"}
+		for _, tc := range []struct {
+			after int64
+			want  []int64
+			next  int64
+		}{{0, []int64{c, b}, b}, {b, []int64{a, d}, 0}} {
+			params := "event_type=" + observed + "&q=IMPORT&limit=2&include_types=true"
+			if tc.after != 0 {
+				params += "&cursor=" + strconv.FormatInt(tc.after, 10)
+			}
+			page := getPage(params)
+			var cursors []int64
+			for _, item := range page.Items {
+				cursors = append(cursors, item.Cursor)
+			}
+			if !slices.Equal(cursors, tc.want) || page.NextCursor != tc.next || !slices.Equal(page.EventTypes, labels) {
+				t.Fatalf("%s: cursors=%v next=%d types=%v", params, cursors, page.NextCursor, page.EventTypes)
+			}
+		}
+		if page := getPage("event_type=PROJECT.OBSERVED&include_types=true"); len(page.Items) != 0 || !slices.Equal(page.EventTypes, labels) {
+			t.Fatalf("exact type filter and independent labels: %+v", page)
+		}
+		if page := getPage("event_type=task.created&q=import&include_types=false"); len(page.Items) != 0 || page.EventTypes != nil {
+			t.Fatalf("combined type and text filters: %+v", page)
+		}
+		reader := app.Actor{ID: "reader", Capabilities: map[string]struct{}{"event:read": {}}}
+		for _, tc := range []struct {
+			coordination bool
+			labels       []string
+		}{{false, []string{observed, "task.created"}}, {true, []string{observed, "recipient.only", "task.created"}}} {
+			if tc.coordination {
+				reader.Capabilities["coordination:read"] = struct{}{}
+			}
+			page, err := service.ListEvents(ctx, reader, project, app.EventQuery{Descending: true, EventType: "private.only", IncludeTypes: true})
+			if err != nil || len(page.Items) != 0 || !slices.Equal(page.EventTypes, tc.labels) {
+				t.Fatalf("reader labels %+v: %+v err=%v", tc, page, err)
+			}
+			_, err = service.ListEvents(ctx, reader, project, app.EventQuery{Descending: true, Cursor: private})
+			if err == nil {
+				t.Fatal("accepted private pivot")
+			}
+		}
+		for _, query := range []string{"order=unknown", "order=desc&cursor=oops", "order=desc&cursor=0", "order=desc&limit=-1", "order=desc&q=%00", "event_type=%00", "include_types=yes", fmt.Sprintf("order=desc&cursor=%d", foreign)} {
+			response := api(http.MethodGet, "/api/v1/events?project_id="+project+"&"+query, nil, nil)
+			if response.StatusCode != http.StatusBadRequest {
+				t.Fatalf("%s status %d", query, response.StatusCode)
+			}
+			_ = response.Body.Close()
 		}
 	})
 

@@ -57,6 +57,8 @@ export function useProjectResource<T>(
   projectId: string | null,
   loader: (projectId: string, signal: AbortSignal) => Promise<T>,
   isEmpty: (value: T) => boolean,
+  subscribe = subscribeProjectChanges,
+  initialDelay?: number,
 ) {
   const [record, setRecord] = useState(() => initialResource<T>(projectId));
   const command = useRef<{ projectId: string; refresh: () => Promise<void> } | null>(null);
@@ -71,6 +73,7 @@ export function useProjectResource<T>(
     let controller: AbortController | null = null;
     let running: Promise<void> | null = null;
     let pending = false;
+    let initialTimer: number | undefined;
 
     const execute = async () => {
       do {
@@ -102,6 +105,7 @@ export function useProjectResource<T>(
       } while (active && pending);
     };
     const refresh = (): Promise<void> => {
+      window.clearTimeout(initialTimer);
       if (!active) return Promise.resolve();
       if (running) {
         pending = true;
@@ -111,7 +115,8 @@ export function useProjectResource<T>(
       return running;
     };
     command.current = { projectId, refresh };
-    const unsubscribe = subscribeProjectChanges(projectId, () => { void refresh(); }, () => {
+    const unsubscribe = subscribe(projectId, () => { void refresh(); }, () => {
+      window.clearTimeout(initialTimer);
       ++generation;
       pending = false;
       controller?.abort();
@@ -121,14 +126,16 @@ export function useProjectResource<T>(
         error: "Access to this project has expired or been revoked.",
       });
     });
-    void refresh();
+    if (initialDelay !== undefined) initialTimer = window.setTimeout(refresh, initialDelay);
+    else void refresh();
     return () => {
       active = false;
+      window.clearTimeout(initialTimer);
       controller?.abort();
       unsubscribe();
       command.current = null;
     };
-  }, [projectId, loader, isEmpty]);
+  }, [projectId, loader, isEmpty, subscribe, initialDelay]);
 
   const refresh = useCallback((): Promise<void> => {
     const current = command.current;

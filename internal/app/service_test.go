@@ -133,15 +133,30 @@ func (r *memoryRepository) Ingest(_ context.Context, events []domain.Event) erro
 	r.events = append(r.events, events...)
 	return nil
 }
-func (r *memoryRepository) Events(_ context.Context, projectID string, after int64, limit int) (EventPage, error) {
+func (r *memoryRepository) Events(_ context.Context, projectID string, actor Actor, q EventQuery) (EventPage, error) {
+	return q.ReadVisiblePage(actor, func(q EventQuery) (EventPage, error) {
+		return r.readEvents(projectID, q)
+	})
+}
+
+func (r *memoryRepository) readEvents(projectID string, q EventQuery) (EventPage, error) {
 	items := make([]domain.Event, 0)
-	for _, event := range r.events {
-		if event.ProjectID == projectID && event.Cursor > after && len(items) < limit {
-			items = append(items, event)
+	for i := range r.events {
+		if q.Descending {
+			i = len(r.events) - 1 - i
 		}
+		e := r.events[i]
+		if e.ProjectID != projectID || (q.Descending && q.Cursor != 0 && e.Cursor >= q.Cursor) || (!q.Descending && e.Cursor <= q.Cursor) {
+			continue
+		}
+		if len(items) == q.Limit {
+			return EventPage{Items: items, NextCursor: items[len(items)-1].Cursor}, nil
+		}
+		items = append(items, e)
 	}
 	return EventPage{Items: items}, nil
 }
+
 func (r *memoryRepository) Overview(context.Context, string) (map[string]any, error) {
 	return r.overview, nil
 }
@@ -195,6 +210,50 @@ type componentRepository struct {
 
 func (r componentRepository) ComponentHealth(context.Context) (map[string]any, error) {
 	return r.components, r.err
+}
+
+func TestTimelinePaginatesVisibleEvents(t *testing.T) {
+	ctx := context.Background()
+	repo := newMemoryRepository()
+	other := actor("other", "event:read", "coordination:read")
+	owner := actor("agent", "event:read", "coordination:read")
+	public := func(cursor int64) domain.Event {
+		return domain.Event{Cursor: cursor, ProjectID: "project", SubjectType: domain.ResourceTask}
+	}
+	private := func(cursor int64) domain.Event {
+		e := public(cursor)
+		e.SubjectType = domain.ResourceCoordinationRequest
+		e.Payload = json.RawMessage(`{"resource":{"owner_id":"agent","owner_type":"agent"}}`)
+		return e
+	}
+	repo.events = []domain.Event{private(10), public(88), private(94), private(145), private(189), public(201), public(230), private(280)}
+	svc := NewService(repo, nil)
+	for _, tc := range []struct {
+		actor  Actor
+		cursor int64
+		want   []int64
+		next   int64
+	}{
+		{other, 0, []int64{230, 201}, 201},
+		{other, 201, []int64{88}, 0},
+		{other, 88, []int64{}, 0},
+		{owner, 0, []int64{280, 230}, 230},
+	} {
+		page, err := svc.ListEvents(ctx, tc.actor, "project", EventQuery{Descending: true, Cursor: tc.cursor, Limit: 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := make([]int64, 0)
+		for _, e := range page.Items {
+			got = append(got, e.Cursor)
+		}
+		if !reflect.DeepEqual(got, tc.want) || page.NextCursor != tc.next {
+			t.Fatalf("actor %s before %d: got %v / %d, want %v / %d", tc.actor.ID, tc.cursor, got, page.NextCursor, tc.want, tc.next)
+		}
+	}
+	if _, err := svc.ListEvents(ctx, actor("none"), "project", EventQuery{Descending: true}); !errors.Is(err, ErrDenied) {
+		t.Fatalf("unauthorized event page: %v", err)
+	}
 }
 
 func TestServiceReadSurfacesAndBrief(t *testing.T) {

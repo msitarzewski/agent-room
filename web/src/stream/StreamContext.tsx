@@ -31,6 +31,7 @@ export function subscribeProjectChanges(
   projectId: string,
   onChange: () => void,
   onDenied: () => void,
+  shouldRefresh?: (message: StreamMessage) => boolean,
 ): () => void {
   let timer: number | undefined;
   const receive = (event: Event) => {
@@ -42,6 +43,7 @@ export function subscribeProjectChanges(
       onDenied();
       return;
     }
+    if (shouldRefresh && !shouldRefresh(message)) return;
     if (timer !== undefined) return;
     timer = window.setTimeout(() => {
       timer = undefined;
@@ -73,7 +75,7 @@ export function StreamProvider({ children }: { children: ReactNode }) {
   const socketRef = useRef<WebSocket | null>(null);
   const retryRef = useRef(0);
   const timerRef = useRef<number | null>(null);
-  const scopeRef = useRef({ projectId, session });
+  const scopeRef = useRef({ projectId, session, opened: false });
 
   const reconnect = useCallback(() => {
     retryRef.current = 0;
@@ -83,7 +85,7 @@ export function StreamProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const sameScope = scopeRef.current.projectId === projectId && scopeRef.current.session === session;
-    scopeRef.current = { projectId, session };
+    if (!sameScope) scopeRef.current = { projectId, session, opened: false };
     setConnectedAt(null);
     setLastReceivedAt(null);
     if (!sameScope || !session || !projectId) setLastMessageAt(null);
@@ -116,7 +118,9 @@ export function StreamProvider({ children }: { children: ReactNode }) {
         const openedAt = new Date().toISOString();
         setConnectedAt(openedAt);
         setStatus("connected");
-        publish({ type: "stream_connected", cursor: 0, occurred_at: openedAt });
+        const reconnected = scopeRef.current.opened;
+        scopeRef.current.opened = true;
+        publish({ type: "stream_connected", cursor: 0, occurred_at: openedAt, data: { reconnected } });
       });
       socket.addEventListener("message", (event) => {
         if (disposed || socketRef.current !== socket) return;
