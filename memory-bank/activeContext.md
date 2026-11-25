@@ -1,12 +1,53 @@
 # Active Context
 
-**Last updated:** 2026-11-17
+**Last updated:** 2026-11-24
 
-**State:** APPLY
+**State:** DOCS
 
-**Substate:** WAITING_TOOL
+**Substate:** IDLE
 
-**Task status:** DESTINATION CUTOVER READY — SOURCE CAUGHT UP, INTERACTIVE SUDO REQUIRED
+**Task status:** Shared-host deployment is live and healthy (`086d31a`). Completed observability, Sentry heartbeat/coverage, CLI token-expiry, Attention brief wording, and shared-host `backup`/`upgrade`/`check` hardening on `feat/shared-host-migration`. [Task record](tasks/2026-11/241126_observability-and-ops-hardening.md)
+
+The Timeline pager and event-type filter went live at 18:58 CST on Nov 18. Signed-in Safari and the production API for a high-volume observed project verified the release. [Timeline task record](tasks/2026-11/181126_timeline-pagination.md)
+
+## Final snapshot recovery — 2026-11-18
+
+The first attempt stopped at the missing canonical hardener during final provisioning. The host's committed hardener was restored and verified. Both remote installation markers still identified the rehearsal, and the private upload matched the final export. The three local writers were unloaded. Michael approved and applied the retry patch on `feat/shared-host-migration`. All 136 migration and collector tests passed in the deployment checkout.
+
+The retry preserved the restored databases. The remote health checks passed, including fresh GitHub delivery. The runner completed the local Sentry handoff and wrote the active deployment record. The old local app and GitHub launch agents are unloaded. [Recovery record](tasks/2026-11/181126_cutover-recovery.md)
+
+## Interactive Cutover Started — 2026-11-17
+
+2026-11-18 verification: the earlier Terminal window still existed, but no
+migration process held the orchestration lock. The initial window inventory
+used a bad AppleScript delimiter; its absence result was incorrect. The same
+authorized command was restarted in a new dedicated native Terminal window.
+Direct property checks now confirm the current `Agent Room migration` window
+is visible, unminimized and frontmost on the deployer's active console desktop.
+The inactive previous attempt is labelled separately. No terminal contents or
+password input were read. The checkpoint remains in fencing with no final
+export/activation at the last check; current private window metadata records
+the verified handle. Enter sudo only in the foreground Terminal prompt.
+
+Michael explicitly asked the assistant to run the prepared cutover. This
+authorizes executing that reviewed script as the deploy user; all shared-host
+isolation and private-data rules still apply. The first PTY invocation verified
+the signed release and reached the destination's sudo password prompt before
+any new local shutdown/export. It was cancelled there, with no activation.
+
+The assistant then opened and started the same command in a dedicated native
+Terminal window titled `Agent Room migration`, allowing Michael to enter the
+sudo password directly into the terminal rather than chat/tool arguments.
+The command is running and the checkpoint remains at its prior `fencing` phase
+while the early remote privilege preflight waits. Source ingestion is caught
+up and no final export/remote activation has occurred at the last check.
+
+Private window handle: `data/local/migration/operator-terminal.json`. Monitor
+checkpoint phases and Terminal busy state without reading credential input.
+Once sudo input is supplied the existing script proceeds automatically; later
+SSH phases may prompt again. Verify remote health, actual login, GitHub delivery
+and Sentry-over-tunnel receipt before claiming the move complete. Never weaken
+sudo, store a password or infer authorization from an elapsed wait.
 
 ## Destination Cutover Continuation — 2026-11-17
 

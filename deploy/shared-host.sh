@@ -172,11 +172,15 @@ PY
 }
 
 compose() { docker compose --project-name agentroom-host --file "$SITE/compose.json" "$@"; }
-marker() { [[ -f "$SITE/.shared-host-$1" ]] && [[ "$(cat "$SITE/.shared-host-$1")" == "$BUNDLE_DIGEST" ]]; }
+marker() { [[ -f "$SITE/.shared-host-$1" ]] && [[ "$(cat "$SITE/.shared-host-$1")" == "${2:-$BUNDLE_DIGEST}" ]]; }
 write_marker() { printf '%s\n' "$BUNDLE_DIGEST" > "$SITE/.shared-host-$1"; chmod 0640 "$SITE/.shared-host-$1"; }
 provision_intent() {
   [[ -f "$HOME/.agentroom-shared-host-intent" && ! -L "$HOME/.agentroom-shared-host-intent" ]] &&
-    [[ "$(cat "$HOME/.agentroom-shared-host-intent")" == "$BUNDLE_DIGEST" ]]
+    [[ "$(cat "$HOME/.agentroom-shared-host-intent")" == "${1:-$BUNDLE_DIGEST}" ]]
+}
+
+require_hardener() {
+  [[ -f "$HOME/harden-site.sh" && ! -L "$HOME/harden-site.sh" && -r "$HOME/harden-site.sh" ]] || fail 'canonical ~/harden-site.sh is required'
 }
 
 supervisor_state() {
@@ -332,7 +336,7 @@ provision() {
     note 'Already activated; provisioning makes no changes.'; return
   fi
   require_stopped
-  [[ -f "$HOME/harden-site.sh" && ! -L "$HOME/harden-site.sh" ]] || fail 'canonical ~/harden-site.sh is required'
+  require_hardener
   # Persist ownership intent before group/user/tree changes, permitting an exact
   # bundle to resume after interruption while rejecting unrelated existing sites.
   printf '%s\n' "$BUNDLE_DIGEST" > "$HOME/.agentroom-shared-host-intent"
@@ -501,14 +505,174 @@ check() {
   note 'Own app/collector identities, both databases, private Serve, readiness and public API boundaries passed.'
 }
 
+check_preflight_markers() {
+  local staged="${1:-}"
+  if [[ -n "$staged" ]]; then
+    # A final upload replaces the incoming directory before provision updates
+    # the site's markers. Only these two checkpointed manifests may appear.
+    [[ ! -e "$SITE/.shared-host-activated" ]] || fail 'activation already recorded; refusing provisioning recovery'
+    require_hardener
+    require_stopped
+    if marker provisioned "$staged" && marker restored "$staged"; then
+      provision_intent "$staged" || provision_intent || fail 'provisioning intent differs from the recovery checkpoint'
+      return
+    fi
+    if ! marker provisioned || ! provision_intent; then fail 'final provisioning markers differ from the recovery checkpoint'; fi
+    # Provision writes its marker before removing the old restore marker.
+    if [[ -e "$SITE/.shared-host-restored" ]] && ! marker restored && ! marker restored "$staged"; then
+      fail 'restore marker differs from the recovery checkpoint'
+    fi
+  else
+    if ! marker provisioned || ! marker restored; then fail 'preflight requires this exact staged bundle to be provisioned and restored'; fi
+    if [[ -f "$SITE/.shared-host-activated" ]]; then marker activated || fail 'preflight found a different active bundle'; fi
+    if [[ "$(jq -r '.kind' "$BUNDLE/snapshot.json")" == rehearsal ]]; then require_hardener; fi
+  fi
+}
+
+backup_site() {
+  local out_root="$1"
+  [[ -f "$SITE/.shared-host-activated" && -f "$SITE/compose.json" && -f "$SITE/dex-config.json" ]] || fail 'active shared-host installation is required for backup'
+  python3 - "$out_root" <<'PY'
+import pathlib, sys
+raw = sys.argv[1]
+root = pathlib.Path(raw)
+if not root.is_absolute() or raw != str(root) or '..' in root.parts or root == pathlib.Path('/'):
+    raise SystemExit('backup output directory must be a normalized absolute path')
+for parent in [root, *root.parents]:
+    if parent.is_symlink():
+        raise SystemExit('backup output path may not contain symlinks')
+PY
+  local stamp dest pg_admin app_db identity_db current_release
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  install -d -m 0700 "$out_root"
+  dest="$out_root/agentroom-backup-$stamp"
+  install -d -m 0700 "$dest"
+  pg_admin="$(jq -er '.services.postgres.environment.POSTGRES_USER' "$SITE/compose.json")"
+  app_db="$(jq -er '.services.postgres.environment.POSTGRES_DB' "$SITE/compose.json")"
+  identity_db="$(jq -er '.storage.config.database' "$SITE/dex-config.json")"
+  current_release="$(readlink "$SITE/current" 2>/dev/null || printf 'unknown')"
+
+  compose exec -T postgres pg_dump -Fc -U "$pg_admin" -d "$app_db" > "$dest/app.dump"
+  compose exec -T postgres pg_restore --list < "$dest/app.dump" >/dev/null || fail 'app database backup failed verification'
+  compose exec -T postgres pg_dump -Fc -U "$pg_admin" -d "$identity_db" > "$dest/identity.dump"
+  compose exec -T postgres pg_restore --list < "$dest/identity.dump" >/dev/null || fail 'identity database backup failed verification'
+  chmod 0600 "$dest/app.dump" "$dest/identity.dump"
+
+  if [[ -d "$SITE/storage/artifacts" ]]; then
+    tar -czf "$dest/artifacts.tar.gz" -C "$SITE/storage" artifacts
+    chmod 0600 "$dest/artifacts.tar.gz"
+  fi
+  if sudo test -f "$RUNTIME/state/queue.sqlite3"; then
+    sudo -u site_agentroom python3 - "$RUNTIME/state/queue.sqlite3" "$dest/github-queue.sqlite3" <<'PY'
+import sqlite3, sys
+src = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
+dst = sqlite3.connect(sys.argv[2])
+try:
+    src.backup(dst)
+finally:
+    dst.close()
+    src.close()
+PY
+    sudo chown "$(id -un):$(id -gn)" "$dest/github-queue.sqlite3"
+    chmod 0600 "$dest/github-queue.sqlite3"
+  fi
+
+  python3 - "$dest" "$stamp" "$current_release" "$app_db" "$identity_db" <<'PY'
+import hashlib, json, pathlib, sys
+dest = pathlib.Path(sys.argv[1])
+files = []
+for path in sorted(dest.iterdir()):
+    if path.is_file() and path.name != 'manifest.json':
+        files.append({'path': path.name, 'size': path.stat().st_size, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
+manifest = {'schema': 1, 'created_at': sys.argv[2], 'release': sys.argv[3], 'databases': {'app': sys.argv[4], 'identity': sys.argv[5]}, 'files': files}
+target = dest / 'manifest.json'
+target.write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
+target.chmod(0o600)
+PY
+  note "Verified shared-host backup written to $dest"
+}
+
+upgrade_release() {
+  local artifact="$1" pubkey="$2" verifier="${3:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/verify-artifact.sh}"
+  [[ -f "$SITE/.shared-host-activated" && -L "$SITE/current" ]] || fail 'active shared-host installation is required for upgrade'
+  [[ -f "$artifact" && ! -L "$artifact" && -f "$pubkey" && ! -L "$pubkey" && -f "$verifier" ]] || fail 'signed artifact, public key, and verify-artifact.sh are required'
+  local admin_addr admin_port scratch revision release_digest previous
+  admin_addr="$(awk -F= '$1=="AGENTROOM_ADMIN_ADDR"{gsub(/"/,"",$2); print $2}' "$SITE/agentroom.conf")"
+  admin_port="${admin_addr##*:}"
+  [[ "$admin_port" =~ ^[0-9]{4,5}$ ]] || fail 'unable to determine loopback admin port from agentroom.conf'
+
+  scratch="$(mktemp -d "${TMPDIR:-/tmp}/agentroom-upgrade-XXXXXXXX")"
+  mkdir "${scratch}/release"
+  if ! TMPDIR="${scratch}" bash "$verifier" --artifact "$artifact" --public-key "$pubkey" --extract-to "${scratch}/release" >/dev/null; then
+    rm -rf -- "$scratch"; fail 'signed release verification failed'
+  fi
+  revision="$(jq -er '.source_revision' "${scratch}/release/manifest.json")" || { rm -rf -- "$scratch"; fail 'release manifest missing source_revision'; }
+  [[ "$revision" =~ ^[a-f0-9]{40}$ ]] || { rm -rf -- "$scratch"; fail 'invalid release source_revision'; }
+  for rel in bin/agentroomd bin/agentroomctl web/index.html manifest.json; do
+    [[ -s "${scratch}/release/$rel" ]] || { rm -rf -- "$scratch"; fail "verified release missing $rel"; }
+  done
+  release_digest="$(sha256sum "${scratch}/release/manifest.json" | awk '{print $1}')"
+
+  if [[ -f "$SITE/.shared-host-release-$revision" ]]; then
+    [[ "$(cat "$SITE/.shared-host-release-$revision")" == "$release_digest" ]] || { rm -rf -- "$scratch"; fail 'existing release provenance mismatch'; }
+    diff -qr "${scratch}/release" "$SITE/releases/$revision" >/dev/null || { rm -rf -- "$scratch"; fail 'existing installed release differs'; }
+  else
+    mkdir -p "$SITE/releases/$revision"
+    cp -a "${scratch}/release/." "$SITE/releases/$revision/"
+    diff -qr "${scratch}/release" "$SITE/releases/$revision" >/dev/null || { rm -rf -- "$scratch"; fail 'release copy incomplete'; }
+    sudo chown -R michael:site_agentroom "$SITE/releases/$revision"
+    sudo chmod -R o-rwx "$SITE/releases/$revision"
+    printf '%s\n' "$release_digest" > "$SITE/.shared-host-release-$revision"
+    chmod 0640 "$SITE/.shared-host-release-$revision"
+  fi
+  rm -rf -- "$scratch"
+
+  sudo -u site_agentroom "$SITE/releases/$revision/bin/agentroomctl" --config "$SITE/agentroom.conf" migrate up
+  previous="$(readlink "$SITE/current")"
+  ln -sfn "releases/$revision" "$SITE/current"
+  sudo supervisorctl restart agentroom-web >/dev/null
+  if ! wait_status "http://127.0.0.1:$admin_port/readyz" 204; then
+    ln -sfn "$previous" "$SITE/current"
+    sudo supervisorctl restart agentroom-web >/dev/null || true
+    fail "upgraded release $revision failed readiness check; rolled back to $previous"
+  fi
+  note "Upgraded shared-host release to $revision (previous: $previous)."
+}
+
 main() {
-  [[ $# == 2 || ( $# == 3 && "$1" == preflight ) ]] || fail 'usage: shared-host.sh validate|provision|restore|start|check ABSOLUTE_BUNDLE; preflight ABSOLUTE_BUNDLE EXPECTED_MANIFEST_SHA256'
+  if [[ "${1:-}" == backup ]]; then
+    [[ $# == 2 ]] || fail 'usage: shared-host.sh backup ABSOLUTE_OUTPUT_DIR'
+    [[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] || fail 'destination must be Linux/amd64'
+    [[ "$(id -un)" == michael && "$(id -u)" != 0 ]] || fail 'run as michael; root execution is forbidden'
+    validate_operator_files
+    exec 9> "$HOME/.agentroom-shared-host.lock"
+    flock -n 9 || fail 'another Agent Room operation is running'
+    backup_site "$2"
+    return
+  fi
+  if [[ "${1:-}" == upgrade ]]; then
+    [[ $# == 3 || $# == 4 ]] || fail 'usage: shared-host.sh upgrade ABSOLUTE_ARTIFACT ABSOLUTE_PUBLIC_KEY [VERIFY_SCRIPT]'
+    [[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] || fail 'destination must be Linux/amd64'
+    [[ "$(id -un)" == michael && "$(id -u)" != 0 ]] || fail 'run as michael; root execution is forbidden'
+    validate_operator_files
+    exec 9> "$HOME/.agentroom-shared-host.lock"
+    flock -n 9 || fail 'another Agent Room operation is running'
+    sudo -v
+    safe_host_paths
+    upgrade_release "$2" "$3" "${4:-}"
+    return
+  fi
+  [[ $# == 2 || ( "$1" == preflight && ( $# == 3 || $# == 4 ) ) ]] || fail 'usage: shared-host.sh validate|provision|restore|start|check ABSOLUTE_BUNDLE; preflight ABSOLUTE_BUNDLE EXPECTED_MANIFEST_SHA256 [REHEARSAL_SHA256]; backup ABSOLUTE_OUTPUT_DIR; upgrade ABSOLUTE_ARTIFACT ABSOLUTE_PUBLIC_KEY'
   MODE="$1"; BUNDLE="$2"
   case "$MODE" in validate|preflight|provision|restore|start|check) ;; *) fail 'unknown mode' ;; esac
   command -v python3 >/dev/null || fail 'Python 3.11+ is required for bundle validation'
   BUNDLE_DIGEST="$(validate_bundle "$BUNDLE")" || fail 'bundle rejected before host mutation'
   if [[ "$MODE" == preflight ]]; then
-    [[ $# == 3 && "$3" =~ ^[a-f0-9]{64}$ && "$BUNDLE_DIGEST" == "$3" ]] || fail 'preflight staged manifest differs from the uploaded checkpoint'
+    [[ $# -ge 3 && "$3" =~ ^[a-f0-9]{64}$ && "$BUNDLE_DIGEST" == "$3" ]] || fail 'preflight staged manifest differs from the uploaded checkpoint'
+    if [[ $# == 4 ]]; then
+      [[ "$4" =~ ^[a-f0-9]{64}$ && "$4" != "$3" ]] || fail 'invalid rehearsal checkpoint for recovery'
+      jq -e '.kind == "final" and .source_fenced == true' "$BUNDLE/snapshot.json" >/dev/null || fail 'recovery requires a fenced final upload'
+    fi
   fi
   if [[ "$MODE" == validate ]]; then note 'Bundle inventory, hashes, paths and shared-host configuration boundaries passed (signature is checked on Linux before provisioning).'; return; fi
   if [[ "$MODE" == start ]]; then
@@ -529,9 +693,8 @@ main() {
   flock -n 9 || fail 'another Agent Room migration command is running'
   preflight
   if [[ "$MODE" == preflight ]]; then
-    if ! marker provisioned || ! marker restored; then fail 'preflight requires this exact staged bundle to be provisioned and restored'; fi
-    if [[ -f "$SITE/.shared-host-activated" ]]; then marker activated || fail 'preflight found a different active bundle'; fi
-    note 'Staged bundle, signature, host identity, scoped services and sudo access verified before local fencing. Later SSH sessions may prompt for sudo again.'
+    check_preflight_markers "${4:-}"
+    note 'Uploaded bundle, signature, host identity, site markers and sudo access verified. Later SSH sessions may prompt for sudo again.'
     return
   fi
   "$MODE"

@@ -189,7 +189,7 @@ describe("Agent Room application", () => {
     expect(await screen.findByRole("heading", { name: "What needs you now" })).toBeInTheDocument();
     expect(screen.getByText("Review authentication evidence")).toBeInTheDocument();
     expect(screen.getByText("Project coordination update")).toBeInTheDocument();
-    expect(screen.getByText(/work events · .* source checks · .* task reports/)).toBeInTheDocument();
+    expect(screen.getByText(/work events? · .* source checks? · .* task reports?/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Mark changes reviewed" }));
     await screen.findByText(/Changes through event 42 were marked reviewed/);
     const briefAck = calls.find((call) => call.url === "/api/v1/brief/acknowledge");
@@ -208,12 +208,19 @@ describe("Agent Room application", () => {
   it("separates routine source checks and task reports from work events without changing review cursors", async () => {
     const brief = { ...projectBrief, through_cursor: 51, event_counts: { "project.observed": 7, "task.observed": 3, "review.requested": 1 } };
     const { calls } = await renderPath("/", { brief });
-    expect(await screen.findByText("1 work events · 7 source checks · 3 task reports")).toBeInTheDocument();
+    expect(await screen.findByText("1 work event · 7 source checks · 3 task reports")).toBeInTheDocument();
     expect(screen.getByText("project.observed")).toBeInTheDocument();
     expect(screen.getByText("task.observed")).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole("button", { name: "Mark changes reviewed" }));
     await screen.findByText(/Changes through event 51 were marked reviewed/);
     expect(calls.find((call) => call.url === "/api/v1/brief/acknowledge")?.init?.body).toBe(JSON.stringify({ expected_cursor: 40, through_cursor: 51 }));
+  });
+
+  it("clearly labels quiet routine-only monitoring briefs", async () => {
+    const brief = { ...projectBrief, through_cursor: 48, event_counts: { "project.observed": 5 } };
+    await renderPath("/", { brief });
+    expect(await screen.findByText("0 work events · 5 source checks · 0 task reports")).toBeInTheDocument();
+    expect(screen.getByText(/Routine monitoring only/)).toBeInTheDocument();
   });
 
   it("shows real run controls only when capabilities advertise them", async () => {

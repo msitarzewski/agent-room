@@ -248,6 +248,19 @@ class Migration:
                 "checkpoint contains an invalid private incoming path")
         return self.state['remote_bundle']
 
+    def rehearsal_digest(self):
+        # Older checkpoints retain the verified stage backup path, including its
+        # manifest digest, even after uploaded_manifest advances to the final copy.
+        path = Path(self.state.get('stage_backup', ''))
+        match = re.fullmatch(r'stage-([0-9a-f]{64})', path.name)
+        require(path.parent == self.directory / 'snapshots' and match,
+                "recovery requires the original checkpointed rehearsal backup")
+        rehearsal = Bundle(path)
+        require(rehearsal.manifest_digest == match[1] and rehearsal.snapshot['kind'] == 'rehearsal'
+                and rehearsal.identity == dict(self.bundle.identity, bundle=str(path)),
+                "rehearsal backup does not match this migration")
+        return rehearsal.manifest_digest
+
     def remote(self, mode):
         require(mode in ('preflight', 'provision', 'restore', 'start', 'check'), "unknown remote helper operation")
         expected = self.state.get('uploaded_manifest', '') if mode == 'preflight' else None
@@ -267,6 +280,15 @@ class Migration:
             require(len(source.encode()) <= 64 * 1024, "shared-host preflight helper exceeds its inline bound")
             program = source + '\nmain "$@"\n'
             arguments = ['bash', '-c', program, 'agentroom-preflight', mode, path, expected]
+            if self.state.get('final_exported') and not self.state.get('activation_possible'):
+                require(self.state.get('fence_started') and self.bundle.snapshot['kind'] == 'final'
+                        and self.bundle.manifest_digest == self.state.get('final_manifest'),
+                        "recovery requires the exact fenced final export")
+                staged = self.rehearsal_digest()
+                require(expected in (staged, self.bundle.manifest_digest),
+                        "uploaded checkpoint matches neither the rehearsal nor the final export")
+                if expected != staged:
+                    arguments.append(staged)
         else:
             arguments = ['bash', path + '/shared-host.sh', mode, path]
         self.ssh(arguments, tty=True)
@@ -409,9 +431,14 @@ src.rename(dest)
     def check(self):
         require(self.state.get('activation_possible'), "remote activation has not been attempted")
         require(self.bundle.manifest_digest == self.state.get('final_manifest'), "final bundle changed after activation; inspect the checkpoint")
-        self.save('checking', remote_check_passed=False)
-        self.remote('check')
-        self.save('checked', remote_check_passed=True)
+        prior_phase = self.state.get('phase')
+        preserved = prior_phase if prior_phase in ('cutover-complete', 'retired') else None
+        try:
+            self.remote('check')
+        except MigrationError:
+            self.save(preserved or 'check-failed', remote_check_passed=False)
+            raise
+        self.save(preserved or 'checked', remote_check_passed=True)
 
     def cutover(self):
         require(self.state.get('stage_complete'), "complete stage before cutover")
@@ -424,6 +451,9 @@ src.rename(dest)
         # writer. Sudo timestamps can be TTY-scoped: later sessions may prompt
         # again, and this check never promises cached authority across them.
         self.remote('preflight')
+        if self.state.get('final_exported') and not self.state.get('activation_possible'):
+            require(not any(self.loaded(label) for label in LABELS),
+                    "a local writer is loaded after final export; inspect source data before recovery")
         self.save('fencing', fence_started=True)
         for label in LABELS:
             self.stop(label)

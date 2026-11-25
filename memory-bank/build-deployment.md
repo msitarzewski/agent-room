@@ -1,8 +1,30 @@
 # Build and Deployment
 
-**Status:** Local app and source ingestion healthy; backlog drained; destination staged, interactive cutover pending
+**Status:** Shared-host cutover complete and healthy; Timeline release `086d31a` active on destination; local retirement and device acceptance pending
 
-**Last updated:** 2026-11-17
+**Last updated:** 2026-11-24
+
+## Post-Cutover Operations — 2026-11-24
+
+The shared-host helper (`deploy/shared-host.sh`) now includes two repeatable
+post-cutover modes in addition to the one-time migration lifecycle:
+
+- `deploy/shared-host.sh backup <ABSOLUTE_OUTPUT_DIR>` — takes verified online
+  custom-format `pg_dump` backups of both isolated databases (`app` and
+  `identity`), archives site artifacts, snapshots the GitHub collector SQLite
+  queue via `sqlite3.backup()`, and writes an owner-only SHA-256 `manifest.json`.
+- `deploy/shared-host.sh upgrade <ABSOLUTE_ARTIFACT> <ABSOLUTE_PUBLIC_KEY>` —
+  verifies a signed Linux/amd64 release archive, installs it immutably under
+  `/srv/www/agentroom/releases/<revision>`, runs `agentroomctl migrate up`,
+  flips `/srv/www/agentroom/current`, restarts `agentroom-web`, verifies
+  `/readyz` returns HTTP 204, and automatically rolls back the symlink on
+  readiness failure.
+
+`agentroomctl doctor` now reports active, expiring-within-14-days, and expired
+service tokens, and `agentroomctl service-token expiring [window-days]` outputs
+machine-readable expiry JSON for rotation monitoring. `deploy/run-migration.py
+check` preserves `cutover-complete` / `retired` checkpoint phases on transient
+connectivity failures while still recording `remote_check_passed`.
 
 ## Current Operational Check — 2026-11-17
 
@@ -308,6 +330,14 @@ that exact bundle, then activates and checks the destination. A rehearsal
 snapshot cannot activate. Activation intent is durable before the remote call;
 after uncertainty, the tool never silently reimports data or resumes the old app.
 Both initial and final snapshots and upload history are retained privately.
+If final provisioning stops after upload, use the same `cutover` command. The
+runner verifies the retained rehearsal backup and final upload, then checks the
+destination's markers and that the local writers are still stopped. Recovery
+can continue from the rehearsal markers or the recorded stages of final
+provisioning. An activation marker closes this provisioning recovery path.
+Initial preflight and provisioning both require the canonical hardener at
+`~/harden-site.sh` on the destination. [November recovery record](tasks/2026-11/181126_cutover-recovery.md)
+
 After successful remote checks, tunnel and source resumption, the orchestrator
 preserves the old deployment record and writes `data/local/deployment.json` as an
 explicit pointer to `data/local/migration/orchestrator.json`, with remote active

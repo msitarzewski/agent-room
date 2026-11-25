@@ -298,6 +298,72 @@ class MigrationTest(unittest.TestCase):
         self.assertEqual([event for event in self.commands.events if event.startswith('remote:')], ['remote:preflight', 'remote:start', 'remote:check'])
         self.assertTrue(resumed.state['cutover_complete'])
 
+    def interrupt_final_provision(self):
+        self.stage()
+        staged = self.migration.state['uploaded_manifest']
+        self.commands.fail = 'remote:provision'
+        with self.assertRaises(operator.MigrationError):
+            self.migration.cutover()
+        self.commands.fail = None
+        self.commands.events.clear()
+        self.commands.calls.clear()
+        self.migration = operator.Migration(operator.Bundle(self.bundle), self.commands)
+        return staged
+
+    def test_retry_after_final_upload_binds_both_snapshots_and_reuses_export(self):
+        staged = self.interrupt_final_provision()
+        final = self.migration.state['final_manifest']
+        self.migration.cutover()
+        self.assertEqual(shlex.split(self.commands.calls[0][0][-1])[-2:], [final, staged])
+        self.assertEqual([event for event in self.commands.events if event.startswith('remote:')],
+                         ['remote:preflight', 'remote:provision', 'remote:restore', 'remote:start', 'remote:check'])
+        self.assertNotIn('export', self.commands.events)
+        self.assertNotIn('upload', self.commands.events)
+        self.assertTrue(self.migration.state['cutover_complete'])
+
+    def test_retry_rejects_unrelated_upload_or_rehearsal_backup_before_ssh(self):
+        self.interrupt_final_provision()
+        saved = self.migration.state.copy()
+        backup = Path(saved['stage_backup'])
+        for changes in ({'uploaded_manifest': 'b' * 64}, {'stage_backup': str(self.bundle.parent)},
+                        {'final_manifest': 'a' * 64}, {'fence_started': False}):
+            with self.subTest(changes=changes):
+                self.migration.state = saved | changes
+                with self.assertRaises(operator.MigrationError):
+                    self.migration.cutover()
+                self.assertFalse(self.commands.calls)
+        self.migration.state = saved
+        write(backup / 'dumps/app.dump', 'altered backup')
+        with self.assertRaises(operator.MigrationError):
+            self.migration.cutover()
+        self.assertFalse(self.commands.calls)
+
+    def test_exported_snapshot_with_failed_upload_still_preflights_rehearsal(self):
+        self.stage()
+        staged = self.migration.state['uploaded_manifest']
+        self.commands.fail = 'upload'
+        with self.assertRaises(operator.MigrationError):
+            self.migration.cutover()
+        self.commands.fail = None
+        self.commands.calls.clear()
+        self.commands.events.clear()
+        resumed = operator.Migration(operator.Bundle(self.bundle), self.commands)
+        resumed.cutover()
+        preflight = shlex.split(self.commands.calls[0][0][-1])
+        self.assertEqual(preflight[4:], ['preflight', resumed.state['remote_bundle'], staged])
+        self.assertNotIn('export', self.commands.events)
+        self.assertIn('upload', self.commands.events)
+        self.assertTrue(resumed.state['cutover_complete'])
+
+    def test_retry_refuses_final_snapshot_if_source_writer_is_loaded(self):
+        self.interrupt_final_provision()
+        self.commands.loaded.add('local.agentroom')
+        checkpoint = self.migration.checkpoint.read_bytes()
+        with self.assertRaisesRegex(operator.MigrationError, 'local writer is loaded'):
+            self.migration.cutover()
+        self.assertNotIn('remote:provision', self.commands.events)
+        self.assertEqual(self.migration.checkpoint.read_bytes(), checkpoint)
+
     def test_failed_fence_prevents_export_and_never_restarts_any_local_writer(self):
         self.stage()
         self.commands.fail = 'bootout:local.agentroom'
@@ -420,6 +486,20 @@ class MigrationTest(unittest.TestCase):
             self.migration.retire('REMOTE_BROWSER_ACCEPTED')
         self.assertEqual(self.commands.events, ['remote:check'])
         self.assertFalse(self.migration.state['remote_check_passed'])
+        self.assertEqual(self.migration.state['phase'], 'cutover-complete')
+
+    def test_standalone_check_preserves_cutover_phase_on_transient_failure_and_recovery(self):
+        self.cutover()
+        self.commands.events.clear()
+        self.commands.fail = 'remote:check'
+        with self.assertRaises(operator.MigrationError):
+            self.migration.check()
+        self.assertEqual(self.migration.state['phase'], 'cutover-complete')
+        self.assertFalse(self.migration.state['remote_check_passed'])
+        self.commands.fail = None
+        self.migration.check()
+        self.assertEqual(self.migration.state['phase'], 'cutover-complete')
+        self.assertTrue(self.migration.state['remote_check_passed'])
 
     def test_retire_only_stops_own_databases_and_two_owned_routes(self):
         self.cutover()

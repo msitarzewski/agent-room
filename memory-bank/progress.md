@@ -1,8 +1,21 @@
 # Progress
 
-**Last updated:** 2026-11-17
+**Last updated:** 2026-11-24
 
 ## Current Phase
+
+2026-11-24 operational and observability hardening: fixed Sentry `partial` vs.
+`complete` classification for readable window-aged task archives, added
+`project_heartbeat_seconds` throttling and offline pending-heartbeat coalescing
+to reduce `project.observed` event amplification, added service-token expiry
+visibility to `agentroomctl doctor` and `service-token expiring`, added
+`backup` and `upgrade` modes to `deploy/shared-host.sh`, fixed
+`deploy/run-migration.py check` phase preservation, and refined Attention brief
+routine-monitoring wording. All Go race tests, Python collector/deployment
+tests, frontend Vitest/ESLint/build, and static/security gates pass. See
+[observability and ops hardening](tasks/2026-11/241126_observability-and-ops-hardening.md).
+
+Shared-host cutover completed on November 18 at 18:22 CST. The destination passed the remote checks, and all 99 local Sentry projects delivered through the supervised tunnel. Device acceptance and local retirement remain pending. [Cutover outcome](tasks/2026-11/181126_cutover-recovery.md#cutover-outcome)
 
 2026-11-17 migration continuation: local ingestion recovered completely,
 pending/quarantined queues are zero and all 99 projects have fresh successful

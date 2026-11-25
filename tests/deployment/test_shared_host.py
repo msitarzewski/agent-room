@@ -146,6 +146,7 @@ class BundleTests(unittest.TestCase):
         code = '''source "$SCRIPT"
 SITE="$SANDBOX/site"; HOME="$SANDBOX/home"
 mkdir -p "$SITE" "$HOME"
+touch "$HOME/harden-site.sh"
 uname() { if [[ "$1" == -s ]]; then echo Linux; else echo x86_64; fi; }
 id() { if [[ "$1" == -un ]]; then echo michael; else echo 1000; fi; }
 verify_release() { :; }; validate_operator_files() { :; }; flock() { :; }; preflight() { :; }
@@ -158,6 +159,68 @@ main preflight "$FIXTURE" "$DIGEST"
                 env = os.environ | {"SCRIPT": str(SCRIPT), "SANDBOX": temporary, "FIXTURE": str(self.bundle), "DIGEST": digest, "MISSING": missing, "ACTIVE": active}
                 result = subprocess.run(["bash", "-c", code], env=env, capture_output=True)
                 self.assertEqual(result.returncode == 0, allowed, result.stderr.decode())
+
+    def test_hardener_is_required_before_fencing_and_on_recovery(self):
+        code = '''source "$SCRIPT"
+HOME="$SANDBOX"; SITE="$SANDBOX"; BUNDLE="$FIXTURE"; BUNDLE_DIGEST=final
+marker() { return 0; }; provision_intent() { return 0; }; require_stopped() { return 0; }
+check_preflight_markers "$STAGED"
+'''
+        for hardener in ("absent", "symlink", "regular"):
+            for staged in ("", "stage"):
+                with self.subTest(hardener=hardener, staged=staged), tempfile.TemporaryDirectory() as tmp:
+                    path = Path(tmp) / "harden-site.sh"
+                    if hardener == "regular":
+                        path.touch()
+                    elif hardener == "symlink":
+                        path.symlink_to(SCRIPT)
+                    env = os.environ | {"SCRIPT": str(SCRIPT), "SANDBOX": tmp, "FIXTURE": str(self.bundle), "STAGED": staged}
+                    result = subprocess.run(["bash", "-c", code], env=env, capture_output=True)
+                    self.assertEqual(result.returncode == 0, hardener == "regular", result.stderr.decode())
+                    if hardener != "regular":
+                        self.assertIn(b"canonical ~/harden-site.sh is required", result.stderr)
+
+    def test_final_upload_recovery_accepts_only_known_inactive_marker_transitions(self):
+        self.jsonchange("snapshot.json", lambda m: m.update(kind="final", source_fenced=True))
+        final = hashlib.sha256((self.bundle / "manifest.json").read_bytes()).hexdigest()
+        stage, foreign = "a" * 64, "b" * 64
+        code = '''source "$SCRIPT"
+HOME="$SANDBOX"; SITE="$SANDBOX"
+uname() { if [[ "$1" == -s ]]; then echo Linux; else echo x86_64; fi; }
+id() { if [[ "$1" == -un ]]; then echo michael; else echo 1000; fi; }
+verify_release() { :; }; validate_operator_files() { :; }; flock() { :; }; preflight() { :; }
+require_stopped() { [[ "$RUNNING" == no ]] || fail "writer active"; }
+main preflight "$FIXTURE" "$FINAL" "$STAGED"
+'''
+        for provisioned, restored, intent, active, running, allowed in (
+            (stage, stage, stage, None, False, True), (stage, stage, final, None, False, True),
+            (final, stage, final, None, False, True), (final, None, final, None, False, True),
+            (final, final, final, None, False, True), (foreign, stage, stage, None, False, False),
+            (stage, foreign, stage, None, False, False), (stage, None, stage, None, False, False),
+            (None, stage, stage, None, False, False), (stage, stage, foreign, None, False, False),
+            (final, None, stage, None, False, False), (final, foreign, final, None, False, False),
+            (final, final, final, final, False, False), (stage, stage, stage, foreign, False, False),
+            (stage, stage, stage, None, True, False),
+        ):
+            with self.subTest(provisioned=provisioned, restored=restored, intent=intent, active=active, running=running), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / "harden-site.sh").touch()
+                for name, value in ((".shared-host-provisioned", provisioned), (".shared-host-restored", restored),
+                                    (".agentroom-shared-host-intent", intent), (".shared-host-activated", active)):
+                    if value is not None:
+                        (root / name).write_text(value + "\n")
+                env = os.environ | {"SCRIPT": str(SCRIPT), "SANDBOX": tmp, "FIXTURE": str(self.bundle),
+                                    "FINAL": final, "STAGED": stage, "RUNNING": "yes" if running else "no"}
+                result = subprocess.run(["bash", "-c", code], env=env, capture_output=True)
+                self.assertEqual(result.returncode == 0, allowed, result.stderr.decode())
+
+    def test_recovery_rejects_rehearsal_upload_and_invalid_predecessor(self):
+        digest = hashlib.sha256((self.bundle / "manifest.json").read_bytes()).hexdigest()
+        for predecessor, message in (("a" * 64, b"fenced final upload"), (digest, b"invalid rehearsal"), ("", b"invalid rehearsal")):
+            with self.subTest(predecessor=predecessor):
+                result = subprocess.run(["bash", str(SCRIPT), "preflight", str(self.bundle), digest, predecessor], capture_output=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stderr)
 
     def test_digest_mismatch(self):
         self.change("github-run.sh", "changed")
@@ -338,6 +401,70 @@ install_release
         result = self.shell('SITE="$SANDBOX"; touch "$SITE/.shared-host-activated"; compose() { touch "$SITE/TOUCHED"; }; restore')
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.sandbox / "TOUCHED").exists())
+
+    def test_backup_site_verifies_dumps_and_writes_manifest(self):
+        code = '''SITE="$SANDBOX/site"; RUNTIME="$SANDBOX/runtime"; OUT="$SANDBOX/backups"
+mkdir -p "$SITE/storage/artifacts"
+touch "$SITE/.shared-host-activated"
+ln -sfn "releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$SITE/current"
+printf '{"services":{"postgres":{"environment":{"POSTGRES_USER":"pgadmin","POSTGRES_DB":"appdb"}}}}' > "$SITE/compose.json"
+printf '{"storage":{"config":{"database":"iddb"}}}' > "$SITE/dex-config.json"
+printf 'artifact-bytes' > "$SITE/storage/artifacts/sample.txt"
+compose() {
+  case "$*" in
+    *pg_dump*) printf 'PGDMP-fixture'; return 0 ;;
+    *pg_restore*) cat >/dev/null; return 0 ;;
+  esac
+  return 1
+}
+sudo() { return 1; }
+backup_site "$OUT"
+'''
+        result = self.shell(code)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        snapshots = list((self.sandbox / "backups").glob("agentroom-backup-*"))
+        self.assertEqual(len(snapshots), 1)
+        manifest = json.loads((snapshots[0] / "manifest.json").read_text())
+        self.assertEqual(manifest["databases"], {"app": "appdb", "identity": "iddb"})
+        self.assertEqual({entry["path"] for entry in manifest["files"]}, {"app.dump", "identity.dump", "artifacts.tar.gz"})
+
+    def test_upgrade_release_swaps_current_and_rolls_back_on_readiness_failure(self):
+        code = '''SITE="$SANDBOX/site"; ARTIFACT="$SANDBOX/release.tar.gz"; PUBKEY="$SANDBOX/key.pem"; VERIFIER="$SANDBOX/verify.sh"
+mkdir -p "$SITE/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+touch "$SITE/.shared-host-activated" "$ARTIFACT" "$PUBKEY"
+ln -sfn "releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$SITE/current"
+printf 'AGENTROOM_ADMIN_ADDR="127.0.0.1:54490"\n' > "$SITE/agentroom.conf"
+cat > "$VERIFIER" <<'VSH'
+#!/usr/bin/env bash
+out=""
+while (($#)); do
+  if [[ "$1" == "--extract-to" ]]; then out="$2"; shift 2; else shift; fi
+done
+mkdir -p "$out/bin" "$out/web"
+printf '{"source_revision":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}\n' > "$out/manifest.json"
+printf '#!/bin/sh\nexit 0\n' > "$out/bin/agentroomctl"
+chmod +x "$out/bin/agentroomctl"
+printf 'bin' > "$out/bin/agentroomd"
+printf '<html></html>' > "$out/web/index.html"
+VSH
+chmod +x "$VERIFIER"
+sudo() {
+  if [[ "$1" == "-u" ]]; then shift 2; "$@"; return $?; fi
+  return 0
+}
+wait_status() { [[ "$READY" == ok ]]; }
+upgrade_release "$ARTIFACT" "$PUBKEY" "$VERIFIER"
+'''
+        ok = self.shell(code, {"READY": "ok"})
+        self.assertEqual(ok.returncode, 0, ok.stderr.decode())
+        self.assertEqual(os.readlink(self.sandbox / "site/current"), "releases/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+
+        # Reset and verify automatic rollback when readiness fails
+        os.unlink(self.sandbox / "site/current")
+        os.symlink("releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", self.sandbox / "site/current")
+        fail_res = self.shell(code, {"READY": "bad"})
+        self.assertNotEqual(fail_res.returncode, 0)
+        self.assertEqual(os.readlink(self.sandbox / "site/current"), "releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 
 
 if __name__ == "__main__":

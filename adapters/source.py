@@ -95,6 +95,7 @@ class State:
             CREATE INDEX IF NOT EXISTS queue_delivery ON queue(project_id,status,id);
             CREATE TABLE IF NOT EXISTS projects(project_id TEXT PRIMARY KEY,report TEXT NOT NULL,last_success TEXT,last_delivery TEXT,delivery_error TEXT);
             CREATE TABLE IF NOT EXISTS project_bindings(project_id TEXT PRIMARY KEY,path TEXT UNIQUE NOT NULL);
+            CREATE TABLE IF NOT EXISTS project_heartbeats(project_id TEXT PRIMARY KEY,fingerprint TEXT NOT NULL,enqueued_at REAL NOT NULL);
         """)
 
     def close(self):
@@ -134,13 +135,29 @@ class State:
         self.db.execute("INSERT INTO queue(project_id,event_id,body,occurred_at) VALUES(?,?,?,?)", (mapping.project_id, event_id, canonical(event), now))
         self.db.execute("INSERT INTO observations VALUES(?,?,?,?) ON CONFLICT(project_id,external_id) DO UPDATE SET fingerprint=excluded.fingerprint,sequence=excluded.sequence", (mapping.project_id, key, fingerprint, sequence))
 
+    def enqueue_project_observation(self, config, mapping, payload: dict, now: float, heartbeat_seconds: float = 0) -> bool:
+        substantive = {key: value for key, value in payload.items() if key != "collected_at"}
+        fingerprint = hashlib.sha256(canonical(substantive).encode()).hexdigest()
+        old = self.db.execute("SELECT fingerprint,enqueued_at FROM project_heartbeats WHERE project_id=?", (mapping.project_id,)).fetchone()
+        if old and old["fingerprint"] == fingerprint:
+            pending = self.db.execute("SELECT 1 FROM queue WHERE project_id=? AND status='pending' AND json_extract(body,'$.type')='project.observed' LIMIT 1", (mapping.project_id,)).fetchone()
+            if pending is not None:
+                return False
+            if heartbeat_seconds > 0 and (now - old["enqueued_at"]) < heartbeat_seconds:
+                return False
+        self.enqueue(config, mapping, "project.observed", payload, now, False)
+        self.db.execute("INSERT INTO project_heartbeats(project_id,fingerprint,enqueued_at) VALUES(?,?,?) ON CONFLICT(project_id) DO UPDATE SET fingerprint=excluded.fingerprint,enqueued_at=excluded.enqueued_at", (mapping.project_id, fingerprint, now))
+        return True
+
     def status(self) -> dict:
         rows = self.db.execute("SELECT project_id,report,last_success,last_delivery,delivery_error FROM projects ORDER BY project_id").fetchall()
         counts = dict(self.db.execute("SELECT status,count(*) FROM queue GROUP BY status").fetchall())
         quarantined = [dict(row) for row in self.db.execute("SELECT project_id,event_id,error,occurred_at FROM queue WHERE status='quarantined' ORDER BY id")]
+        auth_errors = sum(1 for row in rows if row["delivery_error"] in ("http_401", "http_403", "invalid_token_file", "private_token_unavailable"))
         return {"initialized": True, "last_collection": self.meta("last_collection"), "collection_error": self.meta("collection_error"),
                 "needs_provisioning": self.meta("needs_provisioning", []), "pending": counts.get("pending", 0),
                 "quarantined": counts.get("quarantined", 0), "quarantine": quarantined,
+                "auth_error_projects": auth_errors,
                 "transport_error": self.meta("transport_error"),
                 "provider_status": self.meta("provider_status"),
                 "unreadable": self.meta("unreadable", []),

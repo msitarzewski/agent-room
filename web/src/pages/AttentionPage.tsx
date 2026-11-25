@@ -86,6 +86,8 @@ export function AttentionPage() {
   const sourceChecks = brief?.event_counts["project.observed"] ?? 0;
   const taskReports = brief?.event_counts["task.observed"] ?? 0;
   const workEvents = Object.values(brief?.event_counts ?? {}).reduce((sum, count) => sum + count, 0) - sourceChecks - taskReports;
+  const countLabel = (count: number, singular: string, plural: string) => `${count} ${count === 1 ? singular : plural}`;
+  const routineOnly = workEvents === 0 && taskReports === 0 && sourceChecks > 0;
   const reviewBrief = async () => {
     if (!brief || !projectId) return;
     setBriefBusy(true);
@@ -128,8 +130,13 @@ export function AttentionPage() {
               <div className="card-heading">
                 <div>
                   <p className="eyebrow">Project coordination update</p>
-                  <h3>{workEvents} work events · {sourceChecks} source checks · {taskReports} task reports</h3>
-                  <p>{brief.open_attention.length} unresolved attention records · {brief.pending_approvals.length} pending approvals. Repeated source reports are observations, not new agent requests.</p>
+                  <h3>{countLabel(workEvents, "work event", "work events")} · {countLabel(sourceChecks, "source check", "source checks")} · {countLabel(taskReports, "task report", "task reports")}</h3>
+                  <p>
+                    {brief.open_attention.length} unresolved attention records · {brief.pending_approvals.length} pending approvals.{" "}
+                    {routineOnly
+                      ? "Routine monitoring only — no new agent work or task changes since your last review."
+                      : "Repeated source reports are observations, not new agent requests."}
+                  </p>
                 </div>
                 <Freshness loadedAt={brief.generated_at} />
               </div>

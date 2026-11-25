@@ -469,7 +469,7 @@ class Collector(Delivery):
                    "status": "archived" if repo.get("archived") is True else "active" if repo.get("archived") is False else "unknown", "reason": reason, "collected_at": timestamp(now), "scan_status": scan_status, "task_count": observed}
         if errors:
             payload["scan_error"] = "; ".join(sorted(set(errors)))
-        self.state.enqueue(self.config, mapping, "project.observed", payload, now, False)
+        self.state.enqueue_project_observation(self.config, mapping, payload, now, 0)
         report = {"collected_at": timestamp(now), "scan_status": scan_status, "coverage": coverage, "task_count": observed, "scan_error": payload.get("scan_error")}
         self.state.db.execute("INSERT INTO projects(project_id,report,last_success) VALUES(?,?,?) ON CONFLICT(project_id) DO UPDATE SET report=excluded.report,last_success=COALESCE(excluded.last_success,projects.last_success)", (mapping.project_id, canonical(report), timestamp(now) if scan_status == "complete" else None))
         return bool(errors)
@@ -480,7 +480,7 @@ class Collector(Delivery):
         self.state.db.execute("INSERT INTO projects(project_id,report) VALUES(?,?) ON CONFLICT(project_id) DO UPDATE SET report=excluded.report", (mapping.project_id, canonical(report)))
         if known:
             payload = {"external_id": f"repo:{known['id']}", "name": known["name"], "path": "https://github.com/" + known["name"], "status": "unknown", "reason": "Repository unavailable or identity unverified; prior tasks retained without refresh", "collected_at": timestamp(now), "scan_status": "unreadable", "task_count": 0, "scan_error": error}
-            self.state.enqueue(self.config, mapping, "project.observed", payload, now, False)
+            self.state.enqueue_project_observation(self.config, mapping, payload, now, 0)
 
     def collect(self, now):
         self.api.begin(now)

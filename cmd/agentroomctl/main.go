@@ -87,7 +87,19 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("database: ok\nmigrations: %d known\nartifact_dir: %s\n", len(status), cfg.ArtifactDir)
+		tokens, err := auth.ListServiceTokens(ctx, repo.Pool())
+		if err != nil {
+			return err
+		}
+		summary := auth.SummarizeServiceTokenExpiry(tokens, time.Now().UTC(), 14*24*time.Hour)
+		fmt.Printf("database: ok\nmigrations: %d known\nartifact_dir: %s\nservice_tokens: %d active, %d expiring_within_14d, %d expired\n",
+			len(status), cfg.ArtifactDir, summary.Active, len(summary.Expiring), len(summary.Expired))
+		for _, item := range summary.Expired {
+			fmt.Printf("warning: service token %s (%s, actor=%s) expired at %s\n", item.ID, item.Name, item.ActorID, item.ExpiresAt.UTC().Format(time.RFC3339))
+		}
+		for _, item := range summary.Expiring {
+			fmt.Printf("warning: service token %s (%s, actor=%s) expires at %s\n", item.ID, item.Name, item.ActorID, item.ExpiresAt.UTC().Format(time.RFC3339))
+		}
 		return nil
 	case "projection":
 		if len(command) != 2 || command[1] != "rebuild" {
@@ -129,6 +141,27 @@ func run() error {
 				return err
 			}
 			return json.NewEncoder(os.Stdout).Encode(map[string]any{"items": items})
+		case (len(command) == 2 || len(command) == 3) && command[1] == "expiring":
+			days := 14
+			if len(command) == 3 {
+				parsed, err := strconv.Atoi(command[2])
+				if err != nil || parsed < 1 || parsed > 90 {
+					return errors.New("window-days must be an integer from 1 to 90")
+				}
+				days = parsed
+			}
+			items, err := auth.ListServiceTokens(ctx, repo.Pool())
+			if err != nil {
+				return err
+			}
+			summary := auth.SummarizeServiceTokenExpiry(items, time.Now().UTC(), time.Duration(days)*24*time.Hour)
+			return json.NewEncoder(os.Stdout).Encode(map[string]any{
+				"within_days": days,
+				"active":      summary.Active,
+				"expiring":    summary.Expiring,
+				"expired":     summary.Expired,
+				"revoked":     summary.Revoked,
+			})
 		case len(command) == 3 && command[1] == "revoke":
 			replayed, err := auth.RevokeServiceToken(ctx, repo.Pool(), command[2])
 			if err != nil {
@@ -151,7 +184,7 @@ func run() error {
 			}
 			return json.NewEncoder(os.Stdout).Encode(created)
 		default:
-			return errors.New("usage: agentroomctl service-token create <id> <name> <actor-id> <project-id[,project-id...]> <capability,...> [expiry-days] | list | revoke <id>")
+			return errors.New("usage: agentroomctl service-token create <id> <name> <actor-id> <project-id[,project-id...]> <capability,...> [expiry-days] | list | expiring [window-days] | revoke <id>")
 		}
 	default:
 		return fmt.Errorf("unknown command %q", command[0])

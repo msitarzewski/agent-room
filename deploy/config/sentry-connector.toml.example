@@ -8,6 +8,7 @@ state_dir = "/path/to/private/agentroom/sentry-state"
 instance_id = "workstation-source"
 ingest_url = "http://127.0.0.1:8082/api/v1/ingest"
 poll_seconds = 300
+project_heartbeat_seconds = 600
 timeout_seconds = 5
 batch_size = 50
 max_batch_bytes = 524288
