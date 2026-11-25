@@ -8,6 +8,7 @@ import type {
   ChatMessage,
   Claim,
   CoordinationRequest,
+  EventPage,
   Evidence,
   HealthSnapshot,
   Page,
@@ -128,6 +129,17 @@ export const api = {
       `/events${collectionQuery(projectId, after)}`,
       { signal },
     ),
+  timeline: (projectId: string, requestPage: {
+    limit: number; before?: PageCursor; query: string; eventType: string; includeTypes: boolean;
+  }, signal: AbortSignal) => {
+    const { limit, before, query, eventType, includeTypes } = requestPage;
+    const params: Record<string, string> = { order: "desc", limit: String(limit) };
+    if (before !== undefined) params.cursor = String(before);
+    if (query) params.q = query;
+    if (eventType) params.event_type = eventType;
+    if (includeTypes) params.include_types = "true";
+    return request<EventPage>(`/events${projectQuery(projectId, params)}`, { signal });
+  },
   attention: (projectId: string, signal?: AbortSignal, cursor?: PageCursor) =>
     request<Page<AttentionItem>>(`/attention${collectionQuery(projectId, cursor)}`, { signal }),
   evidence: (projectId: string, signal?: AbortSignal, cursor?: PageCursor) =>

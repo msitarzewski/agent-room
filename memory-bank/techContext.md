@@ -1,6 +1,19 @@
 # Technical Context
 
-**Last updated:** 2026-10-17
+**Last updated:** 2026-10-20
+
+## Prepared Shared-host Deployment Variant
+
+The operator-approved destination is multi-tenant. Its pending migration uses a
+site-isolated native daemon/GitHub collector under Supervisor and app-only
+Docker PostgreSQL/Dex, with private Tailscale HTTPS. It does not use the
+dedicated-host native PostgreSQL/bootstrap, modify shared proxy configuration,
+or activate an autonomous executor. Private source ingestion continues through
+an operator-managed SSH tunnel from the workstation's Sentry publisher.
+The existing dedicated-host production architecture below remains a separate
+deployment shape. See
+[shared-host migration](build-deployment.md#shared-host-migration) for verified
+scripts, operator execution requirements and unclaimed remote/backup acceptance.
 
 **Implementation status:** Founding, spatial, agent coordination and GitHub observations merged and verified locally; device acceptance and signed remote promotion separate
 

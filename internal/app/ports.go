@@ -29,9 +29,21 @@ type Page struct {
 	NextCursor string            `json:"next_cursor,omitempty"`
 }
 
+// EventQuery uses an exclusive cursor in the requested direction. A zero cursor
+// starts at the first event in that ordering.
+type EventQuery struct {
+	Cursor       int64
+	Limit        int
+	Descending   bool
+	Filter       string
+	EventType    string
+	IncludeTypes bool
+}
+
 type EventPage struct {
 	Items      []domain.Event `json:"items"`
 	NextCursor int64          `json:"next_cursor,omitempty"`
+	EventTypes []string       `json:"event_types,omitzero"`
 }
 
 // WorkspaceSnapshot is a complete project projection and its event watermark,
@@ -169,7 +181,7 @@ type Repository interface {
 	List(ctx context.Context, projectID string, kind domain.ResourceType, cursor string, limit int) (Page, error)
 	Execute(ctx context.Context, cmd domain.Command, build func(current json.RawMessage) (Mutation, error)) (CommandResult, error)
 	Ingest(ctx context.Context, events []domain.Event) error
-	Events(ctx context.Context, projectID string, after int64, limit int) (EventPage, error)
+	Events(ctx context.Context, projectID string, actor Actor, query EventQuery) (EventPage, error)
 	Overview(ctx context.Context, projectID string) (map[string]any, error)
 	Health(ctx context.Context) error
 	Close()

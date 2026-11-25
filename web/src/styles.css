@@ -290,6 +290,7 @@ main#main-content { padding: clamp(1.5rem, 4vw, 3.2rem); }
 
 .filter-bar { display: grid; grid-template-columns: 1fr 190px; gap: .8rem; margin-bottom: 1rem; padding: .9rem; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--surface); }
 .filter-bar label { display: grid; gap: .35rem; }
+.timeline-pager { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: flex-end; gap: .75rem; padding: .5rem .2rem; margin-bottom: .5rem; background: var(--bg); font-size: .85rem; color: var(--muted); }
 .timeline-list { position: relative; list-style: none; padding: 0; margin: 0; }
 .timeline-list::before { content: ""; position: absolute; top: 1rem; bottom: 1rem; left: .36rem; width: 1px; background: var(--border); }
 .timeline-list li { position: relative; display: grid; grid-template-columns: 1.5rem 1fr; }

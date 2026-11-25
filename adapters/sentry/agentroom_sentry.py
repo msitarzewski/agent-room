@@ -53,6 +53,7 @@ class Config:
     timeout_seconds: float = 5
     batch_size: int = 50
     max_batch_bytes: int = 512 * 1024
+    project_heartbeat_seconds: float = 600
 
 
 def load_config(path: Path) -> Config:
@@ -69,6 +70,7 @@ def load_config(path: Path) -> Config:
         settings["ingest_url"], projects, float(settings.get("poll_seconds", 300)),
         float(settings.get("timeout_seconds", 5)), int(settings.get("batch_size", 50)),
         int(settings.get("max_batch_bytes", 512 * 1024)),
+        float(settings.get("project_heartbeat_seconds", 600)),
     )
     validate_ingest_url(config.ingest_url)
     if not config.instance_id or len(config.instance_id) > 128 or not projects:
@@ -77,9 +79,29 @@ def load_config(path: Path) -> Config:
         raise ConnectorError("project paths and project IDs must each be unique")
     if any(not item.project_id or len(item.project_id) > 256 for item in projects):
         raise ConnectorError("project IDs must be nonempty and bounded")
-    if not 1 <= config.batch_size <= 100 or not 16 * 1024 <= config.max_batch_bytes <= 1024 * 1024 or not 1 <= config.timeout_seconds <= 30 or config.poll_seconds < 10:
+    if not 1 <= config.batch_size <= 100 or not 16 * 1024 <= config.max_batch_bytes <= 1024 * 1024 or not 1 <= config.timeout_seconds <= 30 or config.poll_seconds < 10 or not 0 <= config.project_heartbeat_seconds <= 86400:
         raise ConnectorError("invalid polling, transport, or batch limits")
     return config
+
+
+def _unreadable_kept(project_path: Path, kept: list[tuple[Path, str, str | None]], cutoff: float) -> list[tuple[str, str, str | None]]:
+    """Return only kept entries caused by an actual read failure, not normal age-window retention."""
+    unreadable: list[tuple[str, str, str | None]] = []
+    for kept_path, source, ident in kept:
+        # Non-None ident entries are dated items skipped purely because they precede tasks_window_days.
+        if ident is not None:
+            continue
+        candidate = project_path / source
+        try:
+            info = candidate.stat()
+            with candidate.open("rb"):
+                pass
+            if info.st_mtime < cutoff:
+                continue
+        except OSError:
+            pass
+        unreadable.append((str(kept_path.resolve()), source, ident))
+    return unreadable
 
 
 class SentryReader:
@@ -97,6 +119,7 @@ class SentryReader:
 
     def collect(self, now: float) -> dict:
         paths, skipped, unreadable = self.scanner.discover(self.config.roots, self.config.exclude)
+        cutoff = now - self.config.tasks_window_days * 86400
         found: dict[str, dict] = {}
         for path in paths:
             key = str(path.resolve())
@@ -107,11 +130,12 @@ class SentryReader:
                 stage, reason = self.rules.classify(project, now, self.config.thresholds)
                 tasks = self.scanner.read_tasks(path, now, self.config.tasks_window_days) if project.has_memory_bank else self.scanner.TaskScan()
                 kept = [(str(p.resolve()), source, ident) for p, source, ident in tasks.kept]
+                unreadable_kept = _unreadable_kept(path, tasks.kept, cutoff)
                 found[key] = {
                     "name": project.name, "status": stage.value, "reason": reason,
-                    "scan_status": "partial" if kept else "complete", "items": tasks.items,
+                    "scan_status": "partial" if unreadable_kept else "complete", "items": tasks.items,
                     "kept": kept,
-                    "scan_error": "Some task records were retained without rereading (window or unreadable)" if kept else "",
+                    "scan_error": "Some task records could not be read; previous records retained" if unreadable_kept else "",
                 }
             except OSError:
                 unreadable.append(path)
@@ -154,7 +178,7 @@ class Collector(Delivery):
                            "collected_at": timestamp(now), "scan_status": report["scan_status"], "task_count": len(report["items"])}
                 if report["scan_error"]:
                     payload["scan_error"] = report["scan_error"]
-                self.state.enqueue(self.config, mapping, "project.observed", payload, now, False)
+                self.state.enqueue_project_observation(self.config, mapping, payload, now, self.config.project_heartbeat_seconds)
                 for item in report["items"]:
                     description = "\n".join(([f"Source excerpt: {item.source}"] + ([f"Section: {item.heading}"] if item.heading else []) + [text for _, text in item.detail]))
                     if len(description) > 16384:

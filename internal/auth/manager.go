@@ -252,6 +252,36 @@ type ServiceTokenMetadata struct {
 	CreatedAt    time.Time  `json:"created_at"`
 }
 
+type ServiceTokenExpirySummary struct {
+	Active   int                    `json:"active"`
+	Expiring []ServiceTokenMetadata `json:"expiring"`
+	Expired  []ServiceTokenMetadata `json:"expired"`
+	Revoked  int                    `json:"revoked"`
+}
+
+func SummarizeServiceTokenExpiry(items []ServiceTokenMetadata, now time.Time, window time.Duration) ServiceTokenExpirySummary {
+	summary := ServiceTokenExpirySummary{
+		Expiring: make([]ServiceTokenMetadata, 0),
+		Expired:  make([]ServiceTokenMetadata, 0),
+	}
+	cutoff := now.Add(window)
+	for _, item := range items {
+		if item.RevokedAt != nil {
+			summary.Revoked++
+			continue
+		}
+		if item.ExpiresAt != nil && !item.ExpiresAt.After(now) {
+			summary.Expired = append(summary.Expired, item)
+			continue
+		}
+		summary.Active++
+		if item.ExpiresAt != nil && !item.ExpiresAt.After(cutoff) {
+			summary.Expiring = append(summary.Expiring, item)
+		}
+	}
+	return summary
+}
+
 func CreateServiceTokenWithMetadata(ctx context.Context, pool *pgxpool.Pool, id, name, actorID string, projectIDs, capabilities []string, expiresAt *time.Time) (CreatedServiceToken, error) {
 	if id == "" || name == "" || actorID == "" || len(projectIDs) == 0 || len(capabilities) == 0 {
 		return CreatedServiceToken{}, errors.New("service token id, name, actor, projects, and capabilities are required")

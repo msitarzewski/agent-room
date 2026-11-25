@@ -67,15 +67,20 @@ class CollectorTest(unittest.TestCase):
         self.assertGreater(events[1]["source_sequence"], events[0]["source_sequence"])
         self.assertNotIn("resource", events[1]["payload"])
 
-    def test_deduplicates_unchanged_tasks_but_publishes_every_scan_receipt(self):
+    def test_deduplicates_unchanged_tasks_and_throttles_unchanged_project_heartbeats(self):
         self.collector.collect(self.now)
+        self.collector.deliver(self.now)
         self.collector.collect(self.now + 300)
-        events = [json.loads(row["body"]) for row in self.queue()]
-        self.assertEqual(sum(event["type"] == "task.observed" for event in events), 1)
-        self.assertEqual(sum(event["type"] == "project.observed" for event in events), 2)
-        self.scan["projects"][str(self.project)]["items"] = [task(status="Done")]
+        self.assertEqual(self.queue(), [])
         self.collector.collect(self.now + 600)
-        self.assertEqual(sum(json.loads(row["body"])["type"] == "task.observed" for row in self.queue()), 2)
+        events = [json.loads(row["body"]) for row in self.queue()]
+        self.assertEqual([event["type"] for event in events], ["project.observed"])
+        self.collector.deliver(self.now + 600)
+        self.scan["projects"][str(self.project)]["items"] = [task(status="Done")]
+        self.scan["projects"][str(self.project)]["status"] = "Idle"
+        self.collector.collect(self.now + 660)
+        changed = [json.loads(row["body"]) for row in self.queue()]
+        self.assertEqual([event["type"] for event in changed], ["project.observed", "task.observed"])
 
     def test_restart_retries_identical_persisted_events_after_uncertain_delivery(self):
         self.collector.collect(self.now)
@@ -101,14 +106,18 @@ class CollectorTest(unittest.TestCase):
         sequences = [json.loads(row["body"])["source_sequence"] for row in self.queue()]
         self.assertEqual(sequences, [2_000_000_000_000_000_001, 2_000_000_000_000_000_002])
 
-    def test_offline_collection_persists_new_work_without_repeated_target_timeouts(self):
+    def test_offline_collection_persists_new_work_and_coalesces_unchanged_heartbeats(self):
         self.sender.return_value = "transport_unavailable"
         self.collector.collect(self.now)
         self.collector.deliver(self.now)
+        self.scan["projects"][str(self.project)]["items"].append(task(title="Second task", ident="hash-2"))
         self.collector.collect(self.now + 1)
         self.collector.deliver(self.now + 1)
+        self.collector.collect(self.now + 900)
         self.assertEqual(self.sender.call_count, 1)
-        self.assertEqual(len(self.queue()), 3)
+        events = [json.loads(row["body"]) for row in self.queue()]
+        self.assertEqual(sum(event["type"] == "task.observed" for event in events), 2)
+        self.assertEqual(sum(event["type"] == "project.observed" for event in events), 2)
         self.assertEqual(self.state.status()["transport_error"], "transport_unavailable")
 
     def test_project_authorization_failure_does_not_block_another_project(self):
@@ -123,6 +132,7 @@ class CollectorTest(unittest.TestCase):
         self.assertTrue(all(row["project_id"] == self.mapping.project_id for row in self.queue()))
         status = {item["project_id"]: item for item in self.state.status()["projects"]}
         self.assertEqual(status[self.mapping.project_id]["delivery_error"], "http_403")
+        self.assertEqual(self.state.status()["auth_error_projects"], 1)
         self.assertIsNotNone(status[other.project_id]["last_delivery"])
 
     def test_window_kept_and_unreadable_sources_never_delete_or_recomplete_tasks(self):
@@ -274,7 +284,7 @@ token_file = {json.dumps(str(self.token))}
             self.assertEqual(connector.main(), 0)
         stopped.wait.assert_called_once()
         output = io.StringIO()
-        with patch.object(sys, "argv", ["connector", "--config", str(path), "once"]), patch.object(connector, "load_config", return_value=dataclasses.replace(self.config, batch_size=1)), patch.object(connector, "SentryReader", return_value=self.reader), patch.object(connector, "publish", return_value="http_503"), patch.object(connector.signal, "signal"), contextlib.redirect_stdout(output):
+        with patch.object(sys, "argv", ["connector", "--config", str(path), "once"]), patch.object(connector, "load_config", return_value=dataclasses.replace(self.config, batch_size=1, project_heartbeat_seconds=0)), patch.object(connector, "SentryReader", return_value=self.reader), patch.object(connector, "publish", return_value="http_503"), patch.object(connector.signal, "signal"), contextlib.redirect_stdout(output):
             self.assertEqual(connector.main(), 1)
         # A separate state tests a successful but deliberately bounded delivery pass.
         bounded = dataclasses.replace(self.config, state_dir=self.root / "bounded-state", batch_size=1)
@@ -327,6 +337,39 @@ class ReaderTest(unittest.TestCase):
         self.assertEqual(result["unreadable"], [str(paths[1])])
         self.assertNotIn(str(paths[2]), result["projects"])
         self.assertEqual(result["projects"][str(paths[3])]["scan_error"], "ValueError")
+
+    def test_window_aged_readable_files_classify_as_complete_while_unreadable_stay_partial(self):
+        with tempfile.TemporaryDirectory(prefix="agentroom-reader-window-") as temporary:
+            root = Path(temporary).resolve()
+            aged_project = root / "aged"
+            unreadable_project = root / "broken"
+            (aged_project / "memory-bank/tasks").mkdir(parents=True)
+            (unreadable_project / "memory-bank/tasks").mkdir(parents=True)
+            old_file = aged_project / "memory-bank/tasks/old.md"
+            old_file.write_text("# Old archive\n")
+            now = 1792015200.0
+            old_mtime = now - 120 * 86400
+            connector.os.utime(old_file, (old_mtime, old_mtime))
+
+            reader = connector.SentryReader.__new__(connector.SentryReader)
+            reader.config = types.SimpleNamespace(roots=(root,), exclude=frozenset(), owners=frozenset(), thresholds=object(), tasks_window_days=90)
+            aged_meta = types.SimpleNamespace(name="aged", upstream=False, has_memory_bank=True)
+            broken_meta = types.SimpleNamespace(name="broken", upstream=False, has_memory_bank=True)
+            reader.scanner = types.SimpleNamespace(
+                discover=Mock(return_value=([aged_project, unreadable_project], [], [])),
+                scan=Mock(side_effect=[aged_meta, broken_meta]),
+                read_tasks=Mock(side_effect=[
+                    types.SimpleNamespace(items=[], kept=[(aged_project, "memory-bank/tasks/old.md", ""), (aged_project, "memory-bank/tasks/old.md", None)]),
+                    types.SimpleNamespace(items=[], kept=[(unreadable_project, "memory-bank/tasks/missing.md", None)]),
+                ]),
+            )
+            reader.rules = types.SimpleNamespace(classify=Mock(return_value=(types.SimpleNamespace(value="Quiet"), "Archived")))
+            result = reader.collect(now)
+            self.assertEqual(result["projects"][str(aged_project)]["scan_status"], "complete")
+            self.assertEqual(result["projects"][str(aged_project)]["scan_error"], "")
+            self.assertEqual(len(result["projects"][str(aged_project)]["kept"]), 2)
+            self.assertEqual(result["projects"][str(unreadable_project)]["scan_status"], "partial")
+            self.assertIn("could not be read", result["projects"][str(unreadable_project)]["scan_error"])
 
 
 class ConfigTest(unittest.TestCase):

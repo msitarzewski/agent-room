@@ -32,7 +32,7 @@ func (*approvalFailureRepository) Ingest(context.Context, []domain.Event) error 
 	return nil
 }
 
-func (*approvalFailureRepository) Events(context.Context, string, int64, int) (app.EventPage, error) {
+func (*approvalFailureRepository) Events(context.Context, string, app.Actor, app.EventQuery) (app.EventPage, error) {
 	return app.EventPage{}, nil
 }
 

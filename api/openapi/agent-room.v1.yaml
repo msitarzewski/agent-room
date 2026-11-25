@@ -505,15 +505,34 @@ paths:
   /events:
     get:
       operationId: listEvents
-      summary: List cursor-ordered project events
+      summary: Browse project history or replay events
       tags: [Realtime]
       parameters:
         - {$ref: "#/components/parameters/Project"}
-        - {name: cursor, in: query, description: Return events strictly after this cursor, schema: {type: integer, format: int64, minimum: 0}}
+        - name: order
+          in: query
+          description: Ascending order replays events by ingestion cursor. The Timeline uses desc to show the latest occurrence first, with larger cursors first for identical occurrence times.
+          schema: {type: string, enum: [asc, desc], default: asc}
+        - name: cursor
+          in: query
+          description: Exclusive event cursor. For descending pages, pass the previous page's next_cursor to continue after that event in occurrence-time order. An invalid or inaccessible descending cursor returns HTTP 400.
+          schema: {type: integer, format: int64, minimum: 0}
+        - name: q
+          in: query
+          description: Match a case-insensitive literal substring of the event type, subject type, subject ID, or actor ID.
+          schema: {type: string}
+        - name: event_type
+          in: query
+          description: Match the exact event type. Can be combined with q.
+          schema: {type: string}
+        - name: include_types
+          in: query
+          description: Include the event types visible to the caller across this project's full history, independently of the page and filters.
+          schema: {type: boolean, default: false}
         - {$ref: "#/components/parameters/EventLimit"}
       responses:
         "200":
-          description: Cursor-ordered event page
+          description: Project event page in the requested order
           content: {application/json: {schema: {$ref: "#/components/schemas/EventPage"}}}
         "400": {$ref: "#/components/responses/BadRequest"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -1616,6 +1635,11 @@ components:
       required: [items]
       properties:
         items: {type: array, items: {$ref: "#/components/schemas/Event"}}
+        event_types:
+          type: array
+          description: Alphabetical list of distinct event types visible in the project, returned when include_types is true. An empty project returns an empty list.
+          uniqueItems: true
+          items: {type: string}
         next_cursor: {type: integer, format: int64, minimum: 1}
     AgentPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Agent"}}, next_cursor: {type: string}}}
     RunPage: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Run"}}, next_cursor: {type: string}}}

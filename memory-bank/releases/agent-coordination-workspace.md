@@ -29,7 +29,7 @@ coordination signals.
 - [x] Review unfinished references and update release, architecture, operating, and recovery documentation.
 
 Keep this path and checkbox wording stable for Sentry task identity. No release
-number is assigned. Physical headset comfort/frame pacing, remote pipx activation,
+number is assigned. Physical headset comfort/frame pacing, remote activation,
 and autonomous worker execution remain outside this local acceptance claim.
 
 ## Reuse analysis

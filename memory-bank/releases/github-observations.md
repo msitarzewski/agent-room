@@ -124,5 +124,5 @@ The disposable integration-test database/container was removed.
 Return to the app's agent-first desktop/spatial interface as Michael requested.
 Use genuine review/check/issue context without making the human the dispatcher.
 Physical Vision Pro interaction/comfort/frame pacing, deliberate real runtime
-onboarding and verified pipx promotion remain separate. No autonomous executor,
+onboarding and verified remote promotion remain separate. No autonomous executor,
 merge-eligibility inference or remote activation is claimed.

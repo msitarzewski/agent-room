@@ -166,29 +166,55 @@ func (s *Service) List(ctx context.Context, actor Actor, projectID string, kind 
 }
 
 func (s *Service) Events(ctx context.Context, actor Actor, projectID string, after int64, limit int) (EventPage, error) {
+	return s.ListEvents(ctx, actor, projectID, EventQuery{Cursor: after, Limit: limit})
+}
+
+func (s *Service) ListEvents(ctx context.Context, actor Actor, projectID string, query EventQuery) (EventPage, error) {
 	if !actor.Can("event:read") && !actor.Can("resource:read") {
 		return EventPage{}, ErrDenied
 	}
-	if limit <= 0 {
-		limit = 100
+	if query.Limit <= 0 {
+		query.Limit = 100
 	}
-	if limit > 1000 {
-		limit = 1000
+	query.Limit = min(query.Limit, 1000)
+	query.Filter = strings.TrimSpace(query.Filter)
+	return s.repo.Events(ctx, projectID, actor, query)
+}
+
+// ReadVisiblePage fills a browsing page using the same recipient checks as the
+// live stream. read returns raw bounded batches from the caller's snapshot.
+func (query EventQuery) ReadVisiblePage(actor Actor, read func(EventQuery) (EventPage, error)) (EventPage, error) {
+	limit := query.Limit
+	// Stream replay uses the raw forward cursor as a watermark, including when
+	// a participant cannot read a request. Browsing uses only visible cursors.
+	replay := !query.Descending && query.Filter == "" && query.EventType == "" && !query.IncludeTypes
+	if !replay {
+		query.Limit++ // Look ahead for one more visible result.
 	}
-	page, err := s.repo.Events(ctx, projectID, after, limit)
-	if page.Items != nil {
-		visible := make([]domain.Event, 0, len(page.Items))
-		for _, event := range page.Items {
-			if CoordinationEventVisible(actor, event) {
-				visible = append(visible, event)
-			}
+	page := EventPage{Items: make([]domain.Event, 0)}
+	for {
+		batch, err := read(query)
+		if err != nil {
+			return EventPage{}, err
 		}
-		page.Items = visible
+		for _, event := range batch.Items {
+			if !CoordinationEventVisible(actor, event) {
+				continue
+			}
+			if len(page.Items) == limit {
+				page.NextCursor = page.Items[limit-1].Cursor
+				return page, nil
+			}
+			page.Items = append(page.Items, event)
+		}
+		if replay || batch.NextCursor == 0 {
+			page.NextCursor = batch.NextCursor
+			return page, nil
+		}
+		query.Cursor = batch.NextCursor
+		// Cross long stretches of private events in batches even on a small page.
+		query.Limit = max(query.Limit, 100)
 	}
-	if page.Items == nil {
-		page.Items = make([]domain.Event, 0)
-	}
-	return page, err
 }
 
 // Workspace fails closed when the actor cannot read any of its resource kinds.

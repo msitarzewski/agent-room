@@ -5,7 +5,8 @@ import { vi } from "vitest";
 import { App } from "../App";
 import { AuthProvider, safeLoginReturnTo } from "../auth/AuthContext";
 import { api } from "../api/client";
-import type { ProjectBrief } from "../api/types";
+import type { Project, ProjectBrief, SemanticEvent } from "../api/types";
+import { STREAM_REFRESH_DELAY } from "../stream/StreamContext";
 import {
   artifact,
   approval,
@@ -16,6 +17,7 @@ import {
   health,
   projectBrief,
   run,
+  semanticEvent,
   task,
 } from "./fixtures";
 
@@ -27,6 +29,8 @@ interface FetchOptions {
   degradedHealth?: boolean;
   nullProjects?: boolean;
   brief?: ProjectBrief;
+  projects?: Project[];
+  events?: SemanticEvent[];
 }
 
 interface ControlledSocket {
@@ -41,11 +45,11 @@ function sockets(): ControlledSocket[] {
 }
 
 function mockApi(options: FetchOptions = {}) {
-  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const calls: Array<{ url: string; params: URLSearchParams; init?: RequestInit }> = [];
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const rawUrl = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const url = new URL(rawUrl, window.location.origin);
-    calls.push({ url: url.pathname, init });
+    calls.push({ url: url.pathname, params: url.searchParams, init });
     if (url.pathname === "/api/v1/auth/session") {
       if (options.authenticated === false) {
         return Promise.resolve(Response.json({ title: "Unauthorized", status: 401 }, { status: 401 }));
@@ -65,6 +69,27 @@ function mockApi(options: FetchOptions = {}) {
     }
     if (url.pathname === "/api/v1/projects" && options.nullProjects) {
       return Promise.resolve(Response.json({ items: null }));
+    }
+    if (url.pathname === "/api/v1/projects" && options.projects) {
+      return Promise.resolve(Response.json({ items: options.projects }));
+    }
+    if (url.pathname === "/api/v1/events") {
+      const query = url.searchParams.get("q")?.toLowerCase() ?? "";
+      const cursor = url.searchParams.get("cursor");
+      const eventType = url.searchParams.get("event_type");
+      const limit = Number(url.searchParams.get("limit") ?? 100);
+      const events = options.empty ? [] : options.events ?? [semanticEvent];
+      const projectEvents = events.filter((event) => event.project_id === url.searchParams.get("project_id"));
+      // The fixture timestamps use UTC. Padding the fraction preserves microseconds and equal instants.
+      const timestamp = (value: string) => value.slice(0, 19) + value.slice(20, -1).padEnd(6, "0");
+      const ordered = projectEvents.sort((a, b) => timestamp(b.occurred_at).localeCompare(timestamp(a.occurred_at)) || b.cursor - a.cursor);
+      const start = cursor === null ? 0 : ordered.findIndex((event) => String(event.cursor) === cursor) + 1;
+      const matches = ordered.slice(start).filter((event) => (!eventType || event.type === eventType) &&
+        [event.type, event.subject_type, event.subject_id, event.actor_id].some((field) => field.toLowerCase().includes(query)));
+      const items = matches.slice(0, limit);
+      const event_types = url.searchParams.get("include_types") === "true"
+        ? [...new Set(projectEvents.map((event) => event.type))].sort() : undefined;
+      return Promise.resolve(Response.json({ items, next_cursor: matches.length > limit ? items.at(-1)?.cursor : null, event_types }));
     }
     if (init?.method === "POST") {
       return Promise.resolve(Response.json({ id: "updated", version: 2, project_id: "project_alpha", updated_at: new Date().toISOString() }));
@@ -90,6 +115,15 @@ async function renderPath(path: string, options: FetchOptions = {}) {
   const result = render(<AuthProvider><App /></AuthProvider>);
   await waitFor(() => expect(screen.queryByText("Opening Agent Room")).not.toBeInTheDocument());
   return { ...result, calls };
+}
+
+// Sparse cursors reflect writes for other projects in the same event log.
+function timelineHistory(count: number): SemanticEvent[] {
+  const latest = Date.parse(semanticEvent.occurred_at);
+  return Array.from({ length: count }, (_, index) => ({
+    ...semanticEvent, id: `event_${index + 1}`, cursor: (index + 1) * 3, subject_id: `task_${index + 1}`,
+    occurred_at: new Date(latest - (count - 1 - index) * 1_000).toISOString(),
+  }));
 }
 
 describe("Agent Room application", () => {
@@ -155,7 +189,7 @@ describe("Agent Room application", () => {
     expect(await screen.findByRole("heading", { name: "What needs you now" })).toBeInTheDocument();
     expect(screen.getByText("Review authentication evidence")).toBeInTheDocument();
     expect(screen.getByText("Project coordination update")).toBeInTheDocument();
-    expect(screen.getByText(/work events · .* source checks · .* task reports/)).toBeInTheDocument();
+    expect(screen.getByText(/work events? · .* source checks? · .* task reports?/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Mark changes reviewed" }));
     await screen.findByText(/Changes through event 42 were marked reviewed/);
     const briefAck = calls.find((call) => call.url === "/api/v1/brief/acknowledge");
@@ -174,12 +208,19 @@ describe("Agent Room application", () => {
   it("separates routine source checks and task reports from work events without changing review cursors", async () => {
     const brief = { ...projectBrief, through_cursor: 51, event_counts: { "project.observed": 7, "task.observed": 3, "review.requested": 1 } };
     const { calls } = await renderPath("/", { brief });
-    expect(await screen.findByText("1 work events · 7 source checks · 3 task reports")).toBeInTheDocument();
+    expect(await screen.findByText("1 work event · 7 source checks · 3 task reports")).toBeInTheDocument();
     expect(screen.getByText("project.observed")).toBeInTheDocument();
     expect(screen.getByText("task.observed")).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole("button", { name: "Mark changes reviewed" }));
     await screen.findByText(/Changes through event 51 were marked reviewed/);
     expect(calls.find((call) => call.url === "/api/v1/brief/acknowledge")?.init?.body).toBe(JSON.stringify({ expected_cursor: 40, through_cursor: 51 }));
+  });
+
+  it("clearly labels quiet routine-only monitoring briefs", async () => {
+    const brief = { ...projectBrief, through_cursor: 48, event_counts: { "project.observed": 5 } };
+    await renderPath("/", { brief });
+    expect(await screen.findByText("0 work events · 5 source checks · 0 task reports")).toBeInTheDocument();
+    expect(screen.getByText(/Routine monitoring only/)).toBeInTheDocument();
   });
 
   it("shows real run controls only when capabilities advertise them", async () => {
@@ -461,11 +502,228 @@ describe("Agent Room application", () => {
     await renderPath("/timeline");
     await screen.findByText("task · task_1");
     await user.type(screen.getByLabelText("Filter events"), "no such event");
-    expect(screen.getByText("No events match your filters.")).toBeInTheDocument();
+    expect(await screen.findByText("No events match your filters.")).toBeInTheDocument();
     cleanup();
     await renderPath("/workers");
     await screen.findByText("Build secure session flow");
     await user.selectOptions(screen.getByLabelText("Run state"), "failed");
     expect(screen.getByText("No runs match this filter.")).toBeInTheDocument();
+  });
+
+  it("opens a 9,110-event timeline in one request and navigates split pages by cursor", async () => {
+    const user = userEvent.setup();
+    const events = timelineHistory(9110);
+    // A late delivery has the largest cursor but the oldest occurrence.
+    events[0] = { ...events[0]!, cursor: 40_000, type: "task.observed" };
+    // Both sides of the page boundary share the same occurrence time.
+    events[9059] = { ...events[9059]!, occurred_at: events[9060]!.occurred_at };
+    const { calls } = await renderPath("/timeline", { events });
+    const requests = () => calls.filter((call) => call.url === "/api/v1/events");
+    const pager = () => within(screen.getByRole("navigation", { name: "Timeline pages" }));
+    // The server asks a fresh socket to resync when its replay would exceed 1,000 events.
+    const socket = sockets().at(-1)!;
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        socket.emitOpen();
+        socket.emitMessage({ type: "resync_required", data: { reason: "replay_limit" } });
+        await vi.advanceTimersByTimeAsync(STREAM_REFRESH_DELAY + 1);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    await screen.findByText("task · task_9110");
+    expect(requests()).toHaveLength(1);
+    expect(Object.fromEntries(requests()[0]!.params)).toMatchObject({
+      project_id: "project_alpha", limit: "50", order: "desc", include_types: "true",
+    });
+    expect(requests()[0]!.params.has("cursor")).toBe(false);
+    expect(requests()[0]!.params.has("event_type")).toBe(false);
+    const types = screen.getByRole("combobox", { name: "Event type" });
+    expect(within(types).getByRole("option", { name: "All event types", selected: true })).toBeInTheDocument();
+    expect(within(types).getByRole("option", { name: "task.observed" })).toBeInTheDocument();
+    const items = within(screen.getByRole("list", { name: "Event timeline" })).getAllByRole("listitem");
+    expect(items).toHaveLength(50);
+    expect(items[0]).toHaveTextContent("task · task_9110");
+    expect(items.at(-1)).toHaveTextContent("task · task_9061");
+    expect(pager().getByRole("button", { name: "Newer" })).toBeDisabled();
+
+    await user.click(pager().getByRole("button", { name: "Older" }));
+    await screen.findByText("task · task_9060");
+    expect(screen.queryByText("task · task_9061")).not.toBeInTheDocument();
+    expect(requests()).toHaveLength(2);
+    expect(requests()[1]!.params.get("cursor")).toBe(String(9061 * 3));
+    expect(requests()[1]!.params.has("include_types")).toBe(false);
+
+    await user.click(pager().getByRole("button", { name: "Newer" }));
+    await screen.findByText("task · task_9110");
+    expect(pager().getByRole("button", { name: "Newer" })).toBeDisabled();
+    expect(screen.queryByText("task · task_9060")).not.toBeInTheDocument();
+  });
+
+  it("combines exact event type and text across history, and resets filters and pages on project change", async () => {
+    const user = userEvent.setup();
+    const events = timelineHistory(120);
+    for (const event of events.slice(0, 60)) event.type = "task.observed";
+    events[0] = { ...events[0]!, subject_id: "archived-approval" };
+    events[1] = { ...events[1]!, type: "task.observed.extra", subject_id: "archived-approval-other-type" };
+    events.push({ ...semanticEvent, project_id: "project_beta", id: "beta-event", type: "run.started", subject_id: "beta-subject", cursor: 2047 });
+    const projects = ["alpha", "beta"].map((suffix) => ({
+      id: `project_${suffix}`, name: suffix, version: 1, updated_at: semanticEvent.occurred_at, capabilities: ["*"],
+    }));
+    const { calls } = await renderPath("/timeline", { events, projects });
+    await screen.findByText("task · task_120");
+    await user.click(screen.getByRole("button", { name: "Older" }));
+    await screen.findByText("task · task_70");
+    const typeMenu = () => screen.getByRole("combobox", { name: "Event type" });
+    await user.selectOptions(typeMenu(), "task.observed");
+    await screen.findByText("task · task_60");
+    expect(screen.getByRole("button", { name: "Newer" })).toBeDisabled();
+    expect(within(typeMenu()).getByRole("option", { name: "task.observed.extra" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Filter events"), "archived-approval");
+    expect(await screen.findByText("task · archived-approval")).toBeInTheDocument();
+    const searchRequest = calls.filter((call) => call.url === "/api/v1/events").at(-1)!;
+    expect(searchRequest.params.get("q")).toBe("archived-approval");
+    expect(searchRequest.params.get("event_type")).toBe("task.observed");
+    expect(searchRequest.params.has("cursor")).toBe(false);
+    expect(screen.queryByText("task · archived-approval-other-type")).not.toBeInTheDocument();
+    expect(screen.queryByText("task · task_60")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Older" })).toBeDisabled();
+
+    await user.clear(screen.getByLabelText("Filter events"));
+    await screen.findByText("task · task_60");
+    await user.click(screen.getByRole("button", { name: "Older" }));
+    await screen.findByText("task · archived-approval");
+    await user.selectOptions(screen.getByLabelText("Project"), "project_beta");
+    expect(await screen.findByText("task · beta-subject")).toBeInTheDocument();
+    expect(screen.queryByText("task · archived-approval")).not.toBeInTheDocument();
+    const betaRequests = calls.filter((call) => call.url === "/api/v1/events" && call.params.get("project_id") === "project_beta");
+    expect(betaRequests).toHaveLength(1);
+    expect(betaRequests[0]!.params.has("cursor")).toBe(false);
+    expect(betaRequests[0]!.params.get("include_types")).toBe("true");
+    expect(betaRequests[0]!.params.has("event_type")).toBe(false);
+    expect(within(typeMenu()).getByRole("option", { name: "All event types", selected: true })).toBeInTheDocument();
+    expect(within(typeMenu()).getByRole("option", { name: "run.started" })).toBeInTheDocument();
+    expect(within(typeMenu()).queryByRole("option", { name: "task.observed" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Newer" })).toBeDisabled();
+  });
+
+  it("keeps an older timeline page stable during live activity and hides it on revocation", async () => {
+    const user = userEvent.setup();
+    const events = timelineHistory(51);
+    const { calls } = await renderPath("/timeline", { events });
+    await screen.findByText("task · task_51");
+    await user.click(screen.getByRole("button", { name: "Older" }));
+    await screen.findByText("task · task_1");
+    const fetched = calls.filter((call) => call.url === "/api/v1/events").length;
+    const socket = sockets().at(-1)!;
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        socket.emitMessage({ type: "task.updated", cursor: 155, occurred_at: semanticEvent.occurred_at });
+        await vi.advanceTimersByTimeAsync(STREAM_REFRESH_DELAY + 1);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(screen.getByText("task · task_1")).toBeInTheDocument();
+    expect(calls.filter((call) => call.url === "/api/v1/events")).toHaveLength(fetched);
+    act(() => socket.emitClose(4403));
+    expect(await screen.findByText("Access denied")).toBeInTheDocument();
+    expect(screen.queryByText("task · task_1")).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: semanticEvent.type })).not.toBeInTheDocument();
+  });
+
+  it("merges only live events of the selected type by occurrence time, breaking ties by cursor", async () => {
+    const user = userEvent.setup();
+    const events = timelineHistory(51);
+    const { calls } = await renderPath("/timeline", { events });
+    await screen.findByText("task · task_51");
+    const typeMenu = screen.getByRole("combobox", { name: "Event type" });
+    await user.selectOptions(typeMenu, semanticEvent.type);
+    await waitFor(() => expect(calls.filter((call) => call.url === "/api/v1/events").at(-1)?.params.get("event_type")).toBe(semanticEvent.type));
+    await screen.findByText("task · task_51");
+    const fetched = calls.filter((call) => call.url === "/api/v1/events").length;
+    const newest = { ...semanticEvent, id: "live-newest", subject_id: "newest", cursor: 155, occurred_at: "2026-07-27T12:00:00.000900Z" };
+    const earlier = { ...newest, id: "live-earlier", subject_id: "earlier", cursor: 157, occurred_at: "2026-07-27T12:00:00.000100Z" };
+    const tied = { ...earlier, id: "live-tie", subject_id: "tie", cursor: 158 };
+    const late = { ...newest, id: "late", subject_id: "late", cursor: 160, occurred_at: "2026-07-01T12:00:00Z" };
+    const unrelated = { ...newest, type: `${semanticEvent.type}.extra`, id: "other", subject_id: "other", cursor: 161 };
+    events.push(newest, earlier, tied, late, unrelated);
+    const socket = sockets().at(-1)!;
+    act(() => {
+      for (const event of [newest, earlier, tied, late, unrelated, newest]) {
+        socket.emitMessage({ type: event.type, cursor: event.cursor, occurred_at: event.occurred_at, data: event });
+      }
+    });
+    await screen.findByText("task · newest");
+    const items = within(screen.getByRole("list", { name: "Event timeline" })).getAllByRole("listitem");
+    expect(items).toHaveLength(50);
+    expect(items.slice(0, 4).map((item) => within(item).getByRole("heading").textContent))
+      .toEqual(["task · newest", "task · tie", "task · earlier", "task · task_51"]);
+    expect(screen.queryByText("task · late")).not.toBeInTheDocument();
+    expect(screen.queryByText("task · other")).not.toBeInTheDocument();
+    expect(within(typeMenu).getByRole("option", { name: unrelated.type })).toBeInTheDocument();
+    expect(calls.filter((call) => call.url === "/api/v1/events")).toHaveLength(fetched);
+    await user.click(screen.getByRole("button", { name: "Older" }));
+    expect(await screen.findByText("task · late")).toBeInTheDocument();
+    expect(screen.getByText("task · task_4")).toBeInTheDocument();
+    expect(screen.queryByText("task · task_5")).not.toBeInTheDocument();
+  });
+
+  it("refreshes one bounded page for a burst of incomplete stream notifications", async () => {
+    const events = timelineHistory(51);
+    const { calls } = await renderPath("/timeline", { events });
+    await screen.findByText("task · task_51");
+    events.push({ ...semanticEvent, id: "new-event", subject_id: "new-task", cursor: 160 });
+    const socket = sockets().at(-1)!;
+    act(() => {
+      socket.emitMessage({ type: "task.updated", cursor: 159, occurred_at: semanticEvent.occurred_at });
+      socket.emitMessage({ type: "task.updated", cursor: 160, occurred_at: semanticEvent.occurred_at });
+    });
+    expect(await screen.findByText("task · new-task")).toBeInTheDocument();
+    const requests = calls.filter((call) => call.url === "/api/v1/events");
+    expect(requests).toHaveLength(2);
+    expect(requests[1]!.params.get("limit")).toBe("50");
+    expect(within(screen.getByRole("list", { name: "Event timeline" })).getAllByRole("listitem")).toHaveLength(50);
+  });
+
+  it("keeps a live event received while the latest page is loading", async () => {
+    let finishSnapshot!: () => void;
+    const snapshot = new Promise<void>((resolve) => { finishSnapshot = resolve; });
+    const request = vi.spyOn(api, "timeline").mockImplementationOnce(async () => {
+      await snapshot;
+      return { items: [semanticEvent] };
+    });
+    const incoming = { ...semanticEvent, id: "incoming", subject_id: "new-task", cursor: semanticEvent.cursor + 1 };
+    await renderPath("/timeline", { events: [semanticEvent, incoming] });
+    await waitFor(() => expect(request).toHaveBeenCalled());
+    act(() => sockets().at(-1)!.emitMessage({
+      type: incoming.type, cursor: incoming.cursor, occurred_at: incoming.occurred_at, data: incoming,
+    }));
+    await act(async () => {
+      finishSnapshot();
+      await snapshot;
+    });
+    await screen.findByText("task · task_1");
+    expect(await screen.findByText("task · new-task")).toBeInTheDocument();
+  });
+
+  it("enables Older when an initially empty timeline grows past one page", async () => {
+    const user = userEvent.setup();
+    const events: SemanticEvent[] = [];
+    await renderPath("/timeline", { events });
+    await screen.findByText("No semantic events");
+    const socket = sockets().at(-1)!;
+    events.push(...timelineHistory(51));
+    act(() => {
+      for (const event of events) {
+        socket.emitMessage({ type: event.type, cursor: event.cursor, occurred_at: event.occurred_at, data: event });
+      }
+    });
+    await screen.findByText("task · task_51");
+    expect(screen.queryByText("task · task_1")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Older" }));
+    expect(await screen.findByText("task · task_1")).toBeInTheDocument();
   });
 });

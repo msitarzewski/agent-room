@@ -1,14 +1,250 @@
 # Active Context
 
-**Last updated:** 2026-10-17
+**Last updated:** 2026-11-24
 
 **State:** DOCS
 
 **Substate:** IDLE
 
-**Task status:** GITHUB OBSERVATIONS — MERGED AND RUNNING
+**Task status:** Shared-host deployment is live and healthy (`086d31a`). Completed observability, Sentry heartbeat/coverage, CLI token-expiry, Attention brief wording, and shared-host `backup`/`upgrade`/`check` hardening on `feat/shared-host-migration`. [Task record](tasks/2026-11/241126_observability-and-ops-hardening.md)
 
-## Current Task
+The Timeline pager and event-type filter went live at 18:58 CST on Nov 18. Signed-in Safari and the production API for a high-volume observed project verified the release. [Timeline task record](tasks/2026-11/181126_timeline-pagination.md)
+
+## Final snapshot recovery — 2026-11-18
+
+The first attempt stopped at the missing canonical hardener during final provisioning. The host's committed hardener was restored and verified. Both remote installation markers still identified the rehearsal, and the private upload matched the final export. The three local writers were unloaded. Michael approved and applied the retry patch on `feat/shared-host-migration`. All 136 migration and collector tests passed in the deployment checkout.
+
+The retry preserved the restored databases. The remote health checks passed, including fresh GitHub delivery. The runner completed the local Sentry handoff and wrote the active deployment record. The old local app and GitHub launch agents are unloaded. [Recovery record](tasks/2026-11/181126_cutover-recovery.md)
+
+## Interactive Cutover Started — 2026-11-17
+
+2026-11-18 verification: the earlier Terminal window still existed, but no
+migration process held the orchestration lock. The initial window inventory
+used a bad AppleScript delimiter; its absence result was incorrect. The same
+authorized command was restarted in a new dedicated native Terminal window.
+Direct property checks now confirm the current `Agent Room migration` window
+is visible, unminimized and frontmost on the deployer's active console desktop.
+The inactive previous attempt is labelled separately. No terminal contents or
+password input were read. The checkpoint remains in fencing with no final
+export/activation at the last check; current private window metadata records
+the verified handle. Enter sudo only in the foreground Terminal prompt.
+
+Michael explicitly asked the assistant to run the prepared cutover. This
+authorizes executing that reviewed script as the deploy user; all shared-host
+isolation and private-data rules still apply. The first PTY invocation verified
+the signed release and reached the destination's sudo password prompt before
+any new local shutdown/export. It was cancelled there, with no activation.
+
+The assistant then opened and started the same command in a dedicated native
+Terminal window titled `Agent Room migration`, allowing Michael to enter the
+sudo password directly into the terminal rather than chat/tool arguments.
+The command is running and the checkpoint remains at its prior `fencing` phase
+while the early remote privilege preflight waits. Source ingestion is caught
+up and no final export/remote activation has occurred at the last check.
+
+Private window handle: `data/local/migration/operator-terminal.json`. Monitor
+checkpoint phases and Terminal busy state without reading credential input.
+Once sudo input is supplied the existing script proceeds automatically; later
+SSH phases may prompt again. Verify remote health, actual login, GitHub delivery
+and Sentry-over-tunnel receipt before claiming the move complete. Never weaken
+sudo, store a password or infer authorization from an elapsed wait.
+
+## Destination Cutover Continuation — 2026-11-17
+
+Michael reaffirmed that the remote host is the goal and asked to keep moving.
+The new source credential is accepted. Under the existing collector's process
+lock, recovery paused only that publisher, made a consistent private SQLite
+backup, and set the existing 401-failed records eligible for retry. No event ID,
+body, sequence, occurrence time, status or attempt history was changed; a digest
+verified those immutable queue contents. 101,973 queued records were preserved;
+only 4,950 authentication retry timers changed. The same supervised publisher
+was reloaded and all 99 delivery errors cleared. Queue drainage is complete:
+pending 0, quarantined 0, and all 99 projects have current successful delivery.
+
+The destination remains staged, not activated. Read-only checks confirm the
+isolated runtime UID has no process collision, proposed app/identity/admin/
+adapter listeners are absent, Docker/tools/Tailscale work and space is ample.
+Remote sudo requires interactive input; it is not available noninteractively.
+The host guide's operator execution boundary remains in force. Michael has been
+asked whether a normal Terminal is available and given the concrete cutover
+command; no password should be sent here.
+
+Cutover now runs a signed, staged-manifest-bound remote preflight before any
+local disable/bootout/export or checkpoint phase change. The reviewed helper is
+sent inline over the operator's SSH TTY so the old staged helper need not be
+replaced just to perform preflight. It verifies staged ownership/identity,
+tools, private port boundaries and sudo access. A failure preserves the source
+services and durable state. Separate later SSH sessions may prompt again;
+neither password storage nor a cross-TTY authorization cache is introduced.
+
+Reuse analysis for November tracking: the existing October monthly README is
+historical and cannot be repurposed as the current month's index. A November
+README records this continuing task without inventing a release milestone.
+Implementation remains on `feat/shared-host-migration`; no remote service or
+configuration has been changed by this continuation.
+
+Final verification: 76 migration tests plus 23 Sentry and 30 GitHub tests pass
+(129 total), along with bundle validation, Bash syntax, ShellCheck, deployment
+static/completeness and whitespace checks. The local bundle now includes the
+reviewed early-preflight helper; its private original helper/manifest are kept
+for recovery. The already-staged remote bundle and its durable uploaded hash
+remain unchanged; preflight verifies that old hash inline before local fencing.
+The final export will still capture both current databases and current GitHub
+state before replacing staged data. Source-input baseline remains unchanged.
+
+The remaining step is operator execution of the existing `cutover` command from
+an interactive Terminal, entering sudo only at its remote prompt. It verifies
+authorization before shutdown, then fences/exports/uploads/restores/starts and
+checks the destination, establishes the local Sentry tunnel and updates private
+deployment provenance. Browser/headset acceptance and explicit `retire` follow.
+No user answer or elapsed wait is approval to bypass sudo or the host guide.
+
+## Sentry Credential Rotation — 2026-11-17
+
+Michael explicitly requested a replacement expiring December 31, 2026. The
+existing auth service created it with absolute expiry
+2026-12-31 23:59:59 America/Chicago (2027-01-01 05:59:59 UTC), preserving the old
+actor, exact 99-project scope and only `event:ingest` / `source:sentry`.
+The CLI accepts whole-day lifetimes, so a private ignored one-off helper called
+the existing `CreateServiceTokenWithMetadata` API for the exact requested date;
+no production code or token policy was changed.
+
+Installed by atomic replacement of the existing mode-0600 credential file.
+Database metadata verifies the exact expiry and unchanged scope. One genuine
+queued observation with its original event ID received HTTP 202; its queue row
+was left for the publisher's normal idempotent acknowledgment. The previous
+expired token was revoked. No credential value was printed or tracked.
+
+At verification, roughly 101,900 observations remained queued and the publisher
+was still waiting in its existing authentication retry backoff (up to 15
+minutes). The running publisher reads the token on every delivery attempt, so
+no restart or queue reset is needed. Do not claim the backlog is drained until
+its counters and delivery timestamps confirm that. GitHub's disabled state and
+the staged migration are unchanged. Private operation evidence and metadata
+are under ignored `data/local/sentry/`; the credential remains only in its
+protected configured file. Next: verify automatic delivery/queue drainage, then
+reassess and resume the operator-run migration.
+
+## System Review — 2026-11-17
+
+Michael requested the latest status and a system walkthrough. Read-only checks
+confirm the application is still on the workstation, readiness 204 and public
+health/document 200. Anonymous API access is 401 and private ingestion is 404.
+An isolated authenticated Chromium walkthrough passed login, all 99 authorized
+projects, workspace/live connection, tasks, workers, approvals, health and
+sign-out; no page errors, server failures or desktop horizontal overflow.
+
+The migration is unfinished: its durable checkpoint remains `fencing`, with no
+final export or activation attempt. The destination is provisioned/restored but
+only its isolated PostgreSQL container is running; no app/admin/identity
+listener or app Supervisor configuration is active. The local app and Sentry
+publisher are running. GitHub remains disabled/unloaded from the October
+cutover attempt, and no source tunnel is installed.
+
+Sentry still scans all 99 projects successfully, but its source-ingestion token
+expired 2026-11-14. All 99 delivery reports have `http_401`; last successful
+delivery was November 14. About 100,500 immutable observations are queued
+locally, with no quarantine at this check. Fresh collection and an active web
+socket do not mean observations reached the application. GitHub's last delivered
+observation is October 20; its token is still within its recorded lifetime.
+
+All 120 focused checks pass: 67 migration, 23 Sentry and 30 GitHub tests, plus
+deployment/static/completeness and whitespace checks. Public main still matches
+local main at `ee4a897`; the migration helpers/docs remain uncommitted on
+`feat/shared-host-migration`. The prepared bundle's source-input baseline is
+unchanged, but its age and expired Sentry access must be addressed before
+cutover. This review changed no service, credential, queue, host or cutover state.
+
+Next: renew the existing exact-scoped Sentry source credential, verify actual
+delivery and drain the preserved queue, then recheck/rehearse the migration and
+resume operator-run cutover. Keep GitHub's disabled state explicit until its
+single publisher is deliberately brought up as part of that recovery. Do not
+clear queues/checkpoints or present the old cutover retry command as sufficient
+without source recovery. Automated credential-expiry monitoring remains an
+operational gap. Private evidence: `data/local/system-review-20261117.json`,
+`system-review-browser-20261117.json` and `system-review-20261117.png`.
+
+The October handoff below is historical; use this review for current health.
+
+## Shared-host migration
+
+Michael approved the move off the workstation and supplied the destination's
+canonical deployment guide. Read-only SSH confirms Ubuntu Linux/amd64, Docker
+access, the existing site hardener, and available proposed ports during
+preparation. The current private checkpoint and read-only destination checks now
+confirm the site is provisioned and both snapshots restored. Only the isolated
+PostgreSQL container is running; the application is not activated and its
+Supervisor configuration is not installed. Exact host identity, addresses and
+inventory remain in ignored local files. The assistant's checks remain read-only.
+
+The destination is multi-tenant. Use an isolated site tree/runtime account and
+Docker PostgreSQL, preserve neighboring sites and shared configuration, and keep
+browser access private over Tailscale. The host guide explicitly requires
+idempotent scripts that Michael executes. Prepare and verify those scripts and
+the actual migration bundle before handing over the execution commands. The
+dedicated-host bootstrap must not be run on this server. Preserve both existing
+databases, OIDC subject identity, artifacts, source bindings and durable queues.
+GitHub moves to the destination; local Sentry continues through a supervised
+private SSH tunnel. Do not retire local hosting before remote acceptance.
+
+Reuse analysis: `deploy/deploy.sh` and `deploy/configure-instance.sh` require a
+dedicated root/systemd/native-PostgreSQL host and cannot provision a shared site
+without changing their established contract. `deploy/compose/compose.yaml` uses
+development OIDC fixtures and cannot be promoted as production identity. Extend
+the deployment documentation and reuse `deploy/verify-artifact.sh`, immutable
+release assets and the existing collectors in a separate shared-host helper.
+Tests exercise migration manifests, path/URL validation and fail-closed
+cutover ordering. Work is on `feat/shared-host-migration`.
+
+Implementation passed QA: `deploy/prepare-migration.py` prepares
+the signed private bundle; `deploy/shared-host.sh` validates/provisions/restores
+only the app's isolated site; `deploy/run-migration.py` stages, persistently
+fences local writers, exports a fresh final snapshot, activates/checks the target
+and separately retires local hosting after explicit browser acceptance.
+`tests/deployment/` contains 67 passing migration regressions, including
+credential/config drift, immutable release recovery, private route ownership,
+uncertain activation, reboot-persistent fencing and tunnel login persistence.
+Both actual database dumps restored in an isolated disposable local cluster;
+the pinned Linux verifier accepted the actual signed clean `582567d` artifact.
+The existing 53 source collector tests, shell/static/completeness and secret
+checks pass. No target mutation or local service change occurred.
+
+## Next: Operator Execution
+
+The host guide's explicit execution boundary remains in force: Michael runs the
+prepared commands in an interactive terminal. Staging is complete; next run `cutover`
+using `deploy/run-migration.py --bundle data/local/migration/bundle`; inspect the
+new URL/login/source freshness and actual headset behavior before explicit
+`REMOTE_BROWSER_ACCEPTED` retirement. See
+[shared-host migration](build-deployment.md#shared-host-migration).
+
+The source Mac app remains ready (204); remote activation has not begun. A shell
+invocation without a real terminal failed before loading the bundle because
+remote sudo requires interactive input. The CLI now prints that fixed operational
+reason instead of hiding it behind the generic error; unexpected exception
+details stay private. Both new CLI regressions and all 22 operator tests pass.
+The destination is staged, with its application/admin listeners absent. Private verification is in
+`data/local/migration/verification.json`; a future successful operator run writes
+`orchestrator.json` and replaces `data/local/deployment.json` with a pointer to
+that authoritative remote handoff, retaining the prior record byte for byte.
+No remote deployment, restart acceptance, device acceptance or scheduled
+off-host backup policy is claimed. Keep addresses/secrets out of tracked files.
+Existing current Memory Bank references now use a generic destination label;
+historical machine-alias references were not rewritten in Git history.
+
+The subsequent interactive `cutover` stopped/disabled the local GitHub publisher
+then halted during fencing because the helper checked label removal immediately
+after `launchctl bootout`. Read-only checks find GitHub now unloaded, while local
+Sentry and app remain loaded and readiness remains 204. No final snapshot or
+remote activation was attempted. The helper now waits up to 30 seconds for both
+launchd label removal and the captured process's exit, retaining the final
+snapshot safety gate. Two regressions cover delayed successful unload and a
+timeout that must never export/start/resume. All 67 migration tests pass. Retry
+the same interactive `cutover` command; do not reset the checkpoint or restart
+the old GitHub publisher. Private current evidence is `fence-status.json` under
+the migration directory.
+
+## Previous Task
 
 2026-10-17: Michael's approved read-only GitHub monitor is working and merged.
 [PR #7](https://github.com/msitarzewski/agent-room/pull/7) merged as `582567d`.
@@ -59,7 +295,7 @@ after the monitor. Keep agents primary and the human mostly a passenger. Use
 real source review/CI/issue context, ownership and requests to make necessary
 information understandable without overlapping panels or anonymous icon fields.
 Detailed Vision Pro interaction/comfort/frame pacing still needs device
-acceptance. Deliberate runtime onboarding and verified pipx promotion remain
+acceptance. Deliberate runtime onboarding and verified remote promotion remain
 separate; no automatic executor or remote activation is claimed.
 
 ## Previous Information Layout
@@ -105,7 +341,7 @@ the recorded release check, not a claim of a fresh scan on every docs update.
 Recovery copies are private in `data/local/coordination/backups/ux-layout-before`.
 Next: inspect dense information and input on the actual Vision Pro, measure
 comfort/frame pacing, deliberately onboard real agent runtimes with scoped
-authority, and verify the eventual pipx host before remote promotion. Michael
+authority, and verify the eventual destination host before remote promotion. Michael
 remains mostly a passenger; agent coordination is the primary product workflow.
 
 ## Previous Local Release
@@ -141,7 +377,7 @@ procedure. Exact deployed revision, hashes, and recovery phase are private in
 check those on recovery before assuming the last operation finished. No remote
 activation, provider-hook service, or autonomous executor is claimed. Next are
 physical Vision Pro interaction/comfort/frame pacing, deliberate runtime
-onboarding, and verified pipx promotion. Keep private runtime/evidence ignored.
+onboarding, and verified remote promotion. Keep private runtime/evidence ignored.
 
 2026-10-15: Michael approved proceeding with the agent-first plan. Implementation
 is authorized on the current feature branch: typed machine requests, narrowly
@@ -194,7 +430,7 @@ Chromium/WebKit authenticated portfolio and project selection checks pass.
 The 13 pre-change tasks retain their human-owned fields; a new real source task
 was added during collection. Secrets, host values, and detailed evidence remain
 ignored under owner-only `data/local/`. No runtime file is tracked. Full portfolio
-operation is complete; headset workflow/comfort, brief polish, and pipx promotion
+operation is complete; headset workflow/comfort, brief polish, and remote promotion
 remain the next work.
 
 2026-10-15: Michael reports, "Immersive works!" User-reported immersive operation
@@ -203,7 +439,7 @@ comfort, recovery, and measured frame pacing remain to be recorded in
 `releases/spatial-workspace.md#remaining-device-and-promotion-acceptance`.
 Next recommendation: expand the observatory's real project portfolio with
 view-only operator access, improve the brief's routine-scan wording/counting,
-finish the headset workflow checks, then prepare the verified pipx deployment.
+finish the headset workflow checks, then prepare the verified remote deployment.
 These were recommendations at the time of the headset confirmation. The explicit
 approval and completed full-permission portfolio setup are recorded above.
 
@@ -244,7 +480,7 @@ permission expansion; Michael subsequently approved the exact scope and the
 fresh 99-project setup is complete. Actual authenticated Chromium/WebKit
 acceptance passes: one healthy socket, heartbeat, typed project frames, advancing
 collection times, unchanged human fields, and no reload or CSP violations. The
-release checklist is complete. Mac staging continues; pipx remains the eventual
+release checklist is complete. Mac staging continues; the remote host remains the eventual
 deployment home.
 
 ## Spatial Release Context

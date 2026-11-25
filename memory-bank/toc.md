@@ -1,6 +1,6 @@
 # Agent Room Memory Bank
 
-**Last updated:** 2026-10-17
+**Last updated:** 2026-11-24
 
 This index routes future sessions to the smallest useful context set. `boot.md` remains the founding product specification; the Memory Bank records working context, accepted decisions, implementation patterns, and operational procedures derived from it.
 
@@ -9,9 +9,14 @@ This index routes future sessions to the smallest useful context set. `boot.md` 
 1. [quick-start.md](./quick-start.md) — minimum project orientation
 2. [activeContext.md](./activeContext.md) — current state and pending decisions
 3. [progress.md](./progress.md) — roadmap and completion state
-4. [tasks/2026-10/README.md](./tasks/2026-10/README.md) — current month
+4. [tasks/2026-11/README.md](./tasks/2026-11/README.md) — current month
 
 ## Recent Task Records
+
+- [Observability and ops hardening](./tasks/2026-11/241126_observability-and-ops-hardening.md) — Sentry coverage/heartbeat throttling, CLI token-expiry checks, Attention brief wording, and shared-host backup/upgrade modes
+- [Timeline pagination and event-type filtering](./tasks/2026-11/181126_timeline-pagination.md) — chronological paging, project-wide type selection, and verification
+- [Shared-host migration](./build-deployment.md#shared-host-migration) — operator procedure, checkpoints, and acceptance criteria
+- [November cutover recovery](./tasks/2026-11/181126_cutover-recovery.md) — local fencing, final upload, and recovery from interrupted provisioning
 
 - [GitHub observations](./releases/github-observations.md) — merged read-only issue/PR/review/check source, local operation and return-to-interface handoff
 

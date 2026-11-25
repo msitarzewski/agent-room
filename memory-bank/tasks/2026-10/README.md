@@ -2,6 +2,33 @@
 
 ## Planned Work
 
+### 2026-10-20: [IN-PROGRESS] Shared-host migration
+
+- Michael approved preparing the move and supplied the canonical host guide.
+  APPLY / WAITING_TOOL on `feat/shared-host-migration`: operator-run kit verified;
+  Staging is complete; interactive-terminal `cutover` remains pending.
+- Read-only SSH verifies the staged destination: provisioned/restored markers,
+  PostgreSQL running, app not activated and no app/admin listener. Host-specific
+  inventory remains ignored. Local app readiness remains 204.
+- Prepare isolated, idempotent scripts for Michael to execute, preserving both
+  databases, identity, artifacts and source queues. Keep local hosting until
+  remote acceptance; retain local Sentry through a private tunnel.
+- Reuse release verification and collectors; the dedicated-host bootstrap and
+  development identity fixtures do not fit the shared-host deployment contract.
+- 63 migration regressions and 53 existing collector tests pass, as do shell,
+  deployment/static/completeness and current-source secret checks. Both real
+  database snapshots restored in an isolated local rehearsal; the pinned Linux
+  verifier accepts the signed clean release. No remote activation claimed.
+- See [shared-host migration](../../build-deployment.md#shared-host-migration).
+- Noninteractive CLI failure now explains the terminal/sudo requirement directly;
+  unexpected exception details remain redacted. Two new regressions pass (22
+  operator tests at that check).
+- Interactive cutover subsequently halted during fencing: GitHub is stopped and
+  disabled; app/Sentry remain loaded and local readiness is 204. No final export
+  or remote activation. Fixed the immediate post-bootout check to await label
+  removal and process exit within one bounded wait. Two shutdown regressions and
+  all 67 migration tests pass. Resume the same `cutover` command from Terminal.
+
 ### 2026-10-17: [COMPLETED] Read-only GitHub observations
 
 - [PR #7](https://github.com/msitarzewski/agent-room/pull/7) merged as `582567d`.
@@ -91,7 +118,7 @@
   to be recorded. No source/runtime changes or new release identifier.
 - Recommended next: real portfolio expansion with view-only operator access,
   brief signal/wording polish, complete headset workflow checks, then verified
-  pipx promotion. Portfolio setup remains pending an explicit scope decision.
+  remote promotion. Portfolio setup remains pending an explicit scope decision.
 
 ### 2026-10-13: [IN-PROGRESS] Zoomable control room
 

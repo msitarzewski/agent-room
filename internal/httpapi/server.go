@@ -469,9 +469,44 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	after, _ := strconv.ParseInt(r.URL.Query().Get("cursor"), 10, 64)
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	page, err := s.service.Events(r.Context(), currentActor(r), projectID, after, limit)
+	params := r.URL.Query()
+	order := params.Get("order")
+	if order != "" && order != "asc" && order != "desc" {
+		writeProblem(w, app.Invalid("order must be asc or desc"))
+		return
+	}
+	query := app.EventQuery{Descending: order == "desc", Filter: params.Get("q"), EventType: params.Get("event_type")}
+	for _, value := range []string{query.Filter, query.EventType} {
+		if !utf8.ValidString(value) || strings.ContainsRune(value, 0) {
+			writeProblem(w, app.Invalid("event filters must be valid text"))
+			return
+		}
+	}
+	switch params.Get("include_types") {
+	case "", "false":
+	case "true":
+		query.IncludeTypes = true
+	default:
+		writeProblem(w, app.Invalid("include_types must be true or false"))
+		return
+	}
+	if raw := params.Get("cursor"); raw != "" {
+		cursor, err := strconv.ParseInt(raw, 10, 64)
+		if query.Descending && (err != nil || cursor < 1) {
+			writeProblem(w, app.Invalid("cursor must be a positive integer"))
+			return
+		}
+		query.Cursor = cursor
+	}
+	if raw := params.Get("limit"); raw != "" {
+		limit, err := strconv.Atoi(raw)
+		if query.Descending && (err != nil || limit < 1) {
+			writeProblem(w, app.Invalid("limit must be a positive integer"))
+			return
+		}
+		query.Limit = limit
+	}
+	page, err := s.service.ListEvents(r.Context(), currentActor(r), projectID, query)
 	if err != nil {
 		writeProblem(w, err)
 		return

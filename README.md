@@ -152,7 +152,7 @@ installed provider-hook service or autonomous worker executor.
 
 Development uses the versions pinned by the repository:
 
-- Go 1.26.9 (the `toolchain` in [`go.mod`](go.mod))
+- Go 1.26.11 (the `toolchain` in [`go.mod`](go.mod))
 - Node.js 24.8.0 and npm 11.6.0
 - Docker with Compose for PostgreSQL 18 and the local Dex provider
 - Git, `curl`, and `jq`

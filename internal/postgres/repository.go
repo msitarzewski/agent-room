@@ -558,11 +558,66 @@ func jsonEqual(left, right []byte) bool {
 	return equalBytes(normalizedA, normalizedB)
 }
 
-func (r *Repository) Events(ctx context.Context, projectID string, after int64, limit int) (app.EventPage, error) {
-	rows, err := r.pool.Query(ctx, `SELECT cursor,id,project_id,event_type,subject_type,subject_id,actor_id,
+func (r *Repository) Events(ctx context.Context, projectID string, actor app.Actor, query app.EventQuery) (app.EventPage, error) {
+	var db sqlcgen.DBTX = r.pool
+	if query.Descending || query.Filter != "" || query.EventType != "" || query.IncludeTypes {
+		// Pivot, page (including private-event skips), and type choices must
+		// agree about which events existed and were visible for this request.
+		tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+		if err != nil {
+			return app.EventPage{}, err
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		db = tx
+	}
+	var pivot domain.Event
+	if query.Descending && query.Cursor != 0 {
+		err := db.QueryRow(ctx, `SELECT occurred_at, subject_type, CASE WHEN subject_type='coordination_request' THEN payload END
+			FROM events WHERE project_id=$1 AND cursor=$2`, projectID, query.Cursor).Scan(&pivot.OccurredAt, &pivot.SubjectType, &pivot.Payload)
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && !app.CoordinationEventVisible(actor, pivot)) {
+			return app.EventPage{}, app.Invalid("invalid event cursor")
+		}
+		if err != nil {
+			return app.EventPage{}, err
+		}
+	}
+	page, err := query.ReadVisiblePage(actor, func(batch app.EventQuery) (app.EventPage, error) {
+		result, err := readEventBatch(ctx, db, projectID, batch, pivot.OccurredAt)
+		if result.NextCursor != 0 {
+			pivot.OccurredAt = result.Items[len(result.Items)-1].OccurredAt
+		}
+		return result, err
+	})
+	if err == nil && query.IncludeTypes {
+		page.EventTypes, err = visibleEventTypes(ctx, db, projectID, actor)
+	}
+	return page, err
+}
+
+func readEventBatch(ctx context.Context, db sqlcgen.DBTX, projectID string, query app.EventQuery, pivotTime time.Time) (app.EventPage, error) {
+	args := []any{projectID, query.Cursor, query.Limit + 1}
+	bind := func(value any) string {
+		args = append(args, value)
+		return "$" + strconv.Itoa(len(args))
+	}
+	predicate, order := "cursor > $2", "cursor ASC"
+	if query.Descending {
+		order = "occurred_at DESC, cursor DESC"
+		if query.Cursor != 0 {
+			predicate = "(occurred_at,cursor) < (" + bind(pivotTime) + ",$2)"
+		}
+	}
+	if query.EventType != "" {
+		predicate += " AND event_type=" + bind(query.EventType)
+	}
+	if query.Filter != "" {
+		predicate += fmt.Sprintf(` AND (strpos(lower(event_type),lower(%[1]s)) > 0 OR strpos(lower(subject_type),lower(%[1]s)) > 0
+			OR strpos(lower(subject_id),lower(%[1]s)) > 0 OR strpos(lower(actor_id),lower(%[1]s)) > 0)`, bind(query.Filter))
+	}
+	rows, err := db.Query(ctx, `SELECT cursor,id,project_id,event_type,subject_type,subject_id,actor_id,
 		COALESCE(command_id,''),COALESCE(correlation_id,''),COALESCE(causation_id,''),occurred_at,schema_version,
 		COALESCE(source_system,''),COALESCE(source_event_id,''),COALESCE(source_sequence,0),payload
-		FROM events WHERE project_id=$1 AND cursor>$2 ORDER BY cursor LIMIT $3`, projectID, after, limit+1)
+		FROM events WHERE project_id=$1 AND `+predicate+` ORDER BY `+order+` LIMIT $3`, args...)
 	if err != nil {
 		return app.EventPage{}, err
 	}
@@ -580,11 +635,46 @@ func (r *Repository) Events(ctx context.Context, projectID string, after int64, 
 	if err := rows.Err(); err != nil {
 		return app.EventPage{}, err
 	}
-	if len(page.Items) > limit {
-		page.Items = page.Items[:limit]
+	if len(page.Items) > query.Limit {
+		page.Items = page.Items[:query.Limit]
 		page.NextCursor = page.Items[len(page.Items)-1].Cursor
 	}
 	return page, nil
+}
+
+func visibleEventTypes(ctx context.Context, db sqlcgen.DBTX, projectID string, actor app.Actor) ([]string, error) {
+	// Public events only contribute distinct labels. Operators can read all
+	// coordination event envelopes that decode as objects (JSON null also
+	// decodes into the zero-valued envelope in CoordinationEventVisible).
+	condition := "subject_type <> 'coordination_request'"
+	if actor.Can("resource:read") {
+		condition += " OR jsonb_typeof(payload) IN ('object','null')"
+	}
+	sql := "SELECT DISTINCT event_type, NULL::jsonb FROM events WHERE project_id=$1 AND (" + condition + ")"
+	if !actor.Can("resource:read") && actor.Can("coordination:read") {
+		// Only participant-restricted records need the canonical Go visibility
+		// check. Read them once, independently of the number of event types.
+		sql += ` UNION ALL SELECT event_type, payload FROM events WHERE project_id=$1 AND subject_type='coordination_request'`
+	}
+	rows, err := db.Query(ctx, sql, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	seen := make(map[string]bool)
+	types := make([]string, 0)
+	for rows.Next() {
+		event := domain.Event{SubjectType: domain.ResourceCoordinationRequest}
+		if err := rows.Scan(&event.Type, &event.Payload); err != nil {
+			return nil, err
+		}
+		if !seen[event.Type] && (event.Payload == nil || app.CoordinationEventVisible(actor, event)) {
+			types = append(types, event.Type)
+			seen[event.Type] = true
+		}
+	}
+	sort.Strings(types)
+	return types, rows.Err()
 }
 
 // Workspace reads the projection, event watermark, and source freshness from
