@@ -2,7 +2,7 @@ module github.com/msitarzewski/agent-room
 
 go 1.26
 
-toolchain go1.26.9
+toolchain go1.26.11
 
 require (
 	github.com/coder/websocket v1.8.14
