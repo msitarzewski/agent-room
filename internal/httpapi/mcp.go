@@ -104,9 +104,9 @@ type mcpTimelineInput struct {
 }
 
 type mcpTimelineOutput struct {
-	Items      []domain.Event `json:"items"`
-	NextCursor int64          `json:"next_cursor,omitempty"`
-	EventTypes []string       `json:"event_types,omitempty"`
+	Items      []any    `json:"items"`
+	NextCursor int64    `json:"next_cursor,omitempty"`
+	EventTypes []string `json:"event_types,omitempty"`
 }
 
 type mcpMapOutput struct {
@@ -280,7 +280,19 @@ func (s *Server) mcpHandler() http.Handler {
 				if err != nil {
 					return nil, mcpTimelineOutput{}, err
 				}
-				return nil, mcpTimelineOutput{Items: page.Items, NextCursor: page.NextCursor, EventTypes: page.EventTypes}, nil
+				items := make([]any, 0, len(page.Items))
+				for _, item := range page.Items {
+					raw, err := json.Marshal(item)
+					if err != nil {
+						return nil, mcpTimelineOutput{}, err
+					}
+					var decoded any
+					if err := json.Unmarshal(raw, &decoded); err != nil {
+						return nil, mcpTimelineOutput{}, err
+					}
+					items = append(items, decoded)
+				}
+				return nil, mcpTimelineOutput{Items: items, NextCursor: page.NextCursor, EventTypes: page.EventTypes}, nil
 			})
 		return server
 	}, &mcp.StreamableHTTPOptions{Stateless: true, SessionTimeout: 30 * time.Minute})
