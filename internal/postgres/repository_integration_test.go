@@ -882,6 +882,95 @@ func TestRepositoryCommandEventProjectionRoundTrip(t *testing.T) {
 		}
 	})
 
+	t.Run("unchanged project heartbeats update receipts without growing events and outbox pruning preserves freshness", func(t *testing.T) {
+		const project = "heartbeat-compaction-project"
+		if _, err := repo.EnsureProject(ctx, project, "Heartbeat Compaction"); err != nil {
+			t.Fatal(err)
+		}
+		sentry := app.Actor{ID: "sentry-heartbeat", Capabilities: map[string]struct{}{"event:ingest": {}, "source:sentry": {}}}
+		t1 := time.Now().UTC().Add(-48 * time.Hour).Truncate(time.Microsecond)
+		obs := domain.ProjectObservation{
+			ExternalID: "host:/heartbeat", Name: "Heartbeat", Path: "/heartbeat",
+			Status: "Active", Reason: "Clean scan", CollectedAt: t1, ScanStatus: "complete", TaskCount: 2,
+		}
+		publish := func(seq int64, id string, value domain.ProjectObservation) error {
+			raw, _ := json.Marshal(value)
+			return service.Ingest(ctx, sentry, []domain.Event{{
+				ProjectID: project, Type: "project.observed", SubjectType: domain.ResourceProject,
+				SubjectID: "untrusted", SourceSystem: "sentry", SourceEventID: id, SourceSequence: seq, Payload: raw,
+			}})
+		}
+		if err := publish(1, "hb-1", obs); err != nil {
+			t.Fatal(err)
+		}
+		var countAfterFirst int64
+		if err := repo.Pool().QueryRow(ctx, `SELECT count(*) FROM events WHERE project_id=$1`, project).Scan(&countAfterFirst); err != nil {
+			t.Fatal(err)
+		}
+		if countAfterFirst != 1 {
+			t.Fatalf("expected 1 event after first scan, got %d", countAfterFirst)
+		}
+		// Unchanged substantive payload with newer collected_at updates freshness without appending to events.
+		hb2 := obs
+		hb2.CollectedAt = t1.Add(10 * time.Minute)
+		if err := publish(2, "hb-2", hb2); err != nil {
+			t.Fatal(err)
+		}
+		var countAfterHeartbeat int64
+		if err := repo.Pool().QueryRow(ctx, `SELECT count(*) FROM events WHERE project_id=$1`, project).Scan(&countAfterHeartbeat); err != nil {
+			t.Fatal(err)
+		}
+		if countAfterHeartbeat != 1 {
+			t.Fatalf("expected unchanged heartbeat not to append events, got %d", countAfterHeartbeat)
+		}
+		// Idempotent replay of hb-2 succeeds; conflicting payload for hb-2 fails with ErrIdempotency.
+		if err := publish(2, "hb-2", hb2); err != nil {
+			t.Fatalf("idempotent heartbeat replay failed: %v", err)
+		}
+		mutated := hb2
+		mutated.TaskCount = 9
+		if err := publish(2, "hb-2", mutated); !errors.Is(err, app.ErrIdempotency) {
+			t.Fatalf("expected ErrIdempotency on mutated heartbeat replay, got %v", err)
+		}
+		// Substantive change appends a canonical event.
+		changed := hb2
+		changed.CollectedAt = t1.Add(20 * time.Minute)
+		changed.TaskCount = 5
+		if err := publish(3, "hb-3", changed); err != nil {
+			t.Fatal(err)
+		}
+		var countAfterChange int64
+		if err := repo.Pool().QueryRow(ctx, `SELECT count(*) FROM events WHERE project_id=$1`, project).Scan(&countAfterChange); err != nil {
+			t.Fatal(err)
+		}
+		if countAfterChange != 2 {
+			t.Fatalf("expected substantive change to append 2nd event, got %d", countAfterChange)
+		}
+		// Mark outbox rows old & published, then verify dry-run and apply pruning preserve Workspace freshness.
+		if _, err := repo.Pool().Exec(ctx, `UPDATE event_outbox SET published_at=now() - interval '10 days' WHERE project_id=$1`, project); err != nil {
+			t.Fatal(err)
+		}
+		dry, err := repo.PrunePublishedOutbox(ctx, 7, false)
+		if err != nil || !dry.DryRun || dry.OutboxEligible < 2 || dry.OutboxDeleted != 0 {
+			t.Fatalf("unexpected dry-run prune report: %+v err=%v", dry, err)
+		}
+		applied, err := repo.PrunePublishedOutbox(ctx, 7, true)
+		if err != nil || applied.DryRun || applied.OutboxDeleted < 2 {
+			t.Fatalf("unexpected applied prune report: %+v err=%v", applied, err)
+		}
+		ws, err := repo.Workspace(ctx, project)
+		if err != nil || len(ws.Sources) != 1 || ws.Sources[0].LastCollectedAt == nil || !ws.Sources[0].LastCollectedAt.Equal(changed.CollectedAt) {
+			t.Fatalf("workspace freshness lost after outbox pruning: %+v err=%v", ws.Sources, err)
+		}
+		health, err := repo.ComponentHealth(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := health["service_tokens"]; !ok {
+			t.Fatalf("ComponentHealth missing service_tokens: %+v", health)
+		}
+	})
+
 	t.Run("coordination commands runtime identities and recipient queries survive rebuild", func(t *testing.T) {
 		const project = "coordination-project"
 		if _, err := repo.EnsureProject(ctx, project, "Coordination integration"); err != nil {

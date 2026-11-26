@@ -90,8 +90,11 @@ func (r *Repository) ComponentHealth(ctx context.Context) (map[string]any, error
 	}
 	result["event_outbox"] = map[string]any{"status": statusText(oldestEventSeconds < 30), "pending": eventPending, "oldest_seconds": oldestEventSeconds}
 	result["control_outbox"] = map[string]any{"status": statusText(controlPending == 0), "pending": controlPending}
-	rows, err := r.pool.Query(ctx, `SELECT source_system,max(occurred_at) FROM events
-		WHERE source_system IS NOT NULL GROUP BY source_system ORDER BY source_system`)
+	rows, err := r.pool.Query(ctx, `SELECT source_system,max(last_at) FROM (
+		SELECT source_system,last_collected_at AS last_at FROM source_receipts
+		UNION ALL
+		SELECT source_system,max(occurred_at) AS last_at FROM events WHERE source_system IS NOT NULL GROUP BY source_system
+	) s GROUP BY source_system ORDER BY source_system`)
 	if err != nil {
 		return nil, err
 	}
@@ -110,6 +113,20 @@ func (r *Repository) ComponentHealth(ctx context.Context) (map[string]any, error
 		return nil, err
 	}
 	result["adapters"] = map[string]any{"status": "ok", "last_seen": lastSeen}
+	var tokensActive, tokensExpiring, tokensExpired int64
+	if err := r.pool.QueryRow(ctx, `SELECT
+		COUNT(*) FILTER (WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())),
+		COUNT(*) FILTER (WHERE revoked_at IS NULL AND expires_at IS NOT NULL AND expires_at > now() AND expires_at <= now() + interval '14 days'),
+		COUNT(*) FILTER (WHERE revoked_at IS NULL AND expires_at IS NOT NULL AND expires_at <= now())
+		FROM service_tokens`).Scan(&tokensActive, &tokensExpiring, &tokensExpired); err != nil {
+		return nil, err
+	}
+	result["service_tokens"] = map[string]any{
+		"status":              statusText(tokensExpired == 0 && tokensExpiring == 0),
+		"active":              tokensActive,
+		"expiring_within_14d": tokensExpiring,
+		"expired":             tokensExpired,
+	}
 	return result, nil
 }
 
@@ -528,6 +545,15 @@ func (r *Repository) Ingest(ctx context.Context, events []domain.Event) error {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		if domain.IsTaskObservationSource(event.SourceSystem) && event.Type == "project.observed" && event.SubjectType == domain.ResourceProject {
+			handled, err := ingestProjectHeartbeat(ctx, tx, event)
+			if err != nil {
+				return err
+			}
+			if handled {
+				continue
+			}
+		}
 		var cursor int64
 		err = tx.QueryRow(ctx, `INSERT INTO events(id,project_id,event_type,subject_type,subject_id,actor_id,command_id,correlation_id,causation_id,occurred_at,schema_version,source_system,source_event_id,source_sequence,payload)
 			VALUES($1,$2,$3,$4,$5,$6,NULLIF($7,''),NULLIF($8,''),NULLIF($9,''),$10,$11,$12,$13,NULLIF($14::bigint,0),$15)
@@ -540,12 +566,93 @@ func (r *Repository) Ingest(ctx context.Context, events []domain.Event) error {
 			return err
 		}
 		raw, _ := json.Marshal(event)
-		if _, err := tx.Exec(ctx, `INSERT INTO event_outbox(event_id,cursor,project_id,event)
-			VALUES($1,$2,$3,$4) ON CONFLICT(event_id) DO NOTHING`, event.ID, cursor, event.ProjectID, raw); err != nil {
+		var availableAt time.Time
+		if err := tx.QueryRow(ctx, `INSERT INTO event_outbox(event_id,cursor,project_id,event)
+			VALUES($1,$2,$3,$4) ON CONFLICT(event_id) DO UPDATE SET event_id=excluded.event_id RETURNING available_at`, event.ID, cursor, event.ProjectID, raw).Scan(&availableAt); err != nil {
+			return err
+		}
+		if err := upsertSourceReceipt(ctx, tx, event, availableAt); err != nil {
 			return err
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+func ingestProjectHeartbeat(ctx context.Context, tx pgx.Tx, event domain.Event) (bool, error) {
+	identity := event.ProjectID + "\x1f" + string(event.SubjectType) + "\x1f" + event.SubjectID
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, identity); err != nil {
+		return false, err
+	}
+	var lastEventID string
+	var lastPayload []byte
+	err := tx.QueryRow(ctx, `SELECT last_event_id,last_payload FROM source_receipts WHERE project_id=$1 AND source_system=$2`,
+		event.ProjectID, event.SourceSystem).Scan(&lastEventID, &lastPayload)
+	if err == nil && lastEventID != "" && lastEventID == event.SourceEventID {
+		if !jsonEqual(lastPayload, event.Payload) {
+			return false, app.ErrIdempotency
+		}
+		return true, nil
+	}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return false, err
+	}
+	var currentRaw []byte
+	var currentSource string
+	var currentSequence int64
+	err = tx.QueryRow(ctx, `SELECT document,COALESCE(source_system,''),COALESCE(source_sequence,0)
+		FROM resources WHERE project_id=$1 AND kind=$2 AND id=$3 FOR UPDATE`,
+		event.ProjectID, event.SubjectType, event.SubjectID).Scan(&currentRaw, &currentSource, &currentSequence)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if currentSource != event.SourceSystem || !sameSubstantiveProjectObservation(currentRaw, event.Payload) {
+		return false, nil
+	}
+	if event.SourceSequence > 0 && currentSequence >= event.SourceSequence {
+		return true, nil
+	}
+	if err := applyEventProjection(ctx, tx, event); err != nil {
+		return false, err
+	}
+	if err := upsertSourceReceipt(ctx, tx, event, time.Now().UTC()); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func sameSubstantiveProjectObservation(currentRaw, incomingPayload []byte) bool {
+	var current domain.Project
+	if json.Unmarshal(currentRaw, &current) != nil || current.SourceObservation == nil {
+		return false
+	}
+	var incoming domain.ProjectObservation
+	if json.Unmarshal(incomingPayload, &incoming) != nil {
+		return false
+	}
+	prior := current.SourceObservation
+	return prior.ExternalID == incoming.ExternalID &&
+		prior.Name == incoming.Name &&
+		prior.Path == incoming.Path &&
+		prior.Status == incoming.Status &&
+		prior.Reason == incoming.Reason &&
+		prior.ScanStatus == incoming.ScanStatus &&
+		prior.TaskCount == incoming.TaskCount &&
+		prior.ScanError == incoming.ScanError
+}
+
+func upsertSourceReceipt(ctx context.Context, tx pgx.Tx, event domain.Event, receivedAt time.Time) error {
+	_, err := tx.Exec(ctx, `INSERT INTO source_receipts(project_id,source_system,last_received_at,last_collected_at,last_event_id,last_payload)
+		VALUES($1,$2,$3,$4,$5,$6)
+		ON CONFLICT(project_id,source_system) DO UPDATE SET
+			last_received_at=GREATEST(source_receipts.last_received_at,excluded.last_received_at),
+			last_collected_at=GREATEST(source_receipts.last_collected_at,excluded.last_collected_at),
+			last_event_id=CASE WHEN excluded.last_collected_at >= source_receipts.last_collected_at THEN excluded.last_event_id ELSE source_receipts.last_event_id END,
+			last_payload=CASE WHEN excluded.last_collected_at >= source_receipts.last_collected_at THEN excluded.last_payload ELSE source_receipts.last_payload END`,
+		event.ProjectID, event.SourceSystem, receivedAt.UTC(), event.OccurredAt.UTC(), event.SourceEventID, event.Payload)
+	return err
 }
 
 func jsonEqual(left, right []byte) bool {
@@ -740,13 +847,21 @@ func (r *Repository) Workspace(ctx context.Context, projectID string) (app.Works
 }
 
 func projectSources(ctx context.Context, tx pgx.Tx, projectID string) ([]app.WorkspaceSource, error) {
-	rows, err := tx.Query(ctx, `SELECT e.source_system,max(o.available_at),max(e.occurred_at),
+	rows, err := tx.Query(ctx, `WITH observed AS (
+		SELECT source_system,last_received_at,last_collected_at
+		FROM source_receipts WHERE project_id=$1
+		UNION ALL
+		SELECT e.source_system,max(o.available_at),max(e.occurred_at)
+		FROM events e JOIN event_outbox o ON o.event_id=e.id
+		WHERE e.project_id=$1 AND e.source_system IS NOT NULL
+		GROUP BY e.source_system
+	)
+	SELECT s.source_system,max(s.last_received_at),max(s.last_collected_at),
 		(p.document->>'source_last_successful_collection_at')::timestamptz,
 		p.document->'source_observation'
-		FROM events e JOIN event_outbox o ON o.event_id=e.id
-		LEFT JOIN resources p ON p.project_id=e.project_id AND p.kind='project' AND p.id=CASE WHEN e.source_system='github' THEN $2 ELSE e.project_id END AND p.source_system=e.source_system
-		WHERE e.project_id=$1 AND e.source_system IS NOT NULL
-		GROUP BY e.source_system,p.document ORDER BY e.source_system`, projectID, domain.ObservedProjectIDForSource(projectID, "github"))
+		FROM observed s
+		LEFT JOIN resources p ON p.project_id=$1 AND p.kind='project' AND p.id=CASE WHEN s.source_system='github' THEN $2 ELSE $1 END AND p.source_system=s.source_system
+		GROUP BY s.source_system,p.document ORDER BY s.source_system`, projectID, domain.ObservedProjectIDForSource(projectID, "github"))
 	if err != nil {
 		return nil, err
 	}

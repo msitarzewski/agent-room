@@ -143,6 +143,7 @@ export const health: HealthSnapshot = {
   artifacts: { status: "ok" },
   oidc: { status: "ok", configured: true },
   realtime: { status: "ok" },
+  service_tokens: { status: "ok", active: 2, expiring_within_14d: 0, expired: 0 },
   checked_at: "2026-07-27T12:00:00Z",
 };
 

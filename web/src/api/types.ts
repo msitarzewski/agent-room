@@ -220,6 +220,12 @@ export interface HealthSnapshot {
   artifacts: { status: ComponentStatus };
   oidc: { status: ComponentStatus; configured: boolean };
   realtime: { status: ComponentStatus };
+  service_tokens?: {
+    status: ComponentStatus;
+    active: number;
+    expiring_within_14d: number;
+    expired: number;
+  };
   checked_at: string;
 }
 

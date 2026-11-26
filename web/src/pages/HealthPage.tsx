@@ -59,6 +59,16 @@ const loadHealth = async (projectId: string, signal?: AbortSignal) => {
       checked_at: snapshot.checked_at,
     },
   ];
+  if (snapshot.service_tokens) {
+    items.push({
+      id: "service-tokens",
+      name: "Service tokens",
+      kind: "credentials",
+      status: snapshot.service_tokens.status === "ok" ? "healthy" : "degraded",
+      detail: `${snapshot.service_tokens.active} active · ${snapshot.service_tokens.expiring_within_14d} expiring within 14d · ${snapshot.service_tokens.expired} expired`,
+      checked_at: snapshot.checked_at,
+    });
+  }
   return { items };
 };
 

@@ -414,3 +414,39 @@ func TestGitHubProjectReportCannotAdoptHumanResourceButLegacySentryCan(t *testin
 		}
 	}
 }
+
+func TestSameSubstantiveProjectObservation(t *testing.T) {
+	t1 := time.Date(2026, 11, 25, 10, 0, 0, 0, time.UTC)
+	t2 := t1.Add(10 * time.Minute)
+	base := domain.ProjectObservation{
+		ExternalID: "host:/repo", Name: "Repo", Path: "/repo",
+		Status: "Active", Reason: "Recent commits", CollectedAt: t1,
+		ScanStatus: "complete", TaskCount: 3,
+	}
+	currentDoc, err := json.Marshal(domain.Project{
+		Base: domain.NewBase("repo", "repo", t1), Name: "Repo", Slug: "repo",
+		Source: domain.Source{System: "sentry", ExternalID: base.ExternalID},
+		SourceObservation: &base,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	heartbeat := base
+	heartbeat.CollectedAt = t2
+	heartbeatRaw, _ := json.Marshal(heartbeat)
+	if !sameSubstantiveProjectObservation(currentDoc, heartbeatRaw) {
+		t.Fatal("expected heartbeat with only collected_at changed to be substantively identical")
+	}
+	changed := heartbeat
+	changed.TaskCount = 4
+	changedRaw, _ := json.Marshal(changed)
+	if sameSubstantiveProjectObservation(currentDoc, changedRaw) {
+		t.Fatal("expected changed task_count to require a canonical event")
+	}
+	statusChanged := heartbeat
+	statusChanged.ScanStatus = "partial"
+	statusRaw, _ := json.Marshal(statusChanged)
+	if sameSubstantiveProjectObservation(currentDoc, statusRaw) {
+		t.Fatal("expected changed scan_status to require a canonical event")
+	}
+}

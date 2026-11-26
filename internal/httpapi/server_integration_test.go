@@ -841,12 +841,16 @@ func TestServerAndMCPIntegrationBoundaries(t *testing.T) {
 			args string
 		}{
 			{"list_tasks", `{"limit":10}`},
+			{"list_agents", `{"limit":10}`},
 			{"list_attention", `{"limit":10}`},
 			{"list_runs", `{"limit":10}`},
 			{"list_situations", `{"limit":10}`},
 			{"list_evidence", `{"limit":10}`},
 			{"list_artifacts", `{"limit":10}`},
 			{"list_approvals", `{"limit":10}`},
+			{"get_project_overview", `{}`},
+			{"get_return_brief", `{}`},
+			{"list_timeline", `{"limit":10,"include_types":true}`},
 			{"send_chat_message", `{"body":"MCP integration","idempotency_key":"mcp-chat"}`},
 			{"transition_task", `{"task_id":"task-mcp","status":"working","expected_version":1,"idempotency_key":"mcp-transition"}`},
 			{"request_attention", `{"kind":"review","severity":"high","title":"MCP attention","idempotency_key":"mcp-attention"}`},
@@ -864,8 +868,9 @@ func TestServerAndMCPIntegrationBoundaries(t *testing.T) {
 			}
 		}
 		for index, name := range []string{
-			"list_tasks", "list_attention", "list_runs", "list_situations",
+			"list_tasks", "list_agents", "list_attention", "list_runs", "list_situations",
 			"list_evidence", "list_artifacts", "list_approvals",
+			"get_project_overview", "get_return_brief", "list_timeline",
 			"request_attention", "post_evidence", "claim_task", "request_review",
 		} {
 			response := mcpCall(

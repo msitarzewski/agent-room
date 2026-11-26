@@ -2,6 +2,12 @@
 
 ## Completed
 
+### 2026-11-25 — Agent MCP expansion, source_receipts compaction, and token health
+
+- Added `db/migrations/0003_source_receipts.sql`, server-side unchanged `project.observed` heartbeat deduplication, `agentroomctl maintenance prune-outbox`, and hourly 7-day published outbox pruning while keeping `events` strictly append-only.
+- Added `list_agents`, `get_project_overview`, `get_return_brief`, and `list_timeline` MCP tools to `internal/httpapi/mcp.go`.
+- Added non-secret `service_tokens` health summary to `GET /api/v1/health/components`, OpenAPI schema, and `HealthPage.tsx`. [Task record](251126_mcp-and-storage-compaction.md)
+
 ### 2026-11-24 — Observability, Sentry coverage, token expiry, and shared-host ops hardening
 
 - Fixed Sentry age-window `kept` classification so readable archived task files no longer trap healthy projects in `partial` / Coverage unknown, and added `project_heartbeat_seconds` throttling + pending-heartbeat coalescing + `auth_error_projects` reporting in `adapters/source.py` and `adapters/sentry/agentroom_sentry.py`.

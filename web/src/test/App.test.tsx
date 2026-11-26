@@ -27,6 +27,7 @@ interface FetchOptions {
   errorPath?: string;
   authenticated?: boolean;
   degradedHealth?: boolean;
+  healthSnapshot?: typeof health;
   nullProjects?: boolean;
   brief?: ProjectBrief;
   projects?: Project[];
@@ -95,9 +96,11 @@ function mockApi(options: FetchOptions = {}) {
       return Promise.resolve(Response.json({ id: "updated", version: 2, project_id: "project_alpha", updated_at: new Date().toISOString() }));
     }
     if (url.pathname === "/api/v1/health/components") {
-      return Promise.resolve(Response.json(options.degradedHealth
-        ? { ...health, artifacts: { status: "error" } }
-        : health));
+      return Promise.resolve(Response.json(
+        options.healthSnapshot ?? (options.degradedHealth
+          ? { ...health, artifacts: { status: "error" } }
+          : health),
+      ));
     }
     if (url.pathname === "/api/v1/brief") {
       return Promise.resolve(Response.json(options.brief ?? projectBrief));
@@ -337,6 +340,19 @@ describe("Agent Room application", () => {
     expect(await screen.findByText("1 components need attention")).toBeInTheDocument();
     expect(screen.getByText("Artifact store")).toBeInTheDocument();
     expect(screen.getByText("Content store check failed")).toBeInTheDocument();
+    expect(screen.getByText("Service tokens")).toBeInTheDocument();
+    expect(screen.getByText("2 active · 0 expiring within 14d · 0 expired")).toBeInTheDocument();
+  });
+
+  it("flags expiring or expired service tokens on the health page", async () => {
+    await renderPath("/health", {
+      healthSnapshot: {
+        ...health,
+        service_tokens: { status: "degraded", active: 2, expiring_within_14d: 1, expired: 0 },
+      },
+    });
+    expect(await screen.findByText("1 components need attention")).toBeInTheDocument();
+    expect(screen.getByText("2 active · 1 expiring within 14d · 0 expired")).toBeInTheDocument();
   });
 
   it("posts chat as a message without exposing a command control", async () => {

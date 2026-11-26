@@ -68,10 +68,16 @@ func (r *Repository) DispatchOutbox(ctx context.Context, publisher EventPublishe
 func (r *Repository) RunOutbox(ctx context.Context, publisher EventPublisher, report func(error)) {
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
+	pruneTicker := time.NewTicker(time.Hour)
+	defer pruneTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-pruneTicker.C:
+			if _, err := r.PrunePublishedOutbox(ctx, 7, true); err != nil && ctx.Err() == nil {
+				report(err)
+			}
 		case <-ticker.C:
 			for {
 				count, err := r.DispatchOutbox(ctx, publisher, 100)

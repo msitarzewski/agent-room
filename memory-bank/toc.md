@@ -1,6 +1,6 @@
 # Agent Room Memory Bank
 
-**Last updated:** 2026-11-24
+**Last updated:** 2026-11-25
 
 This index routes future sessions to the smallest useful context set. `boot.md` remains the founding product specification; the Memory Bank records working context, accepted decisions, implementation patterns, and operational procedures derived from it.
 
@@ -13,6 +13,7 @@ This index routes future sessions to the smallest useful context set. `boot.md` 
 
 ## Recent Task Records
 
+- [Agent MCP expansion and storage compaction](./tasks/2026-11/251126_mcp-and-storage-compaction.md) — `list_agents`/`overview`/`brief`/`timeline` MCP tools, `source_receipts` heartbeat deduplication, outbox pruning, and `/health` service-token visibility
 - [Observability and ops hardening](./tasks/2026-11/241126_observability-and-ops-hardening.md) — Sentry coverage/heartbeat throttling, CLI token-expiry checks, Attention brief wording, and shared-host backup/upgrade modes
 - [Timeline pagination and event-type filtering](./tasks/2026-11/181126_timeline-pagination.md) — chronological paging, project-wide type selection, and verification
 - [Shared-host migration](./build-deployment.md#shared-host-migration) — operator procedure, checkpoints, and acceptance criteria
