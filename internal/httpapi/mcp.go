@@ -89,6 +89,30 @@ type mcpCoordinationActionInput struct {
 	app.CoordinationActionInput
 }
 
+type mcpEmptyInput struct{}
+
+type mcpBriefInput struct {
+	AfterCursor int64 `json:"after_cursor,omitempty" jsonschema:"optional non-negative event cursor to read changes after"`
+}
+
+type mcpTimelineInput struct {
+	Cursor       int64  `json:"cursor,omitempty" jsonschema:"optional cursor boundary for paging older events"`
+	Limit        int    `json:"limit,omitempty" jsonschema:"maximum number of events to return, from 1 to 200"`
+	EventType    string `json:"event_type,omitempty" jsonschema:"optional exact event type filter"`
+	Filter       string `json:"filter,omitempty" jsonschema:"optional text search filter"`
+	IncludeTypes bool   `json:"include_types,omitempty" jsonschema:"include the list of visible event types in the project"`
+}
+
+type mcpTimelineOutput struct {
+	Items      []domain.Event `json:"items"`
+	NextCursor int64          `json:"next_cursor,omitempty"`
+	EventTypes []string       `json:"event_types,omitempty"`
+}
+
+type mcpMapOutput struct {
+	Data map[string]any `json:"data"`
+}
+
 func (s *Server) mcpHandler() http.Handler {
 	return mcp.NewStreamableHTTPHandler(func(request *http.Request) *mcp.Server {
 		projectID := request.URL.Query().Get("project_id")
@@ -119,6 +143,7 @@ func (s *Server) mcpHandler() http.Handler {
 			name, description, capability string
 			kind                          domain.ResourceType
 		}{
+			{"list_agents", "List agents and their presence in the authorized project.", "agent:read", domain.ResourceAgent},
 			{"list_runs", "List worker runs in the authorized project.", "run:read", domain.ResourceRun},
 			{"list_situations", "List correlated situations in the authorized project.", "situation:read", domain.ResourceSituation},
 			{"list_evidence", "List completion evidence in the authorized project.", "evidence:read", domain.ResourceEvidence},
@@ -212,6 +237,50 @@ func (s *Server) mcpHandler() http.Handler {
 				result, err := s.service.ActCoordination(ctx, actor, projectID, input.RequestID, input.Action, input.IdempotencyKey, input.ExpectedVersion, input.CoordinationActionInput, "mcp")
 				output, err := mcpMutationResult(result, err)
 				return nil, output, err
+			})
+		mcp.AddTool(server, &mcp.Tool{Name: "get_project_overview", Description: "Get resource counts, coordination summary, source freshness, and event cursor for the authorized project."},
+			func(ctx context.Context, _ *mcp.CallToolRequest, _ mcpEmptyInput) (*mcp.CallToolResult, mcpMapOutput, error) {
+				data, err := s.service.Overview(ctx, actor, projectID)
+				if err != nil {
+					return nil, mcpMapOutput{}, err
+				}
+				return nil, mcpMapOutput{Data: data}, nil
+			})
+		mcp.AddTool(server, &mcp.Tool{Name: "get_return_brief", Description: "Get the durable coordination return brief, event counts, and open attention items for the authorized project."},
+			func(ctx context.Context, _ *mcp.CallToolRequest, input mcpBriefInput) (*mcp.CallToolResult, mcpMapOutput, error) {
+				if input.AfterCursor < 0 {
+					return nil, mcpMapOutput{}, app.Invalid("after_cursor must be non-negative")
+				}
+				data, err := s.service.Brief(ctx, actor, projectID, input.AfterCursor)
+				if err != nil {
+					return nil, mcpMapOutput{}, err
+				}
+				return nil, mcpMapOutput{Data: data}, nil
+			})
+		mcp.AddTool(server, &mcp.Tool{Name: "list_timeline", Description: "List project events newest-first with optional event-type and text filters."},
+			func(ctx context.Context, _ *mcp.CallToolRequest, input mcpTimelineInput) (*mcp.CallToolResult, mcpTimelineOutput, error) {
+				if input.Cursor < 0 {
+					return nil, mcpTimelineOutput{}, app.Invalid("cursor must be non-negative")
+				}
+				limit := input.Limit
+				if limit <= 0 {
+					limit = 50
+				}
+				if limit > 200 {
+					limit = 200
+				}
+				page, err := s.service.ListEvents(ctx, actor, projectID, app.EventQuery{
+					Cursor:       input.Cursor,
+					Limit:        limit,
+					EventType:    input.EventType,
+					Filter:       input.Filter,
+					Descending:   true,
+					IncludeTypes: input.IncludeTypes,
+				})
+				if err != nil {
+					return nil, mcpTimelineOutput{}, err
+				}
+				return nil, mcpTimelineOutput{Items: page.Items, NextCursor: page.NextCursor, EventTypes: page.EventTypes}, nil
 			})
 		return server
 	}, &mcp.StreamableHTTPOptions{Stateless: true, SessionTimeout: 30 * time.Minute})

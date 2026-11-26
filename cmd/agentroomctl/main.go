@@ -41,7 +41,7 @@ func run() error {
 		return err
 	}
 	if len(command) == 0 {
-		return errors.New("command required: report, migrate, bootstrap, project, membership, service-token, projection, doctor, version")
+		return errors.New("command required: report, migrate, bootstrap, project, membership, service-token, projection, maintenance, doctor, version")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -110,6 +110,24 @@ func run() error {
 		}
 		fmt.Println("projections rebuilt")
 		return nil
+	case "maintenance":
+		if len(command) < 2 || command[1] != "prune-outbox" {
+			return errors.New("usage: agentroomctl maintenance prune-outbox [--retention-days 7] [--apply]")
+		}
+		flags := flag.NewFlagSet("prune-outbox", flag.ContinueOnError)
+		flags.SetOutput(io.Discard)
+		retentionDays := 7
+		apply := false
+		flags.IntVar(&retentionDays, "retention-days", 7, "days of published outbox rows to retain (1-365)")
+		flags.BoolVar(&apply, "apply", false, "delete eligible published outbox rows after backfilling source receipts")
+		if err := flags.Parse(command[2:]); err != nil || flags.NArg() != 0 {
+			return errors.New("usage: agentroomctl maintenance prune-outbox [--retention-days 7] [--apply]")
+		}
+		report, err := repo.PrunePublishedOutbox(ctx, retentionDays, apply)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(report)
 	case "bootstrap":
 		if len(command) != 5 {
 			return errors.New("usage: agentroomctl bootstrap <project-id> <project-name> <oidc-subject> <email>")

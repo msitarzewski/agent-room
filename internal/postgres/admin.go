@@ -119,6 +119,66 @@ func (r *Repository) GrantMembership(ctx context.Context, projectID, oidcSubject
 	return auditAdmin(ctx, tx, "membership.grant", "project", projectID, map[string]any{"user_id": userID, "capabilities": capabilities})
 }
 
+type OutboxPruneReport struct {
+	RetentionDays      int   `json:"retention_days"`
+	DryRun             bool  `json:"dry_run"`
+	ReceiptsBackfilled int64 `json:"receipts_backfilled"`
+	OutboxEligible     int64 `json:"outbox_eligible"`
+	OutboxDeleted      int64 `json:"outbox_deleted"`
+}
+
+// PrunePublishedOutbox backfills durable source_receipts from the event outbox
+// before removing already-published outbox rows older than retentionDays.
+// Append-only history tables (events, command_results, audit_records) are never modified.
+func (r *Repository) PrunePublishedOutbox(ctx context.Context, retentionDays int, apply bool) (OutboxPruneReport, error) {
+	if retentionDays < 1 || retentionDays > 365 {
+		return OutboxPruneReport{}, errors.New("retention-days must be an integer from 1 to 365")
+	}
+	cutoff := time.Now().UTC().Add(-time.Duration(retentionDays) * 24 * time.Hour)
+	report := OutboxPruneReport{RetentionDays: retentionDays, DryRun: !apply}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return OutboxPruneReport{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM event_outbox
+		WHERE published_at IS NOT NULL AND published_at < $1`, cutoff).Scan(&report.OutboxEligible); err != nil {
+		return OutboxPruneReport{}, err
+	}
+	if !apply {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM (
+			SELECT e.project_id,e.source_system FROM events e JOIN event_outbox o ON o.event_id=e.id
+			WHERE e.source_system IS NOT NULL GROUP BY e.project_id,e.source_system
+		) s`).Scan(&report.ReceiptsBackfilled); err != nil {
+			return OutboxPruneReport{}, err
+		}
+		return report, tx.Commit(ctx)
+	}
+	tag, err := tx.Exec(ctx, `INSERT INTO source_receipts(project_id,source_system,last_received_at,last_collected_at)
+		SELECT e.project_id,e.source_system,max(o.available_at),max(e.occurred_at)
+		FROM events e JOIN event_outbox o ON o.event_id=e.id
+		WHERE e.source_system IS NOT NULL
+		GROUP BY e.project_id,e.source_system
+		ON CONFLICT(project_id,source_system) DO UPDATE SET
+			last_received_at=GREATEST(source_receipts.last_received_at,excluded.last_received_at),
+			last_collected_at=GREATEST(source_receipts.last_collected_at,excluded.last_collected_at)`)
+	if err != nil {
+		return OutboxPruneReport{}, err
+	}
+	report.ReceiptsBackfilled = tag.RowsAffected()
+
+	deleted, err := tx.Exec(ctx, `DELETE FROM event_outbox WHERE published_at IS NOT NULL AND published_at < $1`, cutoff)
+	if err != nil {
+		return OutboxPruneReport{}, err
+	}
+	report.OutboxDeleted = deleted.RowsAffected()
+	if err := tx.Commit(ctx); err != nil {
+		return OutboxPruneReport{}, err
+	}
+	return report, nil
+}
+
 func validateCapabilities(capabilities []string) error {
 	if len(capabilities) == 0 {
 		return errors.New("at least one capability is required")

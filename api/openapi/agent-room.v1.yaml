@@ -1201,6 +1201,14 @@ components:
           type: object
           required: [status]
           properties: {status: {$ref: "#/components/schemas/ComponentStatus"}}
+        service_tokens:
+          type: object
+          required: [status, active, expiring_within_14d, expired]
+          properties:
+            status: {$ref: "#/components/schemas/ComponentStatus"}
+            active: {type: integer, format: int64, minimum: 0}
+            expiring_within_14d: {type: integer, format: int64, minimum: 0}
+            expired: {type: integer, format: int64, minimum: 0}
         checked_at: {type: string, format: date-time}
     TaskStatus:
       type: string
