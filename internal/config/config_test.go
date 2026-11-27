@@ -274,4 +274,13 @@ func TestLoadAppliesFileAndCLIPrecedence(t *testing.T) {
 		len(cfg.SessionSecret) != 32 || len(rest) != 1 || rest[0] != "serve" {
 		t.Fatalf("cfg=%+v rest=%v", cfg, rest)
 	}
+	_, subRest, err := Load([]string{
+		"--config", configPath, "maintenance", "prune-outbox", "--retention-days", "7", "--apply",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(subRest, " ") != "maintenance prune-outbox --retention-days 7 --apply" {
+		t.Fatalf("subcommand flags were not forwarded: %v", subRest)
+	}
 }

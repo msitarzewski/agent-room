@@ -7,12 +7,10 @@ Caddy and Agent Room: Caddy terminates public TLS and proxies HTTP to the
 loopback-only application listener. These installation scripts must not be run
 on a Darwin development workstation.
 
-For an existing multi-tenant server, use the separately reviewed operator-run
-shared-host migration described in
-[`memory-bank/build-deployment.md#shared-host-migration`](../memory-bank/build-deployment.md#shared-host-migration).
-It preserves private Tailscale access and isolates the app's Docker database and
-site runtime. The dedicated-host bootstrap/configurator below must not be used
-to replace a shared server's PostgreSQL or proxy configuration.
+For multi-tenant or shared servers, keep host-specific migration, wrapper, and
+service scripts outside this public repository (for example, under gitignored
+`data/local/ops/`). Never use the dedicated-host bootstrap/configurator below to
+replace a shared server's PostgreSQL or proxy configuration.
 
 ## Supported production shape
 

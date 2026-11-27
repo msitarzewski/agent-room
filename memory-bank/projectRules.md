@@ -1,8 +1,15 @@
 # Project Rules
 
-**Last updated:** 2026-10-15
+**Last updated:** 2026-11-26
 
 These rules supplement `AGENTS.md` with Agent Room-specific product and architecture constraints.
+
+## Public Repository Privacy Rules
+
+1. This repository is **public**; every tracked file, commit message, PR, and `memory-bank/` entry must be treated as public.
+2. Never commit real machine/host names, private tailnet/DNS domains, non-loopback IP addresses, personal port mappings, host-specific wrapper script paths, private project names, or credentials.
+3. Keep all operator-specific deployment scripts, host inventories, and runtime records under gitignored `data/local/` (e.g., `data/local/ops/`).
+4. Use generic placeholders (`host_agentroom`, `example.invalid`, `127.0.0.1:8443`, `127.0.0.1:9091`) in public documentation and test fixtures.
 
 ## Product Rules
 

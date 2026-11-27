@@ -124,7 +124,7 @@ agentroomctl report \
   --display-name '<participant-name>' \
   --state-dir /absolute/private/reporter-state \
   --token-file /absolute/private/reporter-token \
-  --adapter-url http://127.0.0.1:54491
+  --adapter-url http://127.0.0.1:9091
 ```
 
 Use a separate project-scoped token with `event:ingest` and `source:codex`
@@ -218,15 +218,12 @@ authorization and an isolated target; see
 
 ## Native Apple Silicon development
 
-For the already configured local tailnet installation, open the URL in
-`data/local/deployment.json` and sign in with the `username` and `password` in
-`data/local/secrets/login.json`. These are private generated credentials. The
-app is served over Tailscale HTTPS port 4445, with its identity provider on port
-4446, using a supervised native daemon and persistent local containers. See the
+For a private tailnet installation, store environment-specific URLs, ports, and
+operator credentials in ignored `data/local/` (never in tracked files). See the
 [local deployment runbook](memory-bank/build-deployment.md#local-tailnet-deployment)
-for status, restart, update, and stop procedures. This is also the WebXR entry
-point for Vision Pro Safari. Michael has confirmed immersive operation; detailed
-interaction, comfort, recovery, and measured frame pacing remain device checks.
+for lifecycle procedures. Private tailnet HTTPS also serves as the WebXR entry
+point for Vision Pro Safari; detailed interaction, comfort, recovery, and
+measured frame pacing remain device checks.
 
 The supported workstation shape is a native Go daemon and frontend build, with
 PostgreSQL and Dex in loopback-published containers. Do not use the production

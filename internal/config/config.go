@@ -102,6 +102,10 @@ func parseCLI(args []string) (string, map[string]string, []string, error) {
 	var rest []string
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
+		if arg == "--" {
+			rest = append(rest, args[i+1:]...)
+			break
+		}
 		if !strings.HasPrefix(arg, "--") {
 			rest = append(rest, arg)
 			continue
@@ -113,6 +117,15 @@ func parseCLI(args []string) (string, map[string]string, []string, error) {
 			}
 			values["AGENTROOM_DEV"] = "true"
 			continue
+		}
+		switch name {
+		case "config", "http-addr", "admin-addr", "adapter-addr", "public-url":
+		default:
+			if len(rest) > 0 {
+				rest = append(rest, arg)
+				continue
+			}
+			return "", nil, nil, fmt.Errorf("unknown flag --%s", name)
 		}
 		if !hasValue {
 			i++
@@ -132,8 +145,6 @@ func parseCLI(args []string) (string, map[string]string, []string, error) {
 			values["AGENTROOM_ADAPTER_ADDR"] = value
 		case "public-url":
 			values["AGENTROOM_PUBLIC_URL"] = value
-		default:
-			return "", nil, nil, fmt.Errorf("unknown flag --%s", name)
 		}
 	}
 	return configPath, values, rest, nil

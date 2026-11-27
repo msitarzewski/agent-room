@@ -1,30 +1,20 @@
 # Build and Deployment
 
-**Status:** Shared-host cutover complete and healthy; Timeline release `086d31a` active on destination; local retirement and device acceptance pending
+**Status:** Shared-host cutover complete and healthy; operator-specific deployment scripts live privately under gitignored `data/local/ops/`
 
-**Last updated:** 2026-11-24
+**Last updated:** 2026-11-26
 
 ## Post-Cutover Operations — 2026-11-24
 
-The shared-host helper (`deploy/shared-host.sh`) now includes two repeatable
-post-cutover modes in addition to the one-time migration lifecycle:
+Host-specific shared-host migration, backup, and upgrade scripts are kept
+outside this public repository under gitignored `data/local/ops/` (and on the
+destination operator account). They never live in tracked public files.
 
-- `deploy/shared-host.sh backup <ABSOLUTE_OUTPUT_DIR>` — takes verified online
-  custom-format `pg_dump` backups of both isolated databases (`app` and
-  `identity`), archives site artifacts, snapshots the GitHub collector SQLite
-  queue via `sqlite3.backup()`, and writes an owner-only SHA-256 `manifest.json`.
-- `deploy/shared-host.sh upgrade <ABSOLUTE_ARTIFACT> <ABSOLUTE_PUBLIC_KEY>` —
-  verifies a signed Linux/amd64 release archive, installs it immutably under
-  `/srv/www/agentroom/releases/<revision>`, runs `agentroomctl migrate up`,
-  flips `/srv/www/agentroom/current`, restarts `agentroom-web`, verifies
-  `/readyz` returns HTTP 204, and automatically rolls back the symlink on
-  readiness failure.
-
-`agentroomctl doctor` now reports active, expiring-within-14-days, and expired
-service tokens, and `agentroomctl service-token expiring [window-days]` outputs
-machine-readable expiry JSON for rotation monitoring. `deploy/run-migration.py
-check` preserves `cutover-complete` / `retired` checkpoint phases on transient
-connectivity failures while still recording `remote_check_passed`.
+`agentroomctl doctor` reports active, expiring-within-14-days, and expired
+service tokens, `agentroomctl service-token expiring [window-days]` outputs
+machine-readable expiry JSON for rotation monitoring, and
+`agentroomctl maintenance prune-outbox [--retention-days 7] [--apply]` prunes
+old published outbox rows after backfilling `source_receipts`.
 
 ## Current Operational Check — 2026-11-17
 
@@ -57,38 +47,38 @@ the production web build with `AGENTROOM_DEV=false` and normal OIDC authorizatio
 
 | Component | Local binding | Tailnet HTTPS |
 | --- | --- | --- |
-| Native application | `127.0.0.1:4445` | dedicated port 4445 |
-| Dex identity provider | `127.0.0.1:5557` | dedicated port 4446, `/dex` issuer |
-| PostgreSQL | `127.0.0.1:55440` | none |
-| Administration | `127.0.0.1:54490` | none |
-| Private adapter | `127.0.0.1:54491` | none |
+| Native application | `127.0.0.1:<app-port>` | dedicated private HTTPS port |
+| Dex identity provider | `127.0.0.1:<oidc-port>` | dedicated private HTTPS port, `/dex` issuer |
+| PostgreSQL | `127.0.0.1:<pg-port>` | none |
+| Administration | `127.0.0.1:<admin-port>` | none |
+| Private adapter | `127.0.0.1:<adapter-port>` | none |
 
 Tailscale Serve owns HTTPS and WebSocket proxying. The application trusts only
-loopback proxies and its configured HTTPS origin. MiradorXR's port 4444 and all
-other existing tailnet mappings are retained; Funnel is not enabled.
+loopback proxies and its configured HTTPS origin. Existing tailnet mappings are
+retained; Funnel is not enabled.
 
-Actual URLs are in `data/local/deployment.json`. Operator credentials are in
-`data/local/secrets/login.json`; use the `username` and `password` values at the
-OIDC login screen. These ignored files stay private, outside Git and Sentry docs.
-`data/local/agentroom.conf` references private secret files. Application and Dex
-use separate non-superuser database roles and databases; Dex signing keys and
-identity sessions persist in PostgreSQL. The Compose project is `agentroom-local`.
+Actual URLs and port bindings are kept in ignored `data/local/deployment.json`.
+Operator credentials are in `data/local/secrets/login.json`; use the `username`
+and `password` values at the OIDC login screen. These ignored files stay
+private, outside Git and Sentry docs. `data/local/agentroom.conf` references
+private secret files. Application and Dex use separate non-superuser database
+roles and databases; Dex signing keys and identity sessions persist in
+PostgreSQL.
 
 ### Local Lifecycle
 
-The native `bin/agentroomd` is supervised by per-user launch agent
-`local.agentroom`. Its installed LaunchAgents entry links to
+The native `bin/agentroomd` is supervised by a per-user launch agent linked from
 `data/local/local.agentroom.plist`. It starts at user login and restarts after
 failure; database containers use `unless-stopped`. Docker Desktop, Tailscale,
 and an awake workstation are required for remote headset access.
 
-Check or restart the existing installation from the repository root:
+Check or restart a local installation from the repository root:
 
 ```sh
 docker compose -f data/local/compose.json up --detach --wait postgres dex
 launchctl print "gui/$(id -u)/local.agentroom"
 launchctl kickstart -k "gui/$(id -u)/local.agentroom"
-curl --fail http://127.0.0.1:54490/readyz
+curl --fail http://127.0.0.1:<admin-port>/readyz
 tailscale serve status
 ```
 
@@ -116,13 +106,13 @@ and `agentroom_identity` databases before changes; the initial restart snapshots
 are in `data/local/backups/`. This local instance has not installed the Linux
 pgBackRest/off-host backup policy described below.
 
-To stop this instance while retaining its data:
+To stop a local instance while retaining its data:
 
 ```sh
 launchctl bootout "gui/$(id -u)/local.agentroom"
 docker compose -f data/local/compose.json stop
-tailscale serve --https=4445 off
-tailscale serve --https=4446 off
+tailscale serve --https=<app-port> off
+tailscale serve --https=<oidc-port> off
 ```
 
 To reload a stopped launch agent, use `launchctl bootstrap "gui/$(id -u)"
@@ -130,8 +120,8 @@ data/local/local.agentroom.plist`, then restore only its two Serve mappings to
 the loopback app and Dex ports:
 
 ```sh
-tailscale serve --bg --https=4445 --yes http://127.0.0.1:4445
-tailscale serve --bg --https=4446 --yes http://127.0.0.1:5557
+tailscale serve --bg --https=<app-port> --yes http://127.0.0.1:<app-port>
+tailscale serve --bg --https=<oidc-port> --yes http://127.0.0.1:<oidc-port>
 ```
 
 Never reset all Serve routes or remove database
@@ -266,77 +256,43 @@ keeps access private over Tailscale; no edge/DNS/shared Caddyfile changes occur.
 
 ### Prepared layout and authority
 
-- Immutable verified release under `/srv/www/agentroom/releases/<source-revision>`
-  with a `current` selector. Code belongs to the deployer and isolated site group.
-- Native app and GitHub collector supervised as exactly `agentroom-web` and
-  `agentroom-github`, running as `site_agentroom`; neither runs as the deployer.
-- PostgreSQL and persistent Dex use the app-only `agentroom-host` Compose project
-  and `agentroom-host-postgres` named volume. Other Docker projects and the host's
-  MySQL/native PostgreSQL configuration are outside this deployment.
-- App and identity provider retain loopback listeners. Only private Tailscale
-  HTTPS ports 4445/4446 are added, with ownership checks refusing occupied routes.
-  The adapter/admin/database ports remain loopback-only.
-- GitHub's owner-only queue/token/config live in
-  `/var/lib/agentroom-shared/github`, outside the recursively hardened code tree.
-  The source adapter checks runtime ownership and 0700/0600, so the site hardener
-  must not reset those private files to deployer ownership.
-- The canonical site hardener runs unmodified. Pre-adding the site group avoids
-  its Caddy restart branch. It still performs its documented graceful PHP-FPM
-  reload; this is an operator-visible shared-host side effect.
-
-`deploy/prepare-migration.py` snapshots both existing databases, artifacts and
-the GitHub SQLite queue using database-aware backup, preserving source identities
-and sequence numbers. It retains the existing Dex static subject, bcrypt hash,
-client ID/secret, identity database and app/session credentials. A changed login
-subject would create a different read-only account and lose the existing grants.
-Preparation verifies the signed release; the target re-verifies signature,
-provenance and full file inventory before provisioning. No development identity
-fixture is promoted and no release is rebuilt on the destination.
-Private baseline hashes cover local config, credentials, native binaries and
-collector code before preparation reads them. Snapshot export checks the same
-baseline before and after copying; a rotation or runtime change requires fresh
-preparation rather than combining new database state with stale credentials.
+- Immutable verified release under the site release directory with an atomic
+  `current` symlink, owned by the non-root operator and isolated site group.
+- Native app and GitHub collector supervised under a dedicated non-login
+  service account; neither runs as the interactive operator.
+- PostgreSQL and persistent Dex run in an app-only Compose project with a
+  dedicated named volume, isolated from other services on the host.
+- App and identity provider retain loopback listeners behind dedicated private
+  Tailscale HTTPS ports; adapter, admin, and database ports remain loopback-only.
+- Collector queue/token/config live in an owner-only (`0700`/`0600`) runtime
+  directory outside the site code tree.
+- Host-specific migration, backup, and upgrade scripts (`prepare-migration.py`,
+  `run-migration.py`, `shared-host.sh`) and all private inventories/ports/paths
+  are stored privately under gitignored `data/local/ops/` and
+  `data/local/migration/`.
 
 ### Operator execution
 
-The actual private bundle is `data/local/migration/bundle`. From this checkout,
-Michael runs the following commands in a normal interactive terminal; remote
-scoped provisioning prompts for sudo when necessary:
-
-Use an actual Terminal/iTerm window. The app's shell-command shortcut does not
-provide an interactive terminal; the helper rejects it before any SSH operation
-and now prints the specific terminal requirement. Staging is already complete;
-the next operator step is `cutover`.
+Run the private operator scripts from `data/local/ops/` in an interactive
+terminal; remote scoped provisioning prompts for `sudo` when necessary:
 
 ```sh
-python3 -B deploy/run-migration.py --bundle data/local/migration/bundle stage
-python3 -B deploy/run-migration.py --bundle data/local/migration/bundle cutover
-python3 -B deploy/run-migration.py --bundle data/local/migration/bundle check
+python3 -B data/local/ops/run-migration.py --bundle data/local/migration/bundle stage
+python3 -B data/local/ops/run-migration.py --bundle data/local/migration/bundle cutover
+python3 -B data/local/ops/run-migration.py --bundle data/local/migration/bundle check
 ```
 
 `stage` uploads the private bundle, provisions only the app's own slice and
 rehearses database restoration. It does not activate the destination app or stop
-local hosting. Before any local shutdown, `cutover` uses the reviewed local
-shared-host helper inline over an operator SSH TTY to preflight the exact
-previously uploaded staged manifest, signature, host identity, private listeners
-and sudo access. It does not replace the staged helper or upload a new bundle
-for that check. A failed preflight leaves local services and checkpoint phase
-unchanged. Separate later SSH sessions may ask for sudo again; no password or
-cross-TTY privilege cache is stored.
+local hosting. Before any local shutdown, `cutover` preflights the staged
+manifest, signature, host identity, private listeners, and `sudo` access.
+Separate SSH sessions may prompt for `sudo` again; no password or cross-TTY
+privilege cache is stored.
 
-Once that preflight passes, `cutover` fences local app/GitHub/Sentry publishers, proves their
-processes/listeners stopped, takes a fresh final snapshot, re-provisions/restores
-that exact bundle, then activates and checks the destination. A rehearsal
-snapshot cannot activate. Activation intent is durable before the remote call;
-after uncertainty, the tool never silently reimports data or resumes the old app.
-Both initial and final snapshots and upload history are retained privately.
-If final provisioning stops after upload, use the same `cutover` command. The
-runner verifies the retained rehearsal backup and final upload, then checks the
-destination's markers and that the local writers are still stopped. Recovery
-can continue from the rehearsal markers or the recorded stages of final
-provisioning. An activation marker closes this provisioning recovery path.
-Initial preflight and provisioning both require the canonical hardener at
-`~/harden-site.sh` on the destination. [November recovery record](tasks/2026-11/181126_cutover-recovery.md)
+Once preflight passes, `cutover` fences local writers, proves their
+processes/listeners stopped, takes a fresh final snapshot, re-provisions and
+restores that exact bundle, then activates and checks the destination.
+Recovery notes are in [November recovery record](tasks/2026-11/181126_cutover-recovery.md).
 
 After successful remote checks, tunnel and source resumption, the orchestrator
 preserves the old deployment record and writes `data/local/deployment.json` as an

@@ -88,11 +88,11 @@ provisioning needs rather than silently inheriting access.
 from Vision Pro on the existing tailnet, using this Apple Silicon workstation.
 
 **Decision:** Run the existing native Go daemon and production web build behind
-Tailscale Serve on dedicated HTTPS app port 4445. Use HTTPS port 4446 for a local
-Dex identity provider, persistent isolated PostgreSQL databases, normal OIDC
-authorization, and a per-user launch agent. Preserve existing Serve mappings.
-Private runtime values and generated operator credentials stay in ignored
-`data/local/`. This does not replace the signed Linux/Caddy promotion contract.
+Tailscale Serve on a dedicated private HTTPS app port, with a separate private
+HTTPS port for a local Dex identity provider, persistent isolated PostgreSQL
+databases, normal OIDC authorization, and a per-user launch agent. Preserve
+existing Serve mappings. Private runtime values, port bindings, and generated
+operator credentials stay in ignored `data/local/`. This does not replace the signed Linux/Caddy promotion contract.
 Michael confirmed that the remote machine is the eventual home; the local
 installation supports headset testing first. Its actual host identifier is in
 the private deployment record. Verify its platform before building the promoted
