@@ -510,19 +510,18 @@ has not been requested in this step.
 
 ## Local Tailnet Deployment — 2026-10-14
 
-Reuse MiradorXR's loopback + Tailscale Serve HTTPS pattern at
-`../miradorxr/vite.config.js:123`. Agent Room gets port 4445; the existing
-MiradorXR and other tailnet routes are preserved. Reuse the native Go daemon,
-production web distribution, PostgreSQL 18 and Dex compose services, existing
-OIDC/bootstrap/migration commands, and private admin/adapter listeners. Actual
-hostnames, credentials, configuration and deployment evidence belong in ignored
-`data/local/`, not tracked Memory Bank files. Authenticated browser, secure-context,
-WebSocket and restart checks pass.
+Reuse the loopback + Tailscale Serve HTTPS pattern with dedicated private app
+and identity ports, preserving all existing tailnet routes. Reuse the native Go
+daemon, production web distribution, PostgreSQL 18 and Dex compose services,
+existing OIDC/bootstrap/migration commands, and private admin/adapter listeners.
+Actual hostnames, ports, credentials, configuration and deployment evidence
+belong in ignored `data/local/`, not tracked Memory Bank files. Authenticated
+browser, secure-context, WebSocket and restart checks pass.
 
 The authorized native service now runs under the per-user `local.agentroom`
 launch agent. Dedicated PostgreSQL/Dex containers use persistent databases,
-unique private credentials, and restart policies. HTTPS app port 4445 and OIDC
-port 4446 are configured in Tailscale Serve; prior mappings are preserved.
+unique private credentials, and restart policies. Dedicated private HTTPS app
+and OIDC ports are configured in Tailscale Serve; prior mappings are preserved.
 Five actual repository task records were imported once through the private
 adapter. Live updates work. Database, identity provider, and daemon restart
 passed readiness and preserved the existing session and five actual task records.

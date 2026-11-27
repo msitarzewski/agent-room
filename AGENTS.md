@@ -55,6 +55,7 @@ COMPLIANCE CONFIRMED: Reuse over creation
 
 ### Non-Negotiables
 
+- **Public Repository Privacy**: This repository is **PUBLIC**. Never commit personal machine/host names, private Tailscale/DNS domains, non-loopback IP addresses, personal port mappings, host-specific script paths or service account names, private project names, or credentials to any tracked file (code, deploy scripts, tests, commit messages, PR descriptions, or `memory-bank/`). Keep all personal deployment scripts and host metadata under gitignored `data/local/`.
 - **Approval Gates**: No file changes without explicit user approval
 - **Citations**: Always `file:line` for code, `file.md#Section` for Memory Bank
 - **Sandbox First**: All edits in branch/temp clone, never main

@@ -95,7 +95,7 @@ class CollectorTest(unittest.TestCase):
         self.token.write_text('fixture-agentroom-token')
         self.token.chmod(0o600)
         self.mapping = provider.Repository('fixture', 'source', 'project', self.token, 42)
-        self.config = provider.Config(self.root / 'state', 'github-test-instance', 'http://127.0.0.1:54491/api/v1/ingest', (self.mapping,))
+        self.config = provider.Config(self.root / 'state', 'github-test-instance', 'http://127.0.0.1:9091/api/v1/ingest', (self.mapping,))
         self.state = provider.State(self.config.state_dir)
         self.addCleanup(lambda: self.state.close() if self.state else None)
         self.transport = Transport()
@@ -528,7 +528,7 @@ class ConfigTest(unittest.TestCase):
             config = f'''[connector]
 state_dir = {json.dumps(str(root / 'absent'))}
 instance_id = "test-instance"
-ingest_url = "http://127.0.0.1:54491/api/v1/ingest"
+ingest_url = "http://127.0.0.1:9091/api/v1/ingest"
 [[repositories]]
 owner = "fixture"
 name = "source"
@@ -541,7 +541,7 @@ token_file = {json.dumps(str(root / 'agentroom-token'))}
             self.assertEqual(loaded.request_budget, 12)
             self.assertEqual(loaded.poll_seconds, 900)
             self.assertIsNone(loaded.github_token_file)
-            for original, invalid in [('owner = "fixture"', 'owner = "../other"'), ('repository_id = 42', 'repository_id = 0'), ('http://127.0.0.1:54491', 'http://outside.invalid'), ('project_id = "project"', 'project_id = ""')]:
+            for original, invalid in [('owner = "fixture"', 'owner = "../other"'), ('repository_id = 42', 'repository_id = 0'), ('http://127.0.0.1:9091', 'http://outside.invalid'), ('project_id = "project"', 'project_id = ""')]:
                 path.write_text(config.replace(original, invalid))
                 with self.assertRaises(provider.ConnectorError):
                     provider.load_config(path)

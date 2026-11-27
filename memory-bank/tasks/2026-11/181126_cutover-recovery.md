@@ -1,6 +1,6 @@
 # Shared-host cutover recovery
 
-On November 18, 2026, the destination rejected final provisioning because the required `~/harden-site.sh` was missing. The Mac had already fenced its three writers and uploaded the final snapshot. The destination's provision and restore markers matched the rehearsal, and no activation marker existed.
+On November 18, 2026, the destination rejected final provisioning because the host's required site-hardening helper was missing. The Mac had already fenced its three writers and uploaded the final snapshot. The destination's provision and restore markers matched the rehearsal, and no activation marker existed.
 
 ## Applied changes
 

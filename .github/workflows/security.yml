@@ -117,7 +117,6 @@ jobs:
         run: |
           PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests/sentry -v
           PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests/github -v
-          PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests/deployment -v
       - name: Cross-build Linux binaries
         run: |
           set -Eeuo pipefail

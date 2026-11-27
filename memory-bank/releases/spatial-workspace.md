@@ -91,9 +91,9 @@ connector deployment remains separate.
 ### Local tailnet deployment — 2026-10-14
 
 - Extended the existing native daemon/CLI, production web distribution, and
-  PostgreSQL/Dex Compose service definitions. MiradorXR's loopback + Tailscale
-  Serve HTTPS pattern is reused with dedicated app port 4445 and identity port
-  4446; existing tailnet mappings are preserved.
+  PostgreSQL/Dex Compose service definitions with a loopback + Tailscale Serve
+  HTTPS pattern on dedicated private app and identity ports; existing tailnet
+  mappings are preserved.
 - The per-user `local.agentroom` launch agent supervises the native service.
   Dedicated local containers keep application and identity databases persistent.
   Actual environment values and credentials stay in ignored `data/local/`.

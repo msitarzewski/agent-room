@@ -59,8 +59,8 @@ unfinished cutover. Renew source access and verify/drain delivery before
 resuming migration. See `activeContext.md#system-review--2026-11-17` for current
 evidence; implementation/release history below is not a current health report.
 
-The local native service runs behind tailnet HTTPS port 4445 with normal OIDC.
-Private URL/login values are in ignored `data/local/`; see the deployment runbook.
+The private tailnet deployment runs behind HTTPS with normal OIDC.
+Private URL, port, and login values are in ignored `data/local/`; see the deployment runbook.
 Sentry supplies 99 approved projects through its independently supervised,
 source-only publisher. The shared desktop/XR view groups projects by recorded
 coordination, work, quiet coverage, or unknown coverage, unfolding twelve at a
