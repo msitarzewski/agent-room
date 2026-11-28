@@ -308,6 +308,9 @@ func TestManagerDatabaseSecurityBoundaries(t *testing.T) {
 		if _, err := manager.ResolveServiceToken(ctx, emptyScopeReq, ""); !errors.Is(err, app.ErrDenied) {
 			t.Fatalf("empty-scope token err=%v, want ErrDenied", err)
 		}
+		if _, err := repository.Pool().Exec(ctx, `DELETE FROM service_tokens WHERE id='empty-scope'`); err != nil {
+			t.Fatal(err)
+		}
 		for _, authorization := range []string{"", "Basic abc", "Bearer", "Bearer "} {
 			request.Header.Set("Authorization", authorization)
 			if _, err := manager.ResolveServiceToken(ctx, request, "auth-project"); !errors.Is(err, ErrUnauthenticated) {
