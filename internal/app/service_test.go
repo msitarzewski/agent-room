@@ -1102,3 +1102,69 @@ func TestGitHubIngestionIsTypedSourceOnlyAndPreservesSentryIDs(t *testing.T) {
 		t.Fatal("Sentry task identity changed or collided")
 	}
 }
+
+func TestRequestGateApprovalValidationAndDecision(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	repo := newMemoryRepository()
+	repo.put("project", domain.ResourceTask, "gate-1", domain.Task{
+		Base: base("gate-1", 2, now), Title: "Close relay DoS gate", Status: "ready", Priority: "high",
+	})
+	service := NewService(repo, nil)
+	service.clock = testClock{now: now}
+	service.ids = &testIDs{}
+	ctx := context.Background()
+
+	if _, err := service.RequestGateApproval(ctx, actor("agent", "task:read"), "project", "task", "gate-1", "launch_wave", "Ready for wave", "idem-denied", "mcp", 2, time.Hour); !errors.Is(err, ErrDenied) {
+		t.Fatalf("missing capability err=%v, want ErrDenied", err)
+	}
+	requester := actor("agent", "approval:request")
+	if _, err := service.RequestGateApproval(ctx, requester, "project", "run", "gate-1", "launch_wave", "Wrong type", "idem-type", "mcp", 2, time.Hour); err == nil {
+		t.Fatal("expected invalid resource_type error")
+	}
+	if _, err := service.RequestGateApproval(ctx, requester, "project", "project", "other-project", "launch_wave", "Cross project", "idem-cross", "mcp", 1, time.Hour); err == nil {
+		t.Fatal("expected cross-project resource_id error")
+	}
+	if _, err := service.RequestGateApproval(ctx, requester, "project", "task", "gate-1", "launch_wave", "Stale version", "idem-stale", "mcp", 1, time.Hour); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("stale task version err=%v, want ErrVersionConflict", err)
+	}
+	if _, err := service.RequestGateApproval(ctx, requester, "project", "task", "gate-1", "launch_wave", "Too long", "idem-exp", "mcp", 2, 25*time.Hour); err == nil {
+		t.Fatal("expected excessive lifetime error")
+	}
+
+	created, err := service.RequestGateApproval(ctx, requester, "project", "task", "gate-1", "launch_wave", "All 4 gates ready for Wave 3", "idem-ok", "mcp", 2, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var approval domain.Approval
+	if err := json.Unmarshal(created.Resource, &approval); err != nil {
+		t.Fatal(err)
+	}
+	wantDigest := GateApprovalDigest("project", "task", "gate-1", "agent", "launch_wave", "All 4 gates ready for Wave 3", 2)
+	if approval.Kind != "gate_decision" || approval.Status != "pending" || approval.CommandDigest != wantDigest || approval.CommandVersion != 1 {
+		t.Fatalf("unexpected gate approval: %+v", approval)
+	}
+	if GateApprovalDigest("project", "task", "gate-1", "agent", "launch_wave", "other", 2) == wantDigest {
+		t.Fatal("gate approval digest did not bind reason")
+	}
+
+	decided, err := service.DecideApproval(ctx, actor("human", "approval:decide"), "project", approval.ID, "approved", "Proceed with Wave 3", "idem-decide", approval.Version, "http")
+	if err != nil {
+		t.Fatalf("DecideApproval failed on gate approval: %v", err)
+	}
+	var final domain.Approval
+	if err := json.Unmarshal(decided.Resource, &final); err != nil {
+		t.Fatal(err)
+	}
+	if final.Status != "approved" || final.DecidedBy != "human" {
+		t.Fatalf("unexpected decided gate approval: %+v", final)
+	}
+
+	projectApproval, err := service.RequestGateApproval(ctx, requester, "project", "project", "project", "wave_3_launch", "Approve Wave 3 across Claude and Codex", "idem-project-gate", "mcp", 1, 2*time.Hour)
+	if err != nil {
+		t.Fatalf("project gate approval failed: %v", err)
+	}
+	if projectApproval.Event.Type != "approval.created" {
+		t.Fatalf("unexpected event type %q", projectApproval.Event.Type)
+	}
+}

@@ -306,6 +306,55 @@ describe("Agent Room application", () => {
     expect(transition?.init?.body).toBe(JSON.stringify({ status: "blocked", reason: "Waiting for operator approval." }));
   });
 
+  it("separates done-at-source inbox tasks from active work without changing canonical status", async () => {
+    const previous = endpointItems["/api/v1/tasks"];
+    endpointItems["/api/v1/tasks"] = [
+      task,
+      {
+        ...task,
+        id: "task_sentry_done",
+        title: "Merged Sentry release checklist",
+        status: "inbox",
+        source: { system: "sentry", external_id: "release-1" },
+        source_status: "Done",
+      },
+      {
+        ...task,
+        id: "task_github_merged",
+        title: "PR #10 privacy cleanup",
+        status: "inbox",
+        source: { system: "github", external_id: "repo:1:pull:10" },
+        source_status: "merged",
+      },
+      {
+        ...task,
+        id: "task_sentry_open",
+        title: "Active Sentry task",
+        status: "inbox",
+        source: { system: "sentry", external_id: "open-1" },
+        source_status: "Working",
+      },
+    ];
+    try {
+      const user = userEvent.setup();
+      const { container } = await renderPath("/tasks");
+      expect(await screen.findByText("Build secure session flow")).toBeInTheDocument();
+      expect(screen.getByText("Active Sentry task")).toBeInTheDocument();
+      expect(screen.queryByText("Merged Sentry release checklist")).not.toBeInTheDocument();
+      expect(screen.queryByText("PR #10 privacy cleanup")).not.toBeInTheDocument();
+      expect(screen.getByText(/2 inbox tasks are marked done or merged at their sources/)).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Review done at source" }));
+      expect(screen.getByText("Merged Sentry release checklist")).toBeInTheDocument();
+      expect(screen.getByText("PR #10 privacy cleanup")).toBeInTheDocument();
+      expect(screen.queryByText("Active Sentry task")).not.toBeInTheDocument();
+      expect(screen.getByText("Done")).toBeInTheDocument();
+      expect(screen.getByText("merged")).toBeInTheDocument();
+      expect((await axe(container)).violations).toEqual([]);
+    } finally {
+      endpointItems["/api/v1/tasks"] = previous ?? [];
+    }
+  });
+
   it("reviews the exact approval target before deciding", async () => {
     const previous = endpointItems["/api/v1/approvals"];
     endpointItems["/api/v1/approvals"] = [{ ...approval, status: "pending" }];

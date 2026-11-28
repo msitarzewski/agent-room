@@ -198,6 +198,28 @@ func (m *Manager) Projects(ctx context.Context, user User) ([]map[string]any, er
 	return projects, rows.Err()
 }
 
+func (m *Manager) ProjectsByIDs(ctx context.Context, ids []string) ([]map[string]any, error) {
+	projects := make([]map[string]any, 0, len(ids))
+	if len(ids) == 0 {
+		return projects, nil
+	}
+	rows, err := m.pool.Query(ctx, `SELECT id,name,version,updated_at FROM projects WHERE id = ANY($1::text[]) ORDER BY name,id`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, name string
+		var version int64
+		var updatedAt time.Time
+		if err := rows.Scan(&id, &name, &version, &updatedAt); err != nil {
+			return nil, err
+		}
+		projects = append(projects, map[string]any{"id": id, "name": name, "version": version, "updated_at": updatedAt})
+	}
+	return projects, rows.Err()
+}
+
 func (m *Manager) ResolveServiceToken(ctx context.Context, request *http.Request, projectID string) (ServiceIdentity, error) {
 	scheme, token, ok := strings.Cut(request.Header.Get("Authorization"), " ")
 	if !ok || !strings.EqualFold(scheme, "Bearer") || token == "" {
@@ -213,15 +235,21 @@ func (m *Manager) ResolveServiceToken(ctx context.Context, request *http.Request
 		return ServiceIdentity{}, err
 	}
 	identity.ID, identity.Actor.ID, identity.ProjectIDs, identity.Capabilities = row.ID, row.ActorID, row.ProjectIds, row.Capabilities
-	allowed := false
-	for _, candidate := range identity.ProjectIDs {
-		if candidate == projectID {
-			allowed = true
-			break
+	if projectID == "" {
+		if len(identity.ProjectIDs) == 0 {
+			return ServiceIdentity{}, app.ErrDenied
 		}
-	}
-	if !allowed {
-		return ServiceIdentity{}, app.ErrDenied
+	} else {
+		allowed := false
+		for _, candidate := range identity.ProjectIDs {
+			if candidate == projectID {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return ServiceIdentity{}, app.ErrDenied
+		}
 	}
 	identity.Actor.Capabilities = make(map[string]struct{}, len(identity.Capabilities))
 	for _, capability := range identity.Capabilities {
