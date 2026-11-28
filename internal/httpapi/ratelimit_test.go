@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -589,6 +590,17 @@ func TestMCPMultiProjectListAndDenial(t *testing.T) {
 	badStatusRec := call("/api/v1/mcp?project_id=proj-a", identity, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"create_task","arguments":{"title":"Bad status","status":"completed","idempotency_key":"k2"}}}`)
 	if badStatusRec.Code != http.StatusOK || !strings.Contains(badStatusRec.Body.String(), `"isError":true`) {
 		t.Fatalf("expected error for create_task status=completed, status=%d body=%s", badStatusRec.Code, badStatusRec.Body.String())
+	}
+
+	for index, badCreate := range []string{
+		`{"title":"   ","idempotency_key":"k-empty"}`,
+		`{"title":"Bad priority","priority":"urgent","idempotency_key":"k-prio"}`,
+		`{"title":"Bad dep","dependencies":["  "],"idempotency_key":"k-dep"}`,
+	} {
+		rec := call("/api/v1/mcp?project_id=proj-a", identity, `{"jsonrpc":"2.0","id":`+strconv.Itoa(10+index)+`,"method":"tools/call","params":{"name":"create_task","arguments":`+badCreate+`}}`)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"isError":true`) {
+			t.Fatalf("expected validation error for create_task %s, status=%d body=%s", badCreate, rec.Code, rec.Body.String())
+		}
 	}
 
 	badApprovalRec := call("/api/v1/mcp?project_id=proj-a", identity, `{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"request_approval","arguments":{"resource_type":"unknown","resource_id":"x","action":"go","expected_target_version":1,"idempotency_key":"k3"}}}`)

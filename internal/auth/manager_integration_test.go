@@ -241,6 +241,14 @@ func TestManagerDatabaseSecurityBoundaries(t *testing.T) {
 		if err != nil || emptyProjects == nil || len(emptyProjects) != 0 {
 			t.Fatalf("empty projects=%v err=%v", emptyProjects, err)
 		}
+		emptyByIDs, err := manager.ProjectsByIDs(ctx, nil)
+		if err != nil || emptyByIDs == nil || len(emptyByIDs) != 0 {
+			t.Fatalf("empty ProjectsByIDs=%v err=%v", emptyByIDs, err)
+		}
+		scopedByIDs, err := manager.ProjectsByIDs(ctx, []string{"auth-project"})
+		if err != nil || len(scopedByIDs) != 1 || scopedByIDs[0]["id"] != "auth-project" {
+			t.Fatalf("scoped ProjectsByIDs=%v err=%v", scopedByIDs, err)
+		}
 	})
 
 	t.Run("service tokens are scoped expiring and revocable", func(t *testing.T) {
@@ -283,6 +291,22 @@ func TestManagerDatabaseSecurityBoundaries(t *testing.T) {
 		}
 		if _, err := manager.ResolveServiceToken(ctx, request, "other-project"); !errors.Is(err, app.ErrDenied) {
 			t.Fatalf("cross-project token err=%v", err)
+		}
+		multiIdentity, err := manager.ResolveServiceToken(ctx, request, "")
+		if err != nil || multiIdentity.ID != created.ID || len(multiIdentity.ProjectIDs) != 1 || multiIdentity.ProjectIDs[0] != "auth-project" {
+			t.Fatalf("multi-project resolve identity=%+v err=%v", multiIdentity, err)
+		}
+		emptyHash := sha256.Sum256([]byte("empty-scope-token"))
+		if _, err := repository.Pool().Exec(ctx,
+			`INSERT INTO service_tokens(token_hash,id,name,actor_id,project_ids,capabilities,expires_at) VALUES($1,'empty-scope','Empty','agent:empty','{}','{"task:read"}',$2)`,
+			emptyHash[:], time.Now().Add(time.Hour),
+		); err != nil {
+			t.Fatal(err)
+		}
+		emptyScopeReq := httptest.NewRequest(http.MethodPost, "/api/v1/mcp", nil)
+		emptyScopeReq.Header.Set("Authorization", "Bearer empty-scope-token")
+		if _, err := manager.ResolveServiceToken(ctx, emptyScopeReq, ""); !errors.Is(err, app.ErrDenied) {
+			t.Fatalf("empty-scope token err=%v, want ErrDenied", err)
 		}
 		for _, authorization := range []string{"", "Basic abc", "Bearer", "Bearer "} {
 			request.Header.Set("Authorization", authorization)
