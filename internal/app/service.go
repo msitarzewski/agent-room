@@ -899,6 +899,53 @@ func (s *Service) RequestRunApproval(ctx context.Context, actor Actor, projectID
 	return s.Create(ctx, actor, domain.ResourceApproval, projectID, idem, approval, remoteAddr)
 }
 
+func (s *Service) RequestGateApproval(ctx context.Context, actor Actor, projectID, resourceType, resourceID, action, reason, idem, remoteAddr string, expectedTargetVersion int64, lifetime time.Duration) (CommandResult, error) {
+	if !actor.Can("approval:request") {
+		return CommandResult{}, s.recordRejection(ctx, actor, projectID, "request.approval", resourceType, resourceID, idem, ErrDenied)
+	}
+	action = strings.TrimSpace(action)
+	reason = strings.TrimSpace(reason)
+	if resourceType != string(domain.ResourceTask) && resourceType != string(domain.ResourceProject) {
+		return CommandResult{}, Invalid("gate approval resource_type must be task or project")
+	}
+	if resourceID == "" || len(resourceID) > 512 || action == "" || len(action) > 128 || reason == "" || len(reason) > 2000 {
+		return CommandResult{}, Invalid("gate approval requires bounded resource_id, action, and reason")
+	}
+	if lifetime <= 0 || lifetime > 24*time.Hour {
+		return CommandResult{}, Invalid("approval expiry must be positive and at most 24 hours")
+	}
+	if expectedTargetVersion < 1 {
+		return CommandResult{}, Invalid("expected_target_version must be a positive integer")
+	}
+	switch resourceType {
+	case string(domain.ResourceTask):
+		current, err := s.repo.Get(ctx, projectID, domain.ResourceTask, resourceID)
+		if err != nil {
+			return CommandResult{}, err
+		}
+		var target domain.Task
+		if err := json.Unmarshal(current, &target); err != nil {
+			return CommandResult{}, err
+		}
+		if target.Version != expectedTargetVersion {
+			return CommandResult{}, ErrVersionConflict
+		}
+	case string(domain.ResourceProject):
+		if resourceID != projectID {
+			return CommandResult{}, Invalid("project gate approval resource_id must match the target project_id")
+		}
+	}
+	now := s.clock.Now()
+	approval := domain.Approval{
+		Base: domain.Base{ID: s.ids.New()}, Kind: "gate_decision", Status: "pending",
+		ResourceType: resourceType, ResourceID: resourceID, RequestedBy: actor.ID,
+		Reason: reason, CommandDigest: GateApprovalDigest(projectID, resourceType, resourceID, actor.ID, action, reason, expectedTargetVersion),
+		CommandVersion: 1, ExpectedTargetVersion: expectedTargetVersion, ExpiresAt: now.Add(lifetime),
+	}
+	approval.Context, _ = json.Marshal(map[string]any{"action": action, "reason": reason, "expected_target_version": expectedTargetVersion})
+	return s.Create(ctx, actor, domain.ResourceApproval, projectID, idem, approval, remoteAddr)
+}
+
 func (s *Service) RunAction(ctx context.Context, actor Actor, projectID, id, action, message, approvalID, idem string, expected int64, remoteAddr string) (CommandResult, error) {
 	if !actor.Can("run:" + action) {
 		return CommandResult{}, s.recordRejection(ctx, actor, projectID, action+".run", string(domain.ResourceRun), id, idem, ErrDenied)
@@ -955,6 +1002,24 @@ func RunActionDigest(projectID, runID, actorID, action, message string, expected
 	}{
 		Version: 1, ProjectID: projectID, RunID: runID, ActorID: actorID,
 		Action: action, Message: message, ExpectedTargetVersion: expectedTargetVersion,
+	})
+	digest := sha256.Sum256(canonical)
+	return "sha256:" + hex.EncodeToString(digest[:])
+}
+
+func GateApprovalDigest(projectID, resourceType, resourceID, actorID, action, reason string, expectedTargetVersion int64) string {
+	canonical, _ := json.Marshal(struct {
+		Version               int    `json:"version"`
+		ProjectID             string `json:"project_id"`
+		ResourceType          string `json:"resource_type"`
+		ResourceID            string `json:"resource_id"`
+		ActorID               string `json:"actor_id"`
+		Action                string `json:"action"`
+		Reason                string `json:"reason"`
+		ExpectedTargetVersion int64  `json:"expected_target_version"`
+	}{
+		Version: 1, ProjectID: projectID, ResourceType: resourceType, ResourceID: resourceID,
+		ActorID: actorID, Action: action, Reason: reason, ExpectedTargetVersion: expectedTargetVersion,
 	})
 	digest := sha256.Sum256(canonical)
 	return "sha256:" + hex.EncodeToString(digest[:])

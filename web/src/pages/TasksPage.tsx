@@ -23,6 +23,32 @@ const transitions: Partial<Record<TaskStatus, TaskStatus[]>> = {
   failed: ["reopened", "cancelled"],
 };
 
+function isSourceUnfinished(system: string, status: string): boolean {
+  const normalized = status.trim().toLowerCase();
+  if (system === "sentry") {
+    return normalized === "upcoming" || normalized === "working" || normalized === "blocked";
+  }
+  if (system === "github") {
+    return (
+      normalized === "open" ||
+      normalized === "draft" ||
+      normalized === "blocked" ||
+      normalized === "review" ||
+      normalized === "review_requested"
+    );
+  }
+  return false;
+}
+
+function isDoneAtSource(task: Task): boolean {
+  return (
+    task.status === "inbox" &&
+    (task.source.system === "sentry" || task.source.system === "github") &&
+    Boolean(task.source_status?.trim()) &&
+    !isSourceUnfinished(task.source.system, task.source_status ?? "")
+  );
+}
+
 export function TasksPage() {
   const { projectId, projects } = useAuth();
   const collection = useCollection(api.tasks);
@@ -33,12 +59,15 @@ export function TasksPage() {
   const [error, setError] = useState<string | null>(null);
   const [blockPrompt, setBlockPrompt] = useState<Task | null>(null);
   const [blockReason, setBlockReason] = useState("");
+  const doneAtSourceCount = collection.items.filter(isDoneAtSource).length;
   const visible = collection.items.filter((task) =>
     statusFilter === "all"
       ? true
       : statusFilter === "active"
-        ? !["archived", "cancelled", "completed"].includes(task.status)
-        : task.status === statusFilter,
+        ? !["archived", "cancelled", "completed"].includes(task.status) && !isDoneAtSource(task)
+        : statusFilter === "done_at_source"
+          ? isDoneAtSource(task)
+          : task.status === statusFilter,
   );
   const projectCapabilities = projects.find((project) => project.id === projectId)?.capabilities ?? [];
   const canTransition = hasCapability(projectCapabilities, "task:transition");
@@ -69,15 +98,35 @@ export function TasksPage() {
         actions={
           <label className="compact-field"><span>Status</span>
             <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-              <option value="active">Active work</option><option value="all">All tasks</option>
-              <option value="review">Awaiting review</option><option value="blocked">Blocked</option>
-              <option value="completed">Completed</option><option value="failed">Failed</option>
+              <option value="active">Active work</option>
+              <option value="done_at_source">Done at source ({doneAtSourceCount})</option>
+              <option value="all">All tasks</option>
+              <option value="review">Awaiting review</option>
+              <option value="blocked">Blocked</option>
+              <option value="completed">Completed</option>
+              <option value="failed">Failed</option>
             </select>
           </label>
         }
       />
       <Freshness loadedAt={collection.lastLoadedAt} />
       <ActionFeedback message={message} error={error} />
+      {statusFilter === "active" && doneAtSourceCount > 0 ? (
+        <div className="inline-notice" role="status">
+          <span>
+            {doneAtSourceCount === 1
+              ? "1 inbox task is marked done or merged at its source and hidden from Active work."
+              : `${doneAtSourceCount} inbox tasks are marked done or merged at their sources and hidden from Active work.`}
+          </span>{" "}
+          <button
+            className="button button--secondary"
+            type="button"
+            onClick={() => setStatusFilter("done_at_source")}
+          >
+            Review done at source
+          </button>
+        </div>
+      ) : null}
       <StatePanel
         state={collection.state}
         error={collection.error}
@@ -103,6 +152,7 @@ export function TasksPage() {
                   <div><dt>Owner</dt><dd>{task.owner_id ?? "Unassigned"}</dd></div>
                   <div><dt>Review</dt><dd><StatusPill value={task.review_state ?? "not requested"} /></dd></div>
                   <div><dt>Approval</dt><dd><StatusPill value={task.approval_state ?? "not required"} /></dd></div>
+                  {task.source_status ? <div><dt>Source status</dt><dd><StatusPill value={task.source_status} /></dd></div> : null}
                   <div><dt>Dependencies</dt><dd>{task.dependencies.length}</dd></div>
                 </dl>
                 <div className="card-actions" aria-label={`Actions for ${task.title}`}>

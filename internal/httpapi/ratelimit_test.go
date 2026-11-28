@@ -538,3 +538,61 @@ func expectRecordedProblem(t *testing.T, recorder *httptest.ResponseRecorder, st
 		t.Fatalf("problem=%+v", problem)
 	}
 }
+
+func TestMCPMultiProjectListAndDenial(t *testing.T) {
+	t.Parallel()
+	server := New(nil, nil, nil, nil, nil, 1, 1, "https://agentroom.test", []string{"https://agentroom.test"}, nil, false)
+	handler := server.mcpHandler()
+
+	call := func(url string, identity auth.ServiceIdentity, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, url, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		ctx := context.WithValue(req.Context(), actorKey, identity.Actor)
+		ctx = context.WithValue(ctx, serviceIdentityKey, identity)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req.WithContext(ctx))
+		return rec
+	}
+
+	identity := auth.ServiceIdentity{
+		ID:         "tok-multi",
+		ProjectIDs: []string{"proj-a", "proj-b"},
+		Actor: app.Actor{
+			ID: "agent_multi",
+			Capabilities: map[string]struct{}{
+				"task:read":        {},
+				"task:write":       {},
+				"approval:request": {},
+			},
+		},
+	}
+
+	listRec := call("/api/v1/mcp", identity, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_projects","arguments":{}}}`)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list_projects status=%d body=%s", listRec.Code, listRec.Body.String())
+	}
+	if body := listRec.Body.String(); !strings.Contains(body, "proj-a") || !strings.Contains(body, "proj-b") {
+		t.Fatalf("list_projects missing authorized projects: %s", body)
+	}
+
+	deniedRec := call("/api/v1/mcp", identity, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_tasks","arguments":{"project_id":"proj-denied"}}}`)
+	if deniedRec.Code != http.StatusOK || !strings.Contains(deniedRec.Body.String(), `"isError":true`) {
+		t.Fatalf("expected error for unauthorized project, status=%d body=%s", deniedRec.Code, deniedRec.Body.String())
+	}
+
+	missingRec := call("/api/v1/mcp", identity, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"create_task","arguments":{"title":"Missing project","idempotency_key":"k1"}}}`)
+	if missingRec.Code != http.StatusOK || !strings.Contains(missingRec.Body.String(), `"isError":true`) {
+		t.Fatalf("expected error when project_id omitted, status=%d body=%s", missingRec.Code, missingRec.Body.String())
+	}
+
+	badStatusRec := call("/api/v1/mcp?project_id=proj-a", identity, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"create_task","arguments":{"title":"Bad status","status":"completed","idempotency_key":"k2"}}}`)
+	if badStatusRec.Code != http.StatusOK || !strings.Contains(badStatusRec.Body.String(), `"isError":true`) {
+		t.Fatalf("expected error for create_task status=completed, status=%d body=%s", badStatusRec.Code, badStatusRec.Body.String())
+	}
+
+	badApprovalRec := call("/api/v1/mcp?project_id=proj-a", identity, `{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"request_approval","arguments":{"resource_type":"unknown","resource_id":"x","action":"go","expected_target_version":1,"idempotency_key":"k3"}}}`)
+	if badApprovalRec.Code != http.StatusOK || !strings.Contains(badApprovalRec.Body.String(), `"isError":true`) {
+		t.Fatalf("expected error for invalid approval resource_type, status=%d body=%s", badApprovalRec.Code, badApprovalRec.Body.String())
+	}
+}

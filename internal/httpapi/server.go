@@ -55,6 +55,7 @@ type contextKey string
 
 const sessionKey contextKey = "session"
 const actorKey contextKey = "actor"
+const serviceIdentityKey contextKey = "service_identity"
 
 func New(service *app.Service, authManager *auth.Manager, hub *realtime.Hub, spa http.Handler, artifactStore *artifacts.Store, maxBody, maxArtifact int64, publicURL string, allowedOrigins, trustedProxyCIDRs []string, dev bool) *Server {
 	s := &Server{service: service, auth: authManager, hub: hub, spa: spa, artifacts: artifactStore, maxBody: maxBody, maxArtifact: maxArtifact, allowedOrigins: make(map[string]struct{}), dev: dev, limits: newLimiter(), cspConnect: "'self'"}
@@ -159,7 +160,7 @@ func (s *Server) AdapterHandler() http.Handler {
 func (s *Server) adapterMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		projectID := r.URL.Query().Get("project_id")
-		if projectID == "" {
+		if projectID == "" && r.URL.Path != "/api/v1/mcp" {
 			writeProblemStatus(w, http.StatusBadRequest, "project_required", "project_id is required")
 			return
 		}
@@ -168,11 +169,17 @@ func (s *Server) adapterMiddleware(next http.Handler) http.Handler {
 			writeProblem(w, err)
 			return
 		}
-		if !s.limits.allow("service:"+identity.ID+":"+projectID, 600, time.Minute) {
+		limitScope := projectID
+		if limitScope == "" {
+			limitScope = "mcp"
+		}
+		if !s.limits.allow("service:"+identity.ID+":"+limitScope, 600, time.Minute) {
 			writeProblemStatus(w, http.StatusTooManyRequests, "rate_limited", "Adapter request rate exceeded")
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), actorKey, identity.Actor)))
+		ctx := context.WithValue(r.Context(), actorKey, identity.Actor)
+		ctx = context.WithValue(ctx, serviceIdentityKey, identity)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -922,6 +929,11 @@ func currentActor(r *http.Request) app.Actor {
 	actor := currentSession(r).User.Actor()
 	actor.Human = true
 	return actor
+}
+
+func currentServiceIdentity(r *http.Request) auth.ServiceIdentity {
+	identity, _ := r.Context().Value(serviceIdentityKey).(auth.ServiceIdentity)
+	return identity
 }
 
 func requireProject(w http.ResponseWriter, r *http.Request) (string, bool) {

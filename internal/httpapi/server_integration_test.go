@@ -797,9 +797,9 @@ func TestServerAndMCPIntegrationBoundaries(t *testing.T) {
 	})
 
 	allCapabilities := []string{
-		"resource:read", "resource:write", "event:ingest", "task:read", "task:claim", "task:review",
+		"resource:read", "resource:write", "event:ingest", "task:read", "task:write", "task:claim", "task:review",
 		"attention:read", "attention:write", "run:read", "situation:read", "evidence:read",
-		"evidence:write", "artifact:read", "approval:read",
+		"evidence:write", "artifact:read", "approval:read", "approval:request",
 	}
 	serviceToken, err := auth.CreateServiceToken(
 		ctx, repository.Pool(), "httpapi-service", "HTTP API service", "agent:mcp",
@@ -840,6 +840,7 @@ func TestServerAndMCPIntegrationBoundaries(t *testing.T) {
 			name string
 			args string
 		}{
+			{"list_projects", `{}`},
 			{"list_tasks", `{"limit":10}`},
 			{"list_agents", `{"limit":10}`},
 			{"list_attention", `{"limit":10}`},
@@ -851,9 +852,11 @@ func TestServerAndMCPIntegrationBoundaries(t *testing.T) {
 			{"get_project_overview", `{}`},
 			{"get_return_brief", `{}`},
 			{"list_timeline", `{"limit":10,"include_types":true}`},
+			{"create_task", `{"title":"MCP gate task","description":"Close DoS protection gate","priority":"high","status":"ready","idempotency_key":"mcp-create-task"}`},
 			{"send_chat_message", `{"body":"MCP integration","idempotency_key":"mcp-chat"}`},
 			{"transition_task", `{"task_id":"task-mcp","status":"working","expected_version":1,"idempotency_key":"mcp-transition"}`},
 			{"request_attention", `{"kind":"review","severity":"high","title":"MCP attention","idempotency_key":"mcp-attention"}`},
+			{"request_approval", `{"resource_type":"project","resource_id":"` + projectID + `","action":"launch_wave","reason":"Ready to launch Wave 3","expected_target_version":1,"expires_in_seconds":3600,"idempotency_key":"mcp-approval"}`},
 			{"post_evidence", `{"task_id":"task-mcp","kind":"test","summary":"MCP evidence","source_system":"integration","idempotency_key":"mcp-evidence"}`},
 			{"claim_task", `{"task_id":"task-mcp","expected_version":2,"idempotency_key":"mcp-claim"}`},
 			{"request_review", `{"task_id":"task-mcp","expected_version":3,"reason":"ready","idempotency_key":"mcp-review"}`},
@@ -871,7 +874,7 @@ func TestServerAndMCPIntegrationBoundaries(t *testing.T) {
 			"list_tasks", "list_agents", "list_attention", "list_runs", "list_situations",
 			"list_evidence", "list_artifacts", "list_approvals",
 			"get_project_overview", "get_return_brief", "list_timeline",
-			"request_attention", "post_evidence", "claim_task", "request_review",
+			"create_task", "request_attention", "request_approval", "post_evidence", "claim_task", "request_review",
 		} {
 			response := mcpCall(
 				t, adapter.URL+"/api/v1/mcp?project_id="+projectID,
@@ -884,6 +887,89 @@ func TestServerAndMCPIntegrationBoundaries(t *testing.T) {
 			if body := readBody(response); !strings.Contains(body, `"isError":true`) {
 				t.Fatalf("restricted MCP %s unexpectedly succeeded: %s", name, body)
 			}
+		}
+	})
+
+	t.Run("multi-project MCP discovers authorized projects and enforces per-call allowlist", func(t *testing.T) {
+		const projectA = "mcp-multi-a"
+		const projectB = "mcp-multi-b"
+		const projectDenied = "mcp-multi-denied"
+		for _, item := range []struct{ id, name string }{
+			{projectA, "Multi Project A"},
+			{projectB, "Multi Project B"},
+			{projectDenied, "Denied Project"},
+		} {
+			if _, err := repository.EnsureProject(ctx, item.id, item.name); err != nil {
+				t.Fatal(err)
+			}
+		}
+		multiToken, err := auth.CreateServiceToken(
+			ctx, repository.Pool(), "httpapi-multi-mcp", "Multi-project MCP agent", "agent:multi",
+			[]string{projectA, projectB},
+			[]string{"task:read", "task:write", "overview:read", "approval:read", "approval:request"},
+			nil,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		headers := map[string]string{"Authorization": "Bearer " + multiToken}
+		mcpURL := adapter.URL + "/api/v1/mcp"
+
+		projectsResp := mcpCall(t, mcpURL, headers, 601, "list_projects", `{}`)
+		if projectsResp.StatusCode != http.StatusOK {
+			t.Fatalf("multi list_projects status=%d body=%s", projectsResp.StatusCode, readBody(projectsResp))
+		}
+		projectsBody := readBody(projectsResp)
+		if !strings.Contains(projectsBody, projectA) || !strings.Contains(projectsBody, projectB) || strings.Contains(projectsBody, projectDenied) {
+			t.Fatalf("unexpected list_projects body=%s", projectsBody)
+		}
+
+		missingProjResp := mcpCall(t, mcpURL, headers, 602, "list_tasks", `{}`)
+		if missingProjResp.StatusCode != http.StatusOK {
+			t.Fatalf("missing project_id status=%d body=%s", missingProjResp.StatusCode, readBody(missingProjResp))
+		}
+		if body := readBody(missingProjResp); !strings.Contains(body, `"isError":true`) {
+			t.Fatalf("expected error when project_id omitted from both URL and tool args, got %s", body)
+		}
+
+		deniedResp := mcpCall(t, mcpURL, headers, 603, "list_tasks", `{"project_id":"`+projectDenied+`"}`)
+		if deniedResp.StatusCode != http.StatusOK {
+			t.Fatalf("denied project status=%d body=%s", deniedResp.StatusCode, readBody(deniedResp))
+		}
+		if body := readBody(deniedResp); !strings.Contains(body, `"isError":true`) {
+			t.Fatalf("expected denial for unauthorized project_id, got %s", body)
+		}
+
+		createResp := mcpCall(t, mcpURL, headers, 604, "create_task", `{"project_id":"`+projectB+`","title":"Wave 3 gate","priority":"high","status":"ready","idempotency_key":"multi-create-b"}`)
+		if createResp.StatusCode != http.StatusOK {
+			t.Fatalf("multi create_task status=%d body=%s", createResp.StatusCode, readBody(createResp))
+		}
+		if body := readBody(createResp); !strings.Contains(body, `"Wave 3 gate"`) || strings.Contains(body, `"isError":true`) {
+			t.Fatalf("unexpected multi create_task body=%s", body)
+		}
+
+		listBResp := mcpCall(t, mcpURL, headers, 605, "list_tasks", `{"project_id":"`+projectB+`"}`)
+		if listBResp.StatusCode != http.StatusOK {
+			t.Fatalf("multi list_tasks B status=%d body=%s", listBResp.StatusCode, readBody(listBResp))
+		}
+		if body := readBody(listBResp); !strings.Contains(body, `"Wave 3 gate"`) {
+			t.Fatalf("expected task in projectB, got %s", body)
+		}
+
+		listAResp := mcpCall(t, mcpURL, headers, 606, "list_tasks", `{"project_id":"`+projectA+`"}`)
+		if listAResp.StatusCode != http.StatusOK {
+			t.Fatalf("multi list_tasks A status=%d body=%s", listAResp.StatusCode, readBody(listAResp))
+		}
+		if body := readBody(listAResp); strings.Contains(body, `"Wave 3 gate"`) {
+			t.Fatalf("task leaked across projects into projectA: %s", body)
+		}
+
+		crossFromURLResp := mcpCall(t, mcpURL+"?project_id="+projectA, headers, 607, "list_tasks", `{"project_id":"`+projectDenied+`"}`)
+		if crossFromURLResp.StatusCode != http.StatusOK {
+			t.Fatalf("cross override status=%d body=%s", crossFromURLResp.StatusCode, readBody(crossFromURLResp))
+		}
+		if body := readBody(crossFromURLResp); !strings.Contains(body, `"isError":true`) {
+			t.Fatalf("expected denial when overriding URL project_id with unauthorized project, got %s", body)
 		}
 	})
 
